@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/martin/build/kfilter_chatgpt/patched/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

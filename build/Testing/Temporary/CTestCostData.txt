@@ -1,0 +1,5 @@
+kfilter_driver_smoketest 78 3.45352e-05
+kfilter_projectio_smoketest 78 3.38553e-05
+kfilter_doc_smoketest 77 3.87318e-05
+kfilter_defaults_smoketest 71 3.4613e-05
+---

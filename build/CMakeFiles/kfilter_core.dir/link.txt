@@ -1,0 +1,2 @@
+/usr/bin/ar qc libkfilter_core.a CMakeFiles/kfilter_core.dir/kfilter_core_autogen/mocs_compilation.cpp.o CMakeFiles/kfilter_core.dir/driver.cpp.o CMakeFiles/kfilter_core.dir/kfilterprojectio.cpp.o CMakeFiles/kfilter_core.dir/kfilterdoc.cpp.o
+/usr/bin/ranlib libkfilter_core.a
