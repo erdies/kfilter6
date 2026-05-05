@@ -435,3 +435,23 @@ text rendering code:
 - repaired the `QStringLiteral("\\n")` separator used for the multi-line
   Vb/Fb/V2 text block
 - no logic, layout or file-format changes
+
+## Patch 059
+
+Cleaned up the active Qt6 source tree by removing KDE3/Qt3-era files that are
+no longer part of the build and have been superseded by the current Qt6 classes:
+
+- `main.cpp` and `kfilter.cpp/.h` were the old KDE/KMainWindow application shell;
+  the active application entry path is `mainqt6.cpp` + `kfilterqt6app.cpp/.h`.
+- `driverinput.cpp/.h` was superseded by `DriverParametersDialog`.
+- `networkdialog.cpp/.h` was superseded by `NetworkParametersDialog` and the
+  Qt6 `CircuitOut` preview.
+- `volumedialog.cpp/.h` was superseded by the enclosure section in
+  `DriverParametersDialog`, including the tube length helper.
+- `colordialog.cpp/.h` was the old KDE `KColorDialog` based plot color dialog;
+  future color configuration should be reimplemented with plain Qt6 widgets when
+  needed.
+
+The legacy files are still preserved in `legacy_original_uploaded/` inside full
+handover packages as historical reference, but they should not appear in the
+active KFilter6 repository tree.

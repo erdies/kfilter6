@@ -1,1 +1,0 @@
-/usr/bin/c++ -Wl,--dependency-file=CMakeFiles/kfilter_projectio_smoketest.dir/link.d CMakeFiles/kfilter_projectio_smoketest.dir/kfilter_projectio_smoketest_autogen/mocs_compilation.cpp.o CMakeFiles/kfilter_projectio_smoketest.dir/tools/projectio_smoketest.cpp.o -o kfilter_projectio_smoketest  libkfilter_core.a /usr/lib64/libQt6Core.so.6.10.3
