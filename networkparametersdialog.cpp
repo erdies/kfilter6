@@ -234,7 +234,7 @@ QWidget *NetworkParametersDialog::createDriverPage(int index)
     auto *actionLayout = new QGridLayout();
     actionLayout->addWidget(new QLabel(tr("Order:"), presetGroup), 0, 0);
     actionLayout->addWidget(page.presetOrderCombo, 0, 1);
-    actionLayout->addWidget(insertButton, 1, 0, 1, 2);
+    actionLayout->addWidget(insertButton, 1, 1, Qt::AlignLeft);
     actionLayout->setColumnStretch(1, 1);
 
     presetLayout->addLayout(filterLayout, 0, 0);
