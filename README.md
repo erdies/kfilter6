@@ -1,5 +1,6 @@
 # KFilter6
 
+
 KFilter6 is a standalone Qt6 Widgets port of the original KFilter loudspeaker design tool.
 
 The current development direction is intentionally modest and practical: KFilter6 is not meant to be a full room, baffle, and radiation-pattern simulator. It is a physical orientation tool for loudspeaker crossover and enclosure work. Its purpose is to make the consequences of changes to driver parameters, enclosure tuning, crossover networks, and summation behaviour visible while designing and listening.
