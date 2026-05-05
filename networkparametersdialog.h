@@ -14,6 +14,8 @@
 
 #include <array>
 
+class QComboBox;
+class QDoubleSpinBox;
 class QTableWidget;
 class QWidget;
 class driver;
@@ -31,7 +33,11 @@ class NetworkParametersDialog : public QDialog
     Q_OBJECT
 
 public:
-    explicit NetworkParametersDialog(driver (&drivers)[KFilterProjectIo::DriverCount], QWidget *parent = nullptr);
+    explicit NetworkParametersDialog(driver (&drivers)[KFilterProjectIo::DriverCount],
+                                     QWidget *parent = nullptr,
+                                     int initialDriverIndex = 0);
+
+    int currentDriverIndex() const;
 
 signals:
     void parametersApplied();
@@ -48,6 +54,11 @@ private:
     struct DriverPage
     {
         QWidget *page = nullptr;
+        QComboBox *presetTypeCombo = nullptr;
+        QComboBox *presetOrderCombo = nullptr;
+        QComboBox *presetCharacteristicCombo = nullptr;
+        QDoubleSpinBox *presetFrequencySpin = nullptr;
+        QDoubleSpinBox *presetImpedanceSpin = nullptr;
         QTableWidget *table = nullptr;
     };
 
@@ -57,6 +68,11 @@ private:
     void resetTable(QTableWidget *table);
     bool readCellValue(QTableWidget *table, int row, int column, double& value) const;
     void setCellValue(QTableWidget *table, int row, int column, double value) const;
+    void insertStandardFilterPreset(int driverIndex);
+    bool tableContainsInvalidValues(QTableWidget *table) const;
+    bool sectionIsEmpty(QTableWidget *table, int section) const;
+    int findRightmostFreeSectionBlock(QTableWidget *table, int requiredSections) const;
+    void clearSectionBlock(QTableWidget *table, int startSection, int sectionCount) const;
 
     static int unitIndex(int row, int column);
     static double displayFromInternal(int row, double value);

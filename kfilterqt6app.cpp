@@ -737,7 +737,7 @@ void KFilterQt6App::editDriverParameters()
 
 void KFilterQt6App::editNetworkParameters()
 {
-    NetworkParametersDialog dialog(m_doc->m_driverDriver, this);
+    NetworkParametersDialog dialog(m_doc->m_driverDriver, this, m_lastNetworkParametersDriverIndex);
     connect(&dialog, &NetworkParametersDialog::parametersApplied, this, [this]() {
         m_doc->setModified(true);
         m_doc->viewrefresh();
@@ -745,4 +745,5 @@ void KFilterQt6App::editNetworkParameters()
     });
 
     dialog.exec();
+    m_lastNetworkParametersDriverIndex = dialog.currentDriverIndex();
 }
