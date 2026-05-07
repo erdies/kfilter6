@@ -1,2 +1,5 @@
 build/
 go_for_it.sh
+.kdev4/
+patched.kdev4
+
