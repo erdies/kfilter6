@@ -9,13 +9,16 @@
 #define CIRCUITOUT_H
 
 #include <QColor>
+#include <QPoint>
 #include <QRect>
 #include <QSize>
 #include <QString>
+#include <QVector>
 #include <QWidget>
 
 #include <array>
 
+class QContextMenuEvent;
 class driver;
 
 /**
@@ -42,11 +45,28 @@ public:
     QColor backgroundColor() const;
     void setBackgroundColor(const QColor& color);
 
+    enum class NetworkHitGroup
+    {
+        SeriesSection = 0,
+        ShuntSection = 1
+    };
+    Q_ENUM(NetworkHitGroup)
+
     QSize minimumSizeHint() const override;
     QSize sizeHint() const override;
 
+signals:
+    void networkSectionClicked(int driverIndex, int sectionIndex, NetworkHitGroup group);
+    void networkSectionContextMenuRequested(int driverIndex, int sectionIndex, NetworkHitGroup group, const QPoint& globalPosition);
+    void networkSectionHovered(int driverIndex, int sectionIndex, NetworkHitGroup group);
+    void networkSectionHoverLeft();
+
 protected:
     void paintEvent(QPaintEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void contextMenuEvent(QContextMenuEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void leaveEvent(QEvent *event) override;
 
 private:
     enum NetworkRow
@@ -60,6 +80,14 @@ private:
         RowsPerSection = 6,
         SectionCount = 8,
         NetworkUnitCount = 48
+    };
+
+    struct NetworkSectionHit
+    {
+        QRectF bounds;
+        int driverIndex = 0;
+        int sectionIndex = 0;
+        NetworkHitGroup group = NetworkHitGroup::SeriesSection;
     };
 
     struct DriverSnapshot
@@ -78,6 +106,11 @@ private:
     static DriverSnapshot snapshotFromDriver(driver& drv, int driverNumber);
     void applySnapshot(const DriverSnapshot& snapshot);
     void applyPreviewGeometry();
+    void registerSectionHit(int section, NetworkHitGroup group, const QRectF& bounds) const;
+    bool findSectionHit(const QPoint& position, NetworkSectionHit& hit) const;
+    bool sameSectionHit(const NetworkSectionHit& lhs, const NetworkSectionHit& rhs) const;
+    void updateHoverHit(const QPoint& position);
+    void clearHoverHit();
     void drawCurrentDriverPreview(QPainter& painter, const QRect& previewRect) const;
     void drawNoActiveDriversMessage(QPainter& painter, const QRect& messageRect) const;
 
@@ -126,6 +159,9 @@ private:
     double m_v2 = 0.0;
     bool m_showValues = true;
     QColor m_backgroundColor = defaultBackgroundColor();
+    mutable QVector<NetworkSectionHit> m_sectionHits;
+    NetworkSectionHit m_hoverHit;
+    bool m_hasHoverHit = false;
 };
 
 #endif // CIRCUITOUT_H

@@ -16,6 +16,7 @@
 
 class QComboBox;
 class QDoubleSpinBox;
+class QString;
 class QTableWidget;
 class QWidget;
 class driver;
@@ -66,7 +67,7 @@ private:
     void loadFromDrivers();
     bool applyToDrivers();
     void resetTable(QTableWidget *table);
-    bool readCellValue(QTableWidget *table, int row, int column, double& value) const;
+    bool readCellValue(QTableWidget *table, int row, int column, double& value, QString *errorMessage = nullptr) const;
     void setCellValue(QTableWidget *table, int row, int column, double value) const;
     void insertStandardFilterPreset(int driverIndex);
     bool tableContainsInvalidValues(QTableWidget *table) const;

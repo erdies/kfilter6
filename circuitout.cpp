@@ -12,9 +12,11 @@
 #include <QBrush>
 #include <QColor>
 #include <QFont>
+#include <QContextMenuEvent>
 #include <QFontMetrics>
 #include <QPainter>
 #include <QPainterPath>
+#include <QMouseEvent>
 #include <QPaintEvent>
 #include <QPen>
 #include <QStringList>
@@ -62,6 +64,7 @@ CircuitOut::CircuitOut(QWidget *parent)
     : QWidget(parent)
 {
     setAutoFillBackground(true);
+    setMouseTracking(true);
     setMinimumHeight(300);
 }
 
@@ -239,6 +242,7 @@ QSize CircuitOut::sizeHint() const
 void CircuitOut::paintEvent(QPaintEvent *event)
 {
     QWidget::paintEvent(event);
+    m_sectionHits.clear();
 
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
@@ -287,6 +291,106 @@ void CircuitOut::paintEvent(QPaintEvent *event)
     }
 
     applySnapshot(previousSnapshot);
+}
+
+void CircuitOut::mousePressEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton) {
+        NetworkSectionHit hit;
+        if (findSectionHit(event->pos(), hit)) {
+            emit networkSectionClicked(hit.driverIndex, hit.sectionIndex, hit.group);
+            event->accept();
+            return;
+        }
+    }
+
+    QWidget::mousePressEvent(event);
+}
+
+void CircuitOut::contextMenuEvent(QContextMenuEvent *event)
+{
+    NetworkSectionHit hit;
+    if (findSectionHit(event->pos(), hit)) {
+        emit networkSectionContextMenuRequested(hit.driverIndex,
+                                                hit.sectionIndex,
+                                                hit.group,
+                                                event->globalPos());
+        event->accept();
+        return;
+    }
+
+    QWidget::contextMenuEvent(event);
+}
+
+void CircuitOut::mouseMoveEvent(QMouseEvent *event)
+{
+    updateHoverHit(event->pos());
+    QWidget::mouseMoveEvent(event);
+}
+
+void CircuitOut::leaveEvent(QEvent *event)
+{
+    clearHoverHit();
+    QWidget::leaveEvent(event);
+}
+
+void CircuitOut::registerSectionHit(int section, NetworkHitGroup group, const QRectF& bounds) const
+{
+    if (!bounds.isValid()) {
+        return;
+    }
+
+    NetworkSectionHit hit;
+    hit.bounds = bounds;
+    hit.driverIndex = std::clamp(m_driverNumber - 1, 0, 3);
+    hit.sectionIndex = std::clamp(section, 0, SectionCount - 1);
+    hit.group = group;
+    m_sectionHits.append(hit);
+}
+
+bool CircuitOut::findSectionHit(const QPoint& position, NetworkSectionHit& hit) const
+{
+    for (auto it = m_sectionHits.crbegin(); it != m_sectionHits.crend(); ++it) {
+        if (it->bounds.contains(position)) {
+            hit = *it;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool CircuitOut::sameSectionHit(const NetworkSectionHit& lhs, const NetworkSectionHit& rhs) const
+{
+    return lhs.driverIndex == rhs.driverIndex &&
+           lhs.sectionIndex == rhs.sectionIndex &&
+           lhs.group == rhs.group;
+}
+
+void CircuitOut::updateHoverHit(const QPoint& position)
+{
+    NetworkSectionHit hit;
+    if (findSectionHit(position, hit)) {
+        setCursor(Qt::PointingHandCursor);
+        if (!m_hasHoverHit || !sameSectionHit(m_hoverHit, hit)) {
+            m_hoverHit = hit;
+            m_hasHoverHit = true;
+            emit networkSectionHovered(hit.driverIndex, hit.sectionIndex, hit.group);
+        }
+        return;
+    }
+
+    clearHoverHit();
+}
+
+void CircuitOut::clearHoverHit()
+{
+    unsetCursor();
+    if (!m_hasHoverHit) {
+        return;
+    }
+
+    m_hasHoverHit = false;
+    emit networkSectionHoverLeft();
 }
 
 void CircuitOut::drawNoActiveDriversMessage(QPainter& painter, const QRect& messageRect) const
@@ -454,6 +558,18 @@ void CircuitOut::drawSection(QPainter& painter, int section, int x0, int x1, int
     const int sectionWidth = x1 - x0;
     const int seriesRight = x0 + static_cast<int>(sectionWidth * 0.62);
     const int shuntX = x0 + static_cast<int>(sectionWidth * 0.80);
+
+    const QRectF seriesHitRect(x0,
+                               signalY - 52,
+                               std::max(1, seriesRight - x0),
+                               112);
+    registerSectionHit(section, NetworkHitGroup::SeriesSection, seriesHitRect);
+
+    const QRectF shuntHitRect(seriesRight,
+                              signalY + 8,
+                              std::max(1, x1 - seriesRight),
+                              std::max(1, returnY - signalY));
+    registerSectionHit(section, NetworkHitGroup::ShuntSection, shuntHitRect);
 
     // Historical layout: the series element is always placed on the left,
     // the shunt (parallel-to-line) trap branch is always to its right.

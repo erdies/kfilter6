@@ -9,6 +9,7 @@
 #define KFILTERQT6APP_H
 
 #include <QMainWindow>
+#include <QPoint>
 #include <QString>
 #include <QUrl>
 
@@ -57,6 +58,11 @@ private slots:
     void resetWindowLayout();
     void chooseCircuitPreviewBackgroundColor();
     void resetCircuitPreviewBackgroundColor();
+    void editNetworkSectionFromPreview(int driverIndex, int sectionIndex, int groupValue);
+    void showNetworkSectionContextMenuFromPreview(int driverIndex, int sectionIndex, int groupValue, const QPoint& globalPosition);
+    void clearNetworkSectionFromPreview(int driverIndex, int sectionIndex, int groupValue);
+    void showNetworkSectionHoverFromPreview(int driverIndex, int sectionIndex, int groupValue);
+    void clearNetworkSectionHoverFromPreview();
     void setFileToolBarVisible(bool visible);
     void setEditToolBarVisible(bool visible);
     void setStatusBarVisible(bool visible);
@@ -91,6 +97,7 @@ private:
     QToolBar *m_editToolBar = nullptr;
     QLabel *m_stateLabel = nullptr;
     QString m_lastDirectory;
+    QString m_lastCircuitPreviewHoverStatus;
 
     QAction *m_newAction = nullptr;
     QAction *m_openAction = nullptr;

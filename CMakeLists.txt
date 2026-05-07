@@ -52,6 +52,10 @@ if(KFILTER_BUILD_QT6_APP)
         driverparametersdialog.h
         networkparametersdialog.cpp
         networkparametersdialog.h
+        networksectioneditdialog.cpp
+        networksectioneditdialog.h
+        networkvalueutils.cpp
+        networkvalueutils.h
         circuitout.cpp
         circuitout.h
         kfilterview.cpp

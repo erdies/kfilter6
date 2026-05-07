@@ -8,6 +8,7 @@
 #include "networkparametersdialog.h"
 
 #include "driver.h"
+#include "networkvalueutils.h"
 
 #include <QAbstractItemView>
 #include <QComboBox>
@@ -27,7 +28,6 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
-#include <QLocale>
 
 #include <array>
 #include <cmath>
@@ -60,7 +60,7 @@ QStringList columnLabels()
 
 QString displayNumber(double value)
 {
-    return QLocale::c().toString(value, 'g', 8);
+    return NetworkValueUtils::displayNumber(value, 8);
 }
 
 QString orderLabel(int order)
@@ -292,13 +292,16 @@ bool NetworkParametersDialog::applyToDrivers()
         for (int row = 0; row < NetworkRowsPerSection; ++row) {
             for (int column = 0; column < NetworkSectionCount; ++column) {
                 double value = 0.0;
-                if (!readCellValue(table, row, column, value)) {
+                QString parseError;
+                if (!readCellValue(table, row, column, value, &parseError)) {
+                    table->setCurrentCell(row, column);
                     QMessageBox::warning(this,
                                          tr("Network / Filter Parameters"),
-                                         tr("Invalid numeric value in driver %1, row '%2', section %3.")
+                                         tr("Invalid numeric value in driver %1, row '%2', section %3.\n\n%4")
                                              .arg(driverIndex + 1)
                                              .arg(rowLabels().at(row))
-                                             .arg(column + 1));
+                                             .arg(column + 1)
+                                             .arg(parseError));
                     return false;
                 }
                 displayValues[driverIndex][row][column] = value;
@@ -500,18 +503,22 @@ void NetworkParametersDialog::insertStandardFilterPreset(int driverIndex)
     }
 }
 
-bool NetworkParametersDialog::readCellValue(QTableWidget *table, int row, int column, double& value) const
+bool NetworkParametersDialog::readCellValue(QTableWidget *table,
+                                            int row,
+                                            int column,
+                                            double& value,
+                                            QString *errorMessage) const
 {
     const QTableWidgetItem *item = table->item(row, column);
     const QString text = item == nullptr ? QString() : item->text().trimmed();
-    if (text.isEmpty()) {
-        value = 0.0;
+    if (NetworkValueUtils::parseNonNegativeDisplayValue(text, value)) {
         return true;
     }
 
-    bool ok = false;
-    value = QLocale::c().toDouble(text, &ok);
-    return ok;
+    if (errorMessage != nullptr) {
+        *errorMessage = NetworkValueUtils::validationError(rowLabels().at(row));
+    }
+    return false;
 }
 
 void NetworkParametersDialog::setCellValue(QTableWidget *table, int row, int column, double value) const

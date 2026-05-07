@@ -11,6 +11,7 @@
 #include "driver.h"
 #include "driverparametersdialog.h"
 #include "networkparametersdialog.h"
+#include "networksectioneditdialog.h"
 #include "kfilterdoc.h"
 #include "kfilterprojectio.h"
 #include "kfilterview.h"
@@ -24,6 +25,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QDir>
+#include <QDialog>
 #include <QKeySequence>
 #include <QLabel>
 #include <QMenu>
@@ -41,6 +43,9 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
+#include <algorithm>
+#include <cmath>
+
 
 namespace
 {
@@ -50,6 +55,12 @@ QString ensureProjectSuffix(QString filePath)
         filePath += QStringLiteral(".kfp");
     }
     return filePath;
+}
+
+bool nearlyEqual(double lhs, double rhs)
+{
+    const double scale = std::max(1.0, std::max(std::abs(lhs), std::abs(rhs)));
+    return std::abs(lhs - rhs) <= 1e-12 * scale;
 }
 
 }
@@ -78,6 +89,20 @@ KFilterQt6App::KFilterQt6App(QWidget *parent)
     m_circuitPreview = new CircuitOut(central);
     m_circuitPreview->setMinimumSize(900, 330);
     m_circuitPreview->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    connect(m_circuitPreview, &CircuitOut::networkSectionClicked,
+            this, [this](int driverIndex, int sectionIndex, CircuitOut::NetworkHitGroup group) {
+        editNetworkSectionFromPreview(driverIndex, sectionIndex, static_cast<int>(group));
+    });
+    connect(m_circuitPreview, &CircuitOut::networkSectionContextMenuRequested,
+            this, [this](int driverIndex, int sectionIndex, CircuitOut::NetworkHitGroup group, const QPoint& globalPosition) {
+        showNetworkSectionContextMenuFromPreview(driverIndex, sectionIndex, static_cast<int>(group), globalPosition);
+    });
+    connect(m_circuitPreview, &CircuitOut::networkSectionHovered,
+            this, [this](int driverIndex, int sectionIndex, CircuitOut::NetworkHitGroup group) {
+        showNetworkSectionHoverFromPreview(driverIndex, sectionIndex, static_cast<int>(group));
+    });
+    connect(m_circuitPreview, &CircuitOut::networkSectionHoverLeft,
+            this, &KFilterQt6App::clearNetworkSectionHoverFromPreview);
 
     auto *circuitScrollArea = new QScrollArea(central);
     circuitScrollArea->setWidgetResizable(true);
@@ -344,6 +369,230 @@ void KFilterQt6App::resetCircuitPreviewBackgroundColor()
     settings.remove(QStringLiteral("CircuitPreview/backgroundColor"));
 
     statusBar()->showMessage(tr("Network preview background color reset."), 3000);
+}
+
+void KFilterQt6App::showNetworkSectionHoverFromPreview(int driverIndex, int sectionIndex, int groupValue)
+{
+    if (driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount ||
+        sectionIndex < 0 || sectionIndex >= 8) {
+        return;
+    }
+
+    const int seriesGroupValue = static_cast<int>(CircuitOut::NetworkHitGroup::SeriesSection);
+    const int shuntGroupValue = static_cast<int>(CircuitOut::NetworkHitGroup::ShuntSection);
+    if (groupValue != seriesGroupValue && groupValue != shuntGroupValue) {
+        return;
+    }
+
+    const QString groupName = groupValue == seriesGroupValue ? tr("Series") : tr("Shunt");
+    m_lastCircuitPreviewHoverStatus = tr("Click to edit Driver %1, Section %2, %3 R/C/L; right-click for options.")
+                                         .arg(driverIndex + 1)
+                                         .arg(sectionIndex + 1)
+                                         .arg(groupName);
+    statusBar()->showMessage(m_lastCircuitPreviewHoverStatus);
+}
+
+void KFilterQt6App::clearNetworkSectionHoverFromPreview()
+{
+    if (!m_lastCircuitPreviewHoverStatus.isEmpty() &&
+        statusBar()->currentMessage() == m_lastCircuitPreviewHoverStatus) {
+        statusBar()->clearMessage();
+    }
+    m_lastCircuitPreviewHoverStatus.clear();
+}
+
+void KFilterQt6App::showNetworkSectionContextMenuFromPreview(int driverIndex, int sectionIndex, int groupValue, const QPoint& globalPosition)
+{
+    if (driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount ||
+        sectionIndex < 0 || sectionIndex >= 8) {
+        return;
+    }
+
+    const int seriesGroupValue = static_cast<int>(CircuitOut::NetworkHitGroup::SeriesSection);
+    const int shuntGroupValue = static_cast<int>(CircuitOut::NetworkHitGroup::ShuntSection);
+    if (groupValue != seriesGroupValue && groupValue != shuntGroupValue) {
+        return;
+    }
+
+    const QString groupName = groupValue == seriesGroupValue ? tr("Series") : tr("Shunt");
+
+    QMenu menu(this);
+    QAction *editAction = menu.addAction(tr("Edit Driver %1, Section %2, %3 R/C/L...")
+                                             .arg(driverIndex + 1)
+                                             .arg(sectionIndex + 1)
+                                             .arg(groupName));
+    QAction *clearAction = menu.addAction(tr("Clear Driver %1, Section %2, %3 R/C/L")
+                                              .arg(driverIndex + 1)
+                                              .arg(sectionIndex + 1)
+                                              .arg(groupName));
+
+    QAction *selectedAction = menu.exec(globalPosition);
+    if (selectedAction == editAction) {
+        editNetworkSectionFromPreview(driverIndex, sectionIndex, groupValue);
+        return;
+    }
+
+    if (selectedAction == clearAction) {
+        clearNetworkSectionFromPreview(driverIndex, sectionIndex, groupValue);
+    }
+}
+
+void KFilterQt6App::clearNetworkSectionFromPreview(int driverIndex, int sectionIndex, int groupValue)
+{
+    if (driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount ||
+        sectionIndex < 0 || sectionIndex >= 8) {
+        return;
+    }
+
+    const int seriesGroupValue = static_cast<int>(CircuitOut::NetworkHitGroup::SeriesSection);
+    const int shuntGroupValue = static_cast<int>(CircuitOut::NetworkHitGroup::ShuntSection);
+    if (groupValue != seriesGroupValue && groupValue != shuntGroupValue) {
+        return;
+    }
+
+    const bool clearSeriesGroup = groupValue == seriesGroupValue;
+    const int firstRow = clearSeriesGroup ? 0 : 3;
+    const QString groupName = clearSeriesGroup ? tr("Series") : tr("Shunt");
+
+    auto unitIndex = [](int row, int section) {
+        return section * 6 + row + 1;
+    };
+
+    driver& drv = m_doc->m_driverDriver[driverIndex];
+    const int resistanceUnit = unitIndex(firstRow, sectionIndex);
+    const int capacitanceUnit = unitIndex(firstRow + 1, sectionIndex);
+    const int inductanceUnit = unitIndex(firstRow + 2, sectionIndex);
+
+    if (nearlyEqual(drv.getUnit(resistanceUnit), 0.0) &&
+        nearlyEqual(drv.getUnit(capacitanceUnit), 0.0) &&
+        nearlyEqual(drv.getUnit(inductanceUnit), 0.0)) {
+        statusBar()->showMessage(tr("Driver %1, Section %2, %3 R/C/L already clear.")
+                                     .arg(driverIndex + 1)
+                                     .arg(sectionIndex + 1)
+                                     .arg(groupName),
+                                 3000);
+        return;
+    }
+
+    const QMessageBox::StandardButton answer = QMessageBox::question(
+        this,
+        tr("Clear Network Section"),
+        tr("Clear Driver %1, Section %2, %3 R/C/L?\n\nThis will set R, C and L to 0.")
+            .arg(driverIndex + 1)
+            .arg(sectionIndex + 1)
+            .arg(groupName),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No);
+
+    if (answer != QMessageBox::Yes) {
+        statusBar()->showMessage(tr("Network section clear cancelled."), 3000);
+        return;
+    }
+
+    drv.setUnit(resistanceUnit, 0.0);
+    drv.setUnit(capacitanceUnit, 0.0);
+    drv.setUnit(inductanceUnit, 0.0);
+    drv.Berechneparameter();
+
+    m_lastNetworkParametersDriverIndex = driverIndex;
+    m_doc->setModified(true);
+    m_doc->viewrefresh();
+    statusBar()->showMessage(tr("Driver %1, Section %2, %3 R/C/L cleared.")
+                                 .arg(driverIndex + 1)
+                                 .arg(sectionIndex + 1)
+                                 .arg(groupName),
+                             3000);
+}
+
+void KFilterQt6App::editNetworkSectionFromPreview(int driverIndex, int sectionIndex, int groupValue)
+{
+    if (driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount ||
+        sectionIndex < 0 || sectionIndex >= 8) {
+        return;
+    }
+
+    const int seriesGroupValue = static_cast<int>(CircuitOut::NetworkHitGroup::SeriesSection);
+    const int shuntGroupValue = static_cast<int>(CircuitOut::NetworkHitGroup::ShuntSection);
+    if (groupValue != seriesGroupValue && groupValue != shuntGroupValue) {
+        return;
+    }
+
+    const bool editSeriesGroup = groupValue == seriesGroupValue;
+    const int firstRow = editSeriesGroup ? 0 : 3;
+    const QString groupName = editSeriesGroup ? tr("Series") : tr("Shunt");
+
+    auto unitIndex = [](int row, int section) {
+        return section * 6 + row + 1;
+    };
+
+    auto displayFromInternal = [](int row, double value) {
+        if (row == 1 || row == 4) {
+            return value * 1000000.0; // F -> uF
+        }
+        if (row == 2 || row == 5) {
+            return value * 1000.0; // H -> mH
+        }
+        return value;
+    };
+
+    auto internalFromDisplay = [](int row, double value) {
+        if (row == 1 || row == 4) {
+            return value / 1000000.0; // uF -> F
+        }
+        if (row == 2 || row == 5) {
+            return value / 1000.0; // mH -> H
+        }
+        return value;
+    };
+
+    driver& drv = m_doc->m_driverDriver[driverIndex];
+    NetworkSectionEditDialog::Values values;
+    values.resistanceOhm = displayFromInternal(firstRow, drv.getUnit(unitIndex(firstRow, sectionIndex)));
+    values.capacitanceMicroFarad = displayFromInternal(firstRow + 1, drv.getUnit(unitIndex(firstRow + 1, sectionIndex)));
+    values.inductanceMilliHenry = displayFromInternal(firstRow + 2, drv.getUnit(unitIndex(firstRow + 2, sectionIndex)));
+
+    NetworkSectionEditDialog dialog(driverIndex, sectionIndex, groupName, values, this);
+    if (dialog.exec() != QDialog::Accepted) {
+        statusBar()->showMessage(tr("Network section edit cancelled."), 3000);
+        return;
+    }
+
+    const NetworkSectionEditDialog::Values newValues = dialog.values();
+    const int resistanceUnit = unitIndex(firstRow, sectionIndex);
+    const int capacitanceUnit = unitIndex(firstRow + 1, sectionIndex);
+    const int inductanceUnit = unitIndex(firstRow + 2, sectionIndex);
+
+    const double oldResistance = drv.getUnit(resistanceUnit);
+    const double oldCapacitance = drv.getUnit(capacitanceUnit);
+    const double oldInductance = drv.getUnit(inductanceUnit);
+    const double newResistance = internalFromDisplay(firstRow, newValues.resistanceOhm);
+    const double newCapacitance = internalFromDisplay(firstRow + 1, newValues.capacitanceMicroFarad);
+    const double newInductance = internalFromDisplay(firstRow + 2, newValues.inductanceMilliHenry);
+
+    if (nearlyEqual(oldResistance, newResistance) &&
+        nearlyEqual(oldCapacitance, newCapacitance) &&
+        nearlyEqual(oldInductance, newInductance)) {
+        statusBar()->showMessage(tr("Driver %1, Section %2, %3 R/C/L unchanged.")
+                                     .arg(driverIndex + 1)
+                                     .arg(sectionIndex + 1)
+                                     .arg(groupName),
+                                 3000);
+        return;
+    }
+
+    drv.setUnit(resistanceUnit, newResistance);
+    drv.setUnit(capacitanceUnit, newCapacitance);
+    drv.setUnit(inductanceUnit, newInductance);
+    drv.Berechneparameter();
+
+    m_lastNetworkParametersDriverIndex = driverIndex;
+    m_doc->setModified(true);
+    m_doc->viewrefresh();
+    statusBar()->showMessage(tr("Driver %1, Section %2, %3 R/C/L updated.")
+                                 .arg(driverIndex + 1)
+                                 .arg(sectionIndex + 1)
+                                 .arg(groupName),
+                             3000);
 }
 
 void KFilterQt6App::loadSettings()
