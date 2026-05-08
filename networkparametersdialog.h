@@ -70,8 +70,11 @@ private:
     bool readCellValue(QTableWidget *table, int row, int column, double& value, QString *errorMessage = nullptr) const;
     void setCellValue(QTableWidget *table, int row, int column, double value) const;
     void insertStandardFilterPreset(int driverIndex);
+    void insertImpedanceCorrection(int driverIndex);
+    void updatePresetControlState(int driverIndex);
     bool tableContainsInvalidValues(QTableWidget *table) const;
     bool sectionIsEmpty(QTableWidget *table, int section) const;
+    bool sectionShuntIsEmpty(QTableWidget *table, int section, QString *errorMessage = nullptr) const;
     int findRightmostFreeSectionBlock(QTableWidget *table, int requiredSections) const;
     void clearSectionBlock(QTableWidget *table, int startSection, int sectionCount) const;
 

@@ -87,7 +87,8 @@ CircuitOut::DriverSnapshot CircuitOut::snapshotFromDriver(driver& drv, int drive
             hasNetworkTopology = true;
         }
     }
-    snapshot.active = driverHasActiveCurveOrTotalFlag(drv) || hasNetworkTopology;
+    snapshot.curveOrTotalFlagActive = driverHasActiveCurveOrTotalFlag(drv);
+    snapshot.active = snapshot.curveOrTotalFlagActive || hasNetworkTopology;
     snapshot.valid = true;
     return snapshot;
 }
@@ -101,6 +102,7 @@ void CircuitOut::applySnapshot(const DriverSnapshot& snapshot)
     m_vb = snapshot.vb;
     m_fb = snapshot.fb;
     m_v2 = snapshot.v2;
+    m_curveOrTotalFlagActive = snapshot.curveOrTotalFlagActive;
 }
 
 void CircuitOut::applyPreviewGeometry()
@@ -243,6 +245,7 @@ void CircuitOut::paintEvent(QPaintEvent *event)
 {
     QWidget::paintEvent(event);
     m_sectionHits.clear();
+    m_driverHits.clear();
 
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
@@ -268,6 +271,7 @@ void CircuitOut::paintEvent(QPaintEvent *event)
     previousSnapshot.vb = m_vb;
     previousSnapshot.fb = m_fb;
     previousSnapshot.v2 = m_v2;
+    previousSnapshot.curveOrTotalFlagActive = m_curveOrTotalFlagActive;
     previousSnapshot.valid = true;
 
     const QRect outerRect = rect().adjusted(8, 8, -8, -8);
@@ -299,6 +303,13 @@ void CircuitOut::mousePressEvent(QMouseEvent *event)
         NetworkSectionHit hit;
         if (findSectionHit(event->pos(), hit)) {
             emit networkSectionClicked(hit.driverIndex, hit.sectionIndex, hit.group);
+            event->accept();
+            return;
+        }
+
+        DriverHit driverHit;
+        if (findDriverHit(event->pos(), driverHit)) {
+            emit driverClicked(driverHit.driverIndex);
             event->accept();
             return;
         }
@@ -348,9 +359,32 @@ void CircuitOut::registerSectionHit(int section, NetworkHitGroup group, const QR
     m_sectionHits.append(hit);
 }
 
+void CircuitOut::registerDriverHit(const QRectF& bounds) const
+{
+    if (!bounds.isValid()) {
+        return;
+    }
+
+    DriverHit hit;
+    hit.bounds = bounds;
+    hit.driverIndex = std::clamp(m_driverNumber - 1, 0, 3);
+    m_driverHits.append(hit);
+}
+
 bool CircuitOut::findSectionHit(const QPoint& position, NetworkSectionHit& hit) const
 {
     for (auto it = m_sectionHits.crbegin(); it != m_sectionHits.crend(); ++it) {
+        if (it->bounds.contains(position)) {
+            hit = *it;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool CircuitOut::findDriverHit(const QPoint& position, DriverHit& hit) const
+{
+    for (auto it = m_driverHits.crbegin(); it != m_driverHits.crend(); ++it) {
         if (it->bounds.contains(position)) {
             hit = *it;
             return true;
@@ -366,15 +400,33 @@ bool CircuitOut::sameSectionHit(const NetworkSectionHit& lhs, const NetworkSecti
            lhs.group == rhs.group;
 }
 
+bool CircuitOut::sameDriverHit(const DriverHit& lhs, const DriverHit& rhs) const
+{
+    return lhs.driverIndex == rhs.driverIndex;
+}
+
 void CircuitOut::updateHoverHit(const QPoint& position)
 {
-    NetworkSectionHit hit;
-    if (findSectionHit(position, hit)) {
+    NetworkSectionHit sectionHit;
+    if (findSectionHit(position, sectionHit)) {
         setCursor(Qt::PointingHandCursor);
-        if (!m_hasHoverHit || !sameSectionHit(m_hoverHit, hit)) {
-            m_hoverHit = hit;
-            m_hasHoverHit = true;
-            emit networkSectionHovered(hit.driverIndex, hit.sectionIndex, hit.group);
+        if (m_hoverHitKind != HoverHitKind::NetworkSection ||
+            !sameSectionHit(m_hoverSectionHit, sectionHit)) {
+            m_hoverSectionHit = sectionHit;
+            m_hoverHitKind = HoverHitKind::NetworkSection;
+            emit networkSectionHovered(sectionHit.driverIndex, sectionHit.sectionIndex, sectionHit.group);
+        }
+        return;
+    }
+
+    DriverHit driverHit;
+    if (findDriverHit(position, driverHit)) {
+        setCursor(Qt::PointingHandCursor);
+        if (m_hoverHitKind != HoverHitKind::Driver ||
+            !sameDriverHit(m_hoverDriverHit, driverHit)) {
+            m_hoverDriverHit = driverHit;
+            m_hoverHitKind = HoverHitKind::Driver;
+            emit driverHovered(driverHit.driverIndex);
         }
         return;
     }
@@ -385,11 +437,11 @@ void CircuitOut::updateHoverHit(const QPoint& position)
 void CircuitOut::clearHoverHit()
 {
     unsetCursor();
-    if (!m_hasHoverHit) {
+    if (m_hoverHitKind == HoverHitKind::None) {
         return;
     }
 
-    m_hasHoverHit = false;
+    m_hoverHitKind = HoverHitKind::None;
     emit networkSectionHoverLeft();
 }
 
@@ -428,7 +480,16 @@ void CircuitOut::drawCurrentDriverPreview(QPainter& painter, const QRect& previe
     titleFont.setBold(true);
     titleFont.setPointSize(titleFont.pointSize() + 1);
     painter.setFont(titleFont);
-    painter.drawText(drawingRect.left(), drawingRect.top(), drawingRect.width(), 22,
+    const qreal lampSize = 14.0;
+    const qreal lampGap = 8.0;
+    const QRectF lampRect(drawingRect.left() + 2.0,
+                          drawingRect.top() + (22.0 - lampSize) / 2.0,
+                          lampSize,
+                          lampSize);
+    drawDriverActivityLamp(painter, lampRect, m_curveOrTotalFlagActive);
+
+    const int titleLeft = static_cast<int>(lampRect.right() + lampGap);
+    painter.drawText(titleLeft, drawingRect.top(), drawingRect.right() - titleLeft, 22,
                      Qt::AlignLeft | Qt::AlignVCenter, title);
     painter.setPen(QPen(panelBorderColor(), 1.0));
     painter.drawLine(QPointF(drawingRect.left(), drawingRect.top() + 24),
@@ -472,6 +533,7 @@ void CircuitOut::drawCurrentDriverPreview(QPainter& painter, const QRect& previe
     }
 
     const QRectF driverRect(networkRight + 12, signalY - 22, driverWidth, returnY - signalY + 12);
+    registerDriverHit(driverRect.adjusted(-8.0, -10.0, 10.0, 10.0));
     painter.setPen(QPen(primaryInkColor(), 1.4));
     painter.drawLine(QPointF(networkRight, signalY), QPointF(driverRect.left(), signalY));
     drawDriver(painter, driverRect, signalY, returnY);
@@ -940,6 +1002,50 @@ void CircuitOut::drawEquivalentDriverCircuit(QPainter& painter, const QRectF& re
     }
 
     painter.drawLine(QPointF(branchX.front() - 8, bottomY), QPointF(branchX.back() + 8, bottomY));
+}
+
+void CircuitOut::drawDriverActivityLamp(QPainter& painter, const QRectF& rect, bool active) const
+{
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    const QColor rimColor = useLightInk() ? QColor(225, 225, 225)
+                                           : QColor(35, 35, 35);
+    const QColor shadowColor = useLightInk() ? QColor(45, 45, 45)
+                                             : QColor(115, 115, 115);
+    const QColor fillColor = active ? QColor(80, 205, 95)
+                                    : (useLightInk() ? QColor(82, 82, 82)
+                                                     : QColor(118, 118, 118));
+    const QColor coreColor = active ? QColor(40, 150, 55)
+                                    : (useLightInk() ? QColor(58, 58, 58)
+                                                     : QColor(88, 88, 88));
+
+    painter.setPen(QPen(shadowColor, 1.0));
+    painter.setBrush(QBrush(shadowColor));
+    painter.drawEllipse(rect.adjusted(1.2, 1.2, 1.2, 1.2));
+
+    painter.setPen(QPen(rimColor, 1.1));
+    painter.setBrush(QBrush(fillColor));
+    painter.drawEllipse(rect);
+
+    const QRectF coreRect = rect.adjusted(rect.width() * 0.23,
+                                         rect.height() * 0.23,
+                                         -rect.width() * 0.23,
+                                         -rect.height() * 0.23);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QBrush(coreColor));
+    painter.drawEllipse(coreRect);
+
+    if (active) {
+        const QRectF highlightRect(rect.left() + rect.width() * 0.24,
+                                   rect.top() + rect.height() * 0.18,
+                                   rect.width() * 0.27,
+                                   rect.height() * 0.27);
+        painter.setBrush(QBrush(QColor(210, 255, 215)));
+        painter.drawEllipse(highlightRect);
+    }
+
+    painter.restore();
 }
 
 void CircuitOut::drawPort(QPainter& painter, const QRectF& rect, bool leftFacing) const

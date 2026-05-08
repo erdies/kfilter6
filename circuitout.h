@@ -26,8 +26,8 @@ class driver;
  *
  * The original KDE3 version placed many QLabel/QPixmap fragments into a
  * QScrollView.  This version draws the same 8-section network model directly
- * with QPainter.  It is intentionally a read-only preview for now; editing
- * remains in NetworkParametersDialog until the port is further along.
+ * with QPainter and exposes targeted editing entry points for the ported
+ * parameter dialogs.
  */
 class CircuitOut : public QWidget
 {
@@ -60,6 +60,8 @@ signals:
     void networkSectionContextMenuRequested(int driverIndex, int sectionIndex, NetworkHitGroup group, const QPoint& globalPosition);
     void networkSectionHovered(int driverIndex, int sectionIndex, NetworkHitGroup group);
     void networkSectionHoverLeft();
+    void driverClicked(int driverIndex);
+    void driverHovered(int driverIndex);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -90,6 +92,19 @@ private:
         NetworkHitGroup group = NetworkHitGroup::SeriesSection;
     };
 
+    struct DriverHit
+    {
+        QRectF bounds;
+        int driverIndex = 0;
+    };
+
+    enum class HoverHitKind
+    {
+        None = 0,
+        NetworkSection,
+        Driver
+    };
+
     struct DriverSnapshot
     {
         std::array<double, NetworkUnitCount + 1> network{};
@@ -99,6 +114,7 @@ private:
         double vb = 0.0;
         double fb = 0.0;
         double v2 = 0.0;
+        bool curveOrTotalFlagActive = false;
         bool active = false;
         bool valid = false;
     };
@@ -107,8 +123,11 @@ private:
     void applySnapshot(const DriverSnapshot& snapshot);
     void applyPreviewGeometry();
     void registerSectionHit(int section, NetworkHitGroup group, const QRectF& bounds) const;
+    void registerDriverHit(const QRectF& bounds) const;
     bool findSectionHit(const QPoint& position, NetworkSectionHit& hit) const;
+    bool findDriverHit(const QPoint& position, DriverHit& hit) const;
     bool sameSectionHit(const NetworkSectionHit& lhs, const NetworkSectionHit& rhs) const;
+    bool sameDriverHit(const DriverHit& lhs, const DriverHit& rhs) const;
     void updateHoverHit(const QPoint& position);
     void clearHoverHit();
     void drawCurrentDriverPreview(QPainter& painter, const QRect& previewRect) const;
@@ -141,6 +160,7 @@ private:
     void drawAcSource(QPainter& painter, qreal centerX, qreal signalY, qreal returnY) const;
     void drawDriver(QPainter& painter, const QRectF& rect, int signalY, int returnY) const;
     void drawEquivalentDriverCircuit(QPainter& painter, const QRectF& rect, int signalY, int returnY) const;
+    void drawDriverActivityLamp(QPainter& painter, const QRectF& rect, bool active) const;
     void drawPort(QPainter& painter, const QRectF& rect, bool leftFacing) const;
     void drawSpeakerSymbol(QPainter& painter, const QRectF& rect) const;
     void drawBoxParameterText(QPainter& painter, const QRectF& boxRect, int boxType) const;
@@ -157,11 +177,14 @@ private:
     double m_vb = 0.0;
     double m_fb = 0.0;
     double m_v2 = 0.0;
+    bool m_curveOrTotalFlagActive = false;
     bool m_showValues = true;
     QColor m_backgroundColor = defaultBackgroundColor();
     mutable QVector<NetworkSectionHit> m_sectionHits;
-    NetworkSectionHit m_hoverHit;
-    bool m_hasHoverHit = false;
+    mutable QVector<DriverHit> m_driverHits;
+    NetworkSectionHit m_hoverSectionHit;
+    DriverHit m_hoverDriverHit;
+    HoverHitKind m_hoverHitKind = HoverHitKind::None;
 };
 
 #endif // CIRCUITOUT_H

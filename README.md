@@ -45,7 +45,7 @@ Current major functionality includes:
 - Vector SPL sum.
 - Energetic SPL sum.
 - Total impedance curve.
-- Read-only graphical network preview.
+- Interactive graphical network preview.
 - Network preview modes:
   - All Active Drivers
   - Driver 1
@@ -73,7 +73,9 @@ This is useful as an approximation of the energy balance between drivers. It is 
 
 ### Network preview
 
-The network preview is a read-only schematic visualization of the current crossover topology. It is intended as a consistency and orientation aid while editing numeric network values.
+The network preview is a schematic visualization of the current crossover topology. It is intended as a consistency and orientation aid while editing numeric network values.
+
+The section R/C/L groups in the preview can be clicked for targeted network-section editing. The driver/enclosure sketch on the right-hand side can be clicked to open the driver parameter dialog on the matching driver tab. The small lamp next to each driver title shows whether at least one curve/total flag is enabled for that driver.
 
 The default view is **All Active Drivers**. A driver is considered active if at least one curve/total flag is enabled or at least one network-topology value is non-zero.
 
@@ -234,9 +236,21 @@ Each driver has eight network sections. Each section contains:
 
 Capacitors and inductors are edited in user-friendly units, while the internal model keeps the historical storage units.
 
+The `Standard Filter Preset` area can insert simple Butterworth low-pass and
+high-pass start values. The `Impedance correction` filter type inserts a
+standard Zobel RC correction into Section 8 shunt values of the selected driver:
+
+```text
+R = Rdc
+C = Lsp / Rdc^2
+L = 0
+```
+
+If Section 8 already contains shunt values, KFilter asks before replacing them.
+
 ### 5. Use the network preview
 
-The network preview shows the current network topology graphically.
+The network preview shows the current network topology graphically. Click a section R/C/L group to edit that section, or click the driver/enclosure sketch on the right to open the matching driver parameter tab. The small lamp next to each driver title is lit when at least one curve/total flag is enabled for that driver.
 
 The default mode is:
 

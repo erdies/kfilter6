@@ -21,6 +21,7 @@
 #include <QMessageBox>
 #include <QObject>
 #include <QPushButton>
+#include <QSizePolicy>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QStringList>
@@ -36,6 +37,7 @@ namespace
 {
 constexpr int NetworkSectionCount = 8;
 constexpr int NetworkRowsPerSection = 6;
+constexpr int ImpedanceCorrectionSection = NetworkSectionCount - 1;
 
 QStringList rowLabels()
 {
@@ -87,7 +89,8 @@ int requiredSectionCountForOrder(int order)
 enum PresetFilterType
 {
     PresetLowPass = 0,
-    PresetHighPass = 1
+    PresetHighPass = 1,
+    PresetImpedanceCorrection = 2
 };
 
 enum NetworkRow
@@ -185,6 +188,7 @@ QWidget *NetworkParametersDialog::createDriverPage(int index)
     page.presetTypeCombo = new QComboBox(presetGroup);
     page.presetTypeCombo->addItem(tr("Low-pass"), PresetLowPass);
     page.presetTypeCombo->addItem(tr("High-pass"), PresetHighPass);
+    page.presetTypeCombo->addItem(tr("Impedance correction"), PresetImpedanceCorrection);
 
     page.presetOrderCombo = new QComboBox(presetGroup);
     for (int order = 1; order <= 4; ++order) {
@@ -212,10 +216,17 @@ QWidget *NetworkParametersDialog::createDriverPage(int index)
     page.presetImpedanceSpin->setToolTip(tr("The preset assumes an ideal resistive load with this impedance. Real driver impedance is still simulated by KFilter after applying."));
 
     auto *insertButton = new QPushButton(tr("Insert Preset"), presetGroup);
+    insertButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     insertButton->setToolTip(tr("Insert the preset into the rightmost free network section block."));
     connect(insertButton, &QPushButton::clicked, this, [this, index]() {
         insertStandardFilterPreset(index);
     });
+    connect(page.presetTypeCombo,
+            static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+            this,
+            [this, index](int) {
+                updatePresetControlState(index);
+            });
 
     auto *filterLayout = new QGridLayout();
     filterLayout->addWidget(new QLabel(tr("Filter type:"), presetGroup), 0, 0);
@@ -234,7 +245,7 @@ QWidget *NetworkParametersDialog::createDriverPage(int index)
     auto *actionLayout = new QGridLayout();
     actionLayout->addWidget(new QLabel(tr("Order:"), presetGroup), 0, 0);
     actionLayout->addWidget(page.presetOrderCombo, 0, 1);
-    actionLayout->addWidget(insertButton, 1, 1, Qt::AlignLeft);
+    actionLayout->addWidget(insertButton, 1, 1);
     actionLayout->setColumnStretch(1, 1);
 
     presetLayout->addLayout(filterLayout, 0, 0);
@@ -264,6 +275,8 @@ QWidget *NetworkParametersDialog::createDriverPage(int index)
     auto *layout = new QVBoxLayout(page.page);
     layout->addWidget(presetGroup);
     layout->addWidget(page.table);
+
+    updatePresetControlState(index);
 
     return page.page;
 }
@@ -361,6 +374,32 @@ void NetworkParametersDialog::resetTable(QTableWidget *table)
     }
 }
 
+void NetworkParametersDialog::updatePresetControlState(int driverIndex)
+{
+    if (driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount) {
+        return;
+    }
+
+    DriverPage& page = m_pages.at(driverIndex);
+    const int filterType = page.presetTypeCombo->currentData().toInt();
+    const bool isImpedanceCorrection = filterType == PresetImpedanceCorrection;
+
+    page.presetOrderCombo->setEnabled(!isImpedanceCorrection);
+    page.presetCharacteristicCombo->setEnabled(!isImpedanceCorrection);
+    page.presetFrequencySpin->setEnabled(!isImpedanceCorrection);
+    page.presetImpedanceSpin->setEnabled(!isImpedanceCorrection);
+
+    if (isImpedanceCorrection) {
+        const double driverRdc = m_drivers[driverIndex].getRdc();
+        if (driverRdc > 0.0) {
+            page.presetImpedanceSpin->setValue(driverRdc);
+        }
+        page.presetImpedanceSpin->setToolTip(tr("Impedance correction uses the selected driver's Rdc and Lsp values."));
+    } else {
+        page.presetImpedanceSpin->setToolTip(tr("The preset assumes an ideal resistive load with this impedance. Real driver impedance is still simulated by KFilter after applying."));
+    }
+}
+
 
 bool NetworkParametersDialog::tableContainsInvalidValues(QTableWidget *table) const
 {
@@ -390,6 +429,35 @@ bool NetworkParametersDialog::sectionIsEmpty(QTableWidget *table, int section) c
             return false;
         }
     }
+    return true;
+}
+
+bool NetworkParametersDialog::sectionShuntIsEmpty(QTableWidget *table, int section, QString *errorMessage) const
+{
+    if (section < 0 || section >= NetworkSectionCount) {
+        if (errorMessage != nullptr) {
+            *errorMessage = tr("Invalid section index.");
+        }
+        return false;
+    }
+
+    for (int row = RowShuntR; row <= RowShuntL; ++row) {
+        double value = 0.0;
+        QString parseError;
+        if (!readCellValue(table, row, section, value, &parseError)) {
+            if (errorMessage != nullptr) {
+                *errorMessage = tr("Cannot inspect Section %1 because row '%2' contains an invalid value.\n\n%3")
+                                    .arg(section + 1)
+                                    .arg(rowLabels().at(row))
+                                    .arg(parseError);
+            }
+            return false;
+        }
+        if (std::abs(value) > 0.0) {
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -432,6 +500,11 @@ void NetworkParametersDialog::insertStandardFilterPreset(int driverIndex)
 
     DriverPage& page = m_pages.at(driverIndex);
     const int filterType = page.presetTypeCombo->currentData().toInt();
+    if (filterType == PresetImpedanceCorrection) {
+        insertImpedanceCorrection(driverIndex);
+        return;
+    }
+
     const int order = page.presetOrderCombo->currentData().toInt();
     const double frequencyHz = page.presetFrequencySpin->value();
     const double impedanceOhm = page.presetImpedanceSpin->value();
@@ -501,6 +574,59 @@ void NetworkParametersDialog::insertStandardFilterPreset(int driverIndex)
     } else {
         page.table->setCurrentCell(RowSeriesC, startSection);
     }
+}
+
+void NetworkParametersDialog::insertImpedanceCorrection(int driverIndex)
+{
+    if (driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount) {
+        return;
+    }
+
+    DriverPage& page = m_pages.at(driverIndex);
+    driver& drv = m_drivers[driverIndex];
+    const double rdcOhm = drv.getRdc();
+    const double lspHenry = drv.getLsp();
+
+    if (rdcOhm <= 0.0 || lspHenry <= 0.0) {
+        QMessageBox::warning(this,
+                             tr("Impedance Correction"),
+                             tr("Cannot calculate impedance correction for Driver %1. Rdc and Lsp must be greater than zero.")
+                                 .arg(driverIndex + 1));
+        return;
+    }
+
+    QString shuntInspectionError;
+    const bool shuntIsEmpty = sectionShuntIsEmpty(page.table,
+                                                  ImpedanceCorrectionSection,
+                                                  &shuntInspectionError);
+    if (!shuntInspectionError.isEmpty()) {
+        QMessageBox::warning(this,
+                             tr("Impedance Correction"),
+                             shuntInspectionError);
+        return;
+    }
+
+    if (!shuntIsEmpty) {
+        const QMessageBox::StandardButton answer = QMessageBox::warning(
+            this,
+            tr("Impedance Correction"),
+            tr("Section 8 already contains shunt component values for Driver %1.\n\n"
+               "Inserting impedance correction will replace Shunt R/C/L in Section 8.\n\n"
+               "Continue?")
+                .arg(driverIndex + 1),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);
+        if (answer != QMessageBox::Yes) {
+            return;
+        }
+    }
+
+    const double capacitanceMicroFarad = (lspHenry / (rdcOhm * rdcOhm)) * 1000000.0;
+
+    setCellValue(page.table, RowShuntR, ImpedanceCorrectionSection, rdcOhm);
+    setCellValue(page.table, RowShuntC, ImpedanceCorrectionSection, capacitanceMicroFarad);
+    setCellValue(page.table, RowShuntL, ImpedanceCorrectionSection, 0.0);
+    page.table->setCurrentCell(RowShuntR, ImpedanceCorrectionSection);
 }
 
 bool NetworkParametersDialog::readCellValue(QTableWidget *table,

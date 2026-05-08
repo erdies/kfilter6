@@ -455,3 +455,52 @@ no longer part of the build and have been superseded by the current Qt6 classes:
 The legacy files are still preserved in `legacy_original_uploaded/` inside full
 handover packages as historical reference, but they should not appear in the
 active KFilter6 repository tree.
+
+
+## Patch 071
+
+Added a direct editing entry point from the Qt6 network preview to the driver
+parameter dialog:
+
+- the driver/enclosure sketch on the right-hand side of each preview row now has
+  a hit-test area
+- left-clicking that sketch opens `DriverParametersDialog`
+- in the `All Active Drivers` view, the dialog opens on the tab belonging to the
+  clicked driver
+- the network preview selection itself is left unchanged
+- hover feedback uses the pointing-hand cursor and a status-bar hint
+
+No calculation logic or project file I/O was changed.
+
+## Patch 072
+
+Added a standard impedance-correction preset to the Qt6 network/filter dialog:
+
+- the `Filter type` combo now contains `Impedance correction`
+- selecting it disables the low-pass/high-pass-only controls because order,
+  frequency and characteristic are not used for the correction
+- inserting the preset writes a standard Zobel RC correction into Section 8 of
+  the selected driver's shunt branch:
+  - Shunt R = driver Rdc
+  - Shunt C = driver Lsp / Rdc^2, displayed in uF
+  - Shunt L = 0
+- if Section 8 already has shunt values, the dialog asks before replacing them
+- the calculation uses the driver's actual `Rdc` and `Lsp` values, not the
+  manually editable preset impedance field
+
+No project file I/O or core network calculation logic was changed.
+
+## Patch 074
+
+Added a small visual activity lamp next to each driver title in the Qt6 network
+preview:
+
+- the lamp is lit when at least one curve/total flag is enabled for that driver
+- the lamp is off when all curve/total flags are disabled
+- this state is tracked separately from the existing preview-active logic, which
+  may also keep a driver visible because it has network topology values
+- the lamp is drawn for both single-driver preview mode and the `All Active
+  Drivers` preview rows
+
+This is a visual-only change. No calculation logic or project file I/O was
+changed.

@@ -52,6 +52,7 @@ private slots:
     bool saveFileAs();
     void refreshOverview();
     void editDriverParameters();
+    void editDriverParametersFromPreview(int driverIndex);
     void editNetworkParameters();
     void refreshCircuitPreview();
     void showAboutDialog();
@@ -62,6 +63,7 @@ private slots:
     void showNetworkSectionContextMenuFromPreview(int driverIndex, int sectionIndex, int groupValue, const QPoint& globalPosition);
     void clearNetworkSectionFromPreview(int driverIndex, int sectionIndex, int groupValue);
     void showNetworkSectionHoverFromPreview(int driverIndex, int sectionIndex, int groupValue);
+    void showDriverHoverFromPreview(int driverIndex);
     void clearNetworkSectionHoverFromPreview();
     void setFileToolBarVisible(bool visible);
     void setEditToolBarVisible(bool visible);
@@ -84,6 +86,7 @@ private:
     void updateCircuitPreviewDriverActions();
     bool circuitPreviewDriverSlotAvailable(int driverIndex) const;
     QString circuitPreviewDriverMenuText(int driverIndex) const;
+    void openDriverParametersDialog(int initialDriverIndex);
 
     static constexpr int CircuitPreviewDriverActionCount = 4;
 

@@ -86,7 +86,9 @@ QString tubeDiameterSettingsKey(int driverIndex)
 }
 }
 
-DriverParametersDialog::DriverParametersDialog(driver (&drivers)[KFilterProjectIo::DriverCount], QWidget *parent)
+DriverParametersDialog::DriverParametersDialog(driver (&drivers)[KFilterProjectIo::DriverCount],
+                                               QWidget *parent,
+                                               int initialDriverIndex)
     : QDialog(parent),
       m_drivers(drivers)
 {
@@ -94,11 +96,15 @@ DriverParametersDialog::DriverParametersDialog(driver (&drivers)[KFilterProjectI
     resize(740, 520);
 
     auto *mainLayout = new QVBoxLayout(this);
-    auto *tabs = new QTabWidget(this);
+    m_tabs = new QTabWidget(this);
 
     for (int index = 0; index < KFilterProjectIo::DriverCount; ++index) {
-        tabs->addTab(createDriverPage(index), tr("Driver %1").arg(index + 1));
+        m_tabs->addTab(createDriverPage(index), tr("Driver %1").arg(index + 1));
     }
+
+    const int safeInitialDriverIndex =
+        std::clamp(initialDriverIndex, 0, KFilterProjectIo::DriverCount - 1);
+    m_tabs->setCurrentIndex(safeInitialDriverIndex);
 
     auto *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok |
                                            QDialogButtonBox::Apply |
@@ -109,7 +115,7 @@ DriverParametersDialog::DriverParametersDialog(driver (&drivers)[KFilterProjectI
     connect(buttonBox->button(QDialogButtonBox::Apply), &QPushButton::clicked,
             this, &DriverParametersDialog::applyClicked);
 
-    mainLayout->addWidget(tabs);
+    mainLayout->addWidget(m_tabs);
     mainLayout->addWidget(buttonBox);
 
     loadFromDrivers();

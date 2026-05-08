@@ -18,6 +18,7 @@ class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLineEdit;
+class QTabWidget;
 class QWidget;
 class driver;
 
@@ -33,7 +34,9 @@ class DriverParametersDialog : public QDialog
     Q_OBJECT
 
 public:
-    explicit DriverParametersDialog(driver (&drivers)[KFilterProjectIo::DriverCount], QWidget *parent = nullptr);
+    explicit DriverParametersDialog(driver (&drivers)[KFilterProjectIo::DriverCount],
+                                    QWidget *parent = nullptr,
+                                    int initialDriverIndex = 0);
 
 signals:
     void parametersApplied();
@@ -82,6 +85,7 @@ private:
 
     driver (&m_drivers)[KFilterProjectIo::DriverCount];
     std::array<DriverPage, KFilterProjectIo::DriverCount> m_pages;
+    QTabWidget *m_tabs = nullptr;
 };
 
 #endif // DRIVERPARAMETERSDIALOG_H

@@ -103,6 +103,10 @@ KFilterQt6App::KFilterQt6App(QWidget *parent)
     });
     connect(m_circuitPreview, &CircuitOut::networkSectionHoverLeft,
             this, &KFilterQt6App::clearNetworkSectionHoverFromPreview);
+    connect(m_circuitPreview, &CircuitOut::driverClicked,
+            this, &KFilterQt6App::editDriverParametersFromPreview);
+    connect(m_circuitPreview, &CircuitOut::driverHovered,
+            this, &KFilterQt6App::showDriverHoverFromPreview);
 
     auto *circuitScrollArea = new QScrollArea(central);
     circuitScrollArea->setWidgetResizable(true);
@@ -389,6 +393,17 @@ void KFilterQt6App::showNetworkSectionHoverFromPreview(int driverIndex, int sect
                                          .arg(driverIndex + 1)
                                          .arg(sectionIndex + 1)
                                          .arg(groupName);
+    statusBar()->showMessage(m_lastCircuitPreviewHoverStatus);
+}
+
+void KFilterQt6App::showDriverHoverFromPreview(int driverIndex)
+{
+    if (driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount) {
+        return;
+    }
+
+    m_lastCircuitPreviewHoverStatus = tr("Click to edit Driver %1 parameters.")
+                                         .arg(driverIndex + 1);
     statusBar()->showMessage(m_lastCircuitPreviewHoverStatus);
 }
 
@@ -974,7 +989,24 @@ void KFilterQt6App::showAboutDialog()
 
 void KFilterQt6App::editDriverParameters()
 {
-    DriverParametersDialog dialog(m_doc->m_driverDriver, this);
+    openDriverParametersDialog(0);
+}
+
+void KFilterQt6App::editDriverParametersFromPreview(int driverIndex)
+{
+    if (driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount) {
+        return;
+    }
+
+    openDriverParametersDialog(driverIndex);
+}
+
+void KFilterQt6App::openDriverParametersDialog(int initialDriverIndex)
+{
+    const int safeInitialDriverIndex =
+        std::clamp(initialDriverIndex, 0, KFilterProjectIo::DriverCount - 1);
+
+    DriverParametersDialog dialog(m_doc->m_driverDriver, this, safeInitialDriverIndex);
     connect(&dialog, &DriverParametersDialog::parametersApplied, this, [this]() {
         m_doc->setModified(true);
         m_doc->viewrefresh();
