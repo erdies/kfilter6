@@ -49,6 +49,14 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
+#ifndef KFILTER_VERSION_STRING
+#define KFILTER_VERSION_STRING "unknown"
+#endif
+
+#ifndef KFILTER_PATCH_LEVEL_STRING
+#define KFILTER_PATCH_LEVEL_STRING "unknown"
+#endif
+
 #include <algorithm>
 #include <cmath>
 #include <memory>
@@ -1329,10 +1337,14 @@ void KFilterQt6App::showAboutDialog()
         this,
         tr("About KFilter6"),
         tr("<b>KFilter6</b><br>"
+           "Version %1<br>"
+           "Patch %2<br><br>"
            "KFilter6 is a Qt6-based loudspeaker design and crossover modelling tool.<br><br>"
            "It visualizes driver response, impedance, enclosure behaviour, "
            "crossover networks, vector SPL summation, energetic SPL summation, "
-           "and total impedance while preserving the legacy KFilter project model."));
+           "and total impedance while preserving the legacy KFilter project model.")
+            .arg(QStringLiteral(KFILTER_VERSION_STRING))
+            .arg(QStringLiteral(KFILTER_PATCH_LEVEL_STRING)));
 }
 
 void KFilterQt6App::editDriverParameters()

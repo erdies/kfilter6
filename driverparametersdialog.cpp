@@ -8,7 +8,9 @@
 #include "driverparametersdialog.h"
 
 #include "driver.h"
+#include "networkvalueutils.h"
 
+#include <QAbstractSpinBox>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -26,20 +28,137 @@
 #include <QTabWidget>
 #include <QVariant>
 #include <QVBoxLayout>
+#include <QValidator>
 #include <QWidget>
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace
 {
+QString stripSpinBoxAffixes(const QDoubleSpinBox *spinBox, const QString& text)
+{
+    QString stripped = text.trimmed();
+
+    const QString prefix = spinBox->prefix();
+    if (!prefix.isEmpty() && stripped.startsWith(prefix)) {
+        stripped.remove(0, prefix.size());
+        stripped = stripped.trimmed();
+    }
+
+    const QString suffix = spinBox->suffix();
+    if (!suffix.isEmpty() && stripped.endsWith(suffix)) {
+        stripped.chop(suffix.size());
+        stripped = stripped.trimmed();
+    } else {
+        const QString trimmedSuffix = suffix.trimmed();
+        if (!trimmedSuffix.isEmpty() && stripped.endsWith(trimmedSuffix)) {
+            stripped.chop(trimmedSuffix.size());
+            stripped = stripped.trimmed();
+        }
+    }
+
+    return stripped;
+}
+
+bool parseSpinBoxText(const QDoubleSpinBox *spinBox,
+                      const QString& text,
+                      double& value,
+                      double minimum,
+                      double maximum)
+{
+    return NetworkValueUtils::parseDisplayValue(stripSpinBoxAffixes(spinBox, text),
+                                                value,
+                                                minimum,
+                                                maximum);
+}
+
+bool isIncompleteNumber(const QString& text, double minimum)
+{
+    if (text.isEmpty()) {
+        return true;
+    }
+
+    if (text == QLatin1String("+") || text == QLatin1String(".") || text == QLatin1String(",")) {
+        return true;
+    }
+
+    if (text == QLatin1String("-")) {
+        return minimum < 0.0;
+    }
+
+    if (text == QLatin1String("+.") || text == QLatin1String("+,")) {
+        return true;
+    }
+
+    if (text == QLatin1String("-.") || text == QLatin1String("-,")) {
+        return minimum < 0.0;
+    }
+
+    if (text.endsWith(QLatin1Char('.')) || text.endsWith(QLatin1Char(','))) {
+        double parsedPrefix = 0.0;
+        return NetworkValueUtils::parseDisplayValue(text.left(text.size() - 1),
+                                                    parsedPrefix,
+                                                    -std::numeric_limits<double>::max(),
+                                                    std::numeric_limits<double>::max());
+    }
+
+    return false;
+}
+
+class DriverValueSpinBox : public QDoubleSpinBox
+{
+public:
+    explicit DriverValueSpinBox(QWidget *parent = nullptr)
+        : QDoubleSpinBox(parent)
+    {
+        setCorrectionMode(QAbstractSpinBox::CorrectToPreviousValue);
+    }
+
+protected:
+    double valueFromText(const QString& text) const override
+    {
+        double parsed = 0.0;
+        if (parseSpinBoxText(this, text, parsed, minimum(), maximum())) {
+            return parsed;
+        }
+        return value();
+    }
+
+    QValidator::State validate(QString& input, int& pos) const override
+    {
+        Q_UNUSED(pos);
+
+        const QString stripped = stripSpinBoxAffixes(this, input);
+        if (isIncompleteNumber(stripped, minimum())) {
+            return QValidator::Intermediate;
+        }
+
+        double parsed = 0.0;
+        if (parseSpinBoxText(this, input, parsed, minimum(), maximum())) {
+            return QValidator::Acceptable;
+        }
+
+        if (parseSpinBoxText(this,
+                             input,
+                             parsed,
+                             -std::numeric_limits<double>::max(),
+                             std::numeric_limits<double>::max())) {
+            return QValidator::Intermediate;
+        }
+
+        return QValidator::Invalid;
+    }
+};
+
 QDoubleSpinBox *createSpinBox(double minimum,
                               double maximum,
                               int decimals,
                               double singleStep,
                               const QString& suffix = QString())
 {
-    auto *spinBox = new QDoubleSpinBox;
+    auto *spinBox = new DriverValueSpinBox;
     spinBox->setRange(minimum, maximum);
     spinBox->setDecimals(decimals);
     spinBox->setSingleStep(singleStep);

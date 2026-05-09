@@ -21,6 +21,15 @@ namespace NetworkValueUtils
 QString displayNumber(double value, int significantDigits = 10);
 
 /**
+ * Parse a UI-entered numeric value with an explicit range.
+ *
+ * Empty input is treated as zero. Both decimal point and decimal comma are
+ * accepted as decimal separators. Mixed decimal separators are rejected so a
+ * string such as "1.234,5" cannot be silently misread.
+ */
+bool parseDisplayValue(const QString& text, double& value, double minimum, double maximum);
+
+/**
  * Parse a non-negative network value as shown in the UI.
  *
  * Empty input is treated as zero. Both decimal point and decimal comma are

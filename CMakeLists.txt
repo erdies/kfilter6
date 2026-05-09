@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.21)
 
 project(kfilter VERSION 0.1.0 LANGUAGES CXX)
 
+set(KFILTER_PATCH_LEVEL "099")
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -67,6 +69,11 @@ if(KFILTER_BUILD_QT6_APP)
         PRIVATE
             kfilter_core
             Qt6::Widgets
+    )
+    target_compile_definitions(kfilter_qt6
+        PRIVATE
+            KFILTER_VERSION_STRING="${PROJECT_VERSION}"
+            KFILTER_PATCH_LEVEL_STRING="${KFILTER_PATCH_LEVEL}"
     )
 endif()
 

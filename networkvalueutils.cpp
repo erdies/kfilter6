@@ -11,6 +11,7 @@
 #include <QObject>
 
 #include <cmath>
+#include <limits>
 
 namespace NetworkValueUtils
 {
@@ -22,12 +23,12 @@ QString displayNumber(double value, int significantDigits)
     return QLocale::c().toString(value, 'g', significantDigits);
 }
 
-bool parseNonNegativeDisplayValue(const QString& text, double& value)
+bool parseDisplayValue(const QString& text, double& value, double minimum, double maximum)
 {
     const QString trimmed = text.trimmed();
     if (trimmed.isEmpty()) {
         value = 0.0;
-        return true;
+        return minimum <= 0.0 && maximum >= 0.0;
     }
 
     const bool hasComma = trimmed.contains(QLatin1Char(','));
@@ -43,12 +44,17 @@ bool parseNonNegativeDisplayValue(const QString& text, double& value)
 
     bool ok = false;
     const double parsed = QLocale::c().toDouble(normalized, &ok);
-    if (!ok || !std::isfinite(parsed) || parsed < 0.0) {
+    if (!ok || !std::isfinite(parsed) || parsed < minimum || parsed > maximum) {
         return false;
     }
 
     value = parsed;
     return true;
+}
+
+bool parseNonNegativeDisplayValue(const QString& text, double& value)
+{
+    return parseDisplayValue(text, value, 0.0, std::numeric_limits<double>::max());
 }
 
 QString validationHint()
