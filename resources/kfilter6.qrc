@@ -1,0 +1,12 @@
+<RCC>
+    <qresource prefix="/icons">
+        <file alias="kfilter6.svg">icons/kfilter6.svg</file>
+        <file alias="kfilter6-16.png">icons/kfilter6-16.png</file>
+        <file alias="kfilter6-24.png">icons/kfilter6-24.png</file>
+        <file alias="kfilter6-32.png">icons/kfilter6-32.png</file>
+        <file alias="kfilter6-48.png">icons/kfilter6-48.png</file>
+        <file alias="kfilter6-64.png">icons/kfilter6-64.png</file>
+        <file alias="kfilter6-128.png">icons/kfilter6-128.png</file>
+        <file alias="kfilter6-256.png">icons/kfilter6-256.png</file>
+    </qresource>
+</RCC>

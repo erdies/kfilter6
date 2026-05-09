@@ -24,6 +24,7 @@ class QSplitter;
 class QToolBar;
 class KFilterDoc;
 class KFilterView;
+class NetworkSectionEditDialog;
 
 /**
  * Qt6 application shell used during the KDE3 -> Qt6/KF6 port.
@@ -87,6 +88,8 @@ private:
     bool circuitPreviewDriverSlotAvailable(int driverIndex) const;
     QString circuitPreviewDriverMenuText(int driverIndex) const;
     void openDriverParametersDialog(int initialDriverIndex);
+    bool networkSectionEditInProgress() const;
+    bool raiseActiveNetworkSectionEditor();
 
     static constexpr int CircuitPreviewDriverActionCount = 4;
 
@@ -120,6 +123,7 @@ private:
     QAction *m_circuitPreviewBackgroundColorAction = nullptr;
     QAction *m_resetCircuitPreviewBackgroundColorAction = nullptr;
     QAction *m_aboutAction = nullptr;
+    NetworkSectionEditDialog *m_activeNetworkSectionEditDialog = nullptr;
 };
 
 #endif // KFILTERQT6APP_H

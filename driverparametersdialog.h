@@ -84,6 +84,7 @@ private:
     void applyToDrivers();
     void updateQtsForPage(DriverPage& page);
     void updateTubeLengthForPage(DriverPage& page);
+    void calculateHogeForPage(DriverPage& page);
 
     driver (&m_drivers)[KFilterProjectIo::DriverCount];
     std::array<DriverPage, KFilterProjectIo::DriverCount> m_pages;

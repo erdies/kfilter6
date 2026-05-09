@@ -939,27 +939,40 @@ void CircuitOut::drawInductor(QPainter& painter, const QRectF& rect, Qt::Orienta
     }
 }
 
-void CircuitOut::drawEquivalentDriverCircuit(QPainter& painter, const QRectF& rect, int signalY, int returnY) const
+void CircuitOut::drawEquivalentDriverCircuit(QPainter& painter, const QRectF& rect, int signalY, int returnY, qreal shuntStartX) const
 {
     const qreal topY = std::max(rect.top() + 8.0, static_cast<qreal>(signalY));
     const qreal bottomY = static_cast<qreal>(returnY);
 
-    const qreal leftX = rect.left() + 2;
-    const qreal rSeriesWidth = 22;
-    const qreal lSeriesWidth = 28;
-    const qreal gap = 6;
+    // Keep the series RL branch a bit further to the left so the shunt elements
+    // can be spread out more clearly in narrow box-symbol layouts.
+    const qreal rSeriesWidth = 20;
+    const qreal lSeriesWidth = 26;
+    const qreal gap = 4;
 
-    const QRectF rSeriesRect(leftX + 2, topY - 7, rSeriesWidth, 14);
+    const QRectF rSeriesRect(rect.left() + 1, topY - 7, rSeriesWidth, 14);
     const QRectF lSeriesRect(rSeriesRect.right() + gap, topY - 8, lSeriesWidth, 16);
 
-    const qreal busLeftX = lSeriesRect.right() + 6;
-    const qreal busRightX = rect.right() - 4;
-    const qreal usableWidth = std::max<qreal>(24.0, busRightX - busLeftX);
-    const std::array<qreal, 3> branchX = {
-        busLeftX + usableWidth * 0.10,
-        busLeftX + usableWidth * 0.50,
-        busLeftX + usableWidth * 0.90
-    };
+    const qreal busLeftX = lSeriesRect.right() + 4;
+    const qreal busRightX = rect.right() - 2;
+
+    std::array<qreal, 3> branchX{};
+    if (shuntStartX > 0.0) {
+        const qreal clampedShuntStartX = std::clamp(shuntStartX, busLeftX, busRightX - 22.0);
+        const qreal shuntWidth = std::max<qreal>(22.0, busRightX - clampedShuntStartX);
+        branchX = {
+            clampedShuntStartX + shuntWidth * 0.08,
+            clampedShuntStartX + shuntWidth * 0.52,
+            clampedShuntStartX + shuntWidth * 0.92
+        };
+    } else {
+        const qreal usableWidth = std::max<qreal>(30.0, busRightX - busLeftX);
+        branchX = {
+            busLeftX + usableWidth * 0.03,
+            busLeftX + usableWidth * 0.50,
+            busLeftX + usableWidth * 0.97
+        };
+    }
 
     painter.setPen(QPen(primaryInkColor(), 1.2));
     painter.drawLine(QPointF(rect.left(), topY), QPointF(rSeriesRect.left(), topY));
@@ -1057,6 +1070,32 @@ void CircuitOut::drawPort(QPainter& painter, const QRectF& rect, bool leftFacing
     const qreal tubeY = rect.center().y() - tubeHeight / 2.0;
     const qreal mouthWidth = std::max<qreal>(10.0, rect.height() * 0.90);
 
+    const auto drawRadiation = [&](const QRectF& mouthRect, bool radiatesLeft) {
+        const qreal centerY = mouthRect.center().y();
+        const qreal baseArcWidth = std::max<qreal>(5.0, rect.height() * 0.28);
+        const qreal baseArcHeight = std::max<qreal>(10.0, rect.height() * 0.62);
+
+        for (int i = 0; i < 3; ++i) {
+            const qreal arcWidth = baseArcWidth + i * 3.0;
+            const qreal arcHeight = baseArcHeight + i * 5.0;
+            const qreal offset = 3.0 + i * 2.0;
+
+            if (radiatesLeft) {
+                const QRectF arcRect(mouthRect.left() - offset - arcWidth,
+                                     centerY - arcHeight / 2.0,
+                                     arcWidth,
+                                     arcHeight);
+                painter.drawArc(arcRect, 125 * 16, 110 * 16);
+            } else {
+                const QRectF arcRect(mouthRect.right() + offset,
+                                     centerY - arcHeight / 2.0,
+                                     arcWidth,
+                                     arcHeight);
+                painter.drawArc(arcRect, -55 * 16, 110 * 16);
+            }
+        }
+    };
+
     if (leftFacing) {
         const QRectF tubeRect(rect.left() + mouthWidth * 0.55, tubeY,
                               rect.width() - mouthWidth * 0.55, tubeHeight);
@@ -1066,6 +1105,7 @@ void CircuitOut::drawPort(QPainter& painter, const QRectF& rect, bool leftFacing
         painter.drawEllipse(mouthRect);
         painter.drawLine(QPointF(tubeRect.right(), tubeRect.center().y()),
                          QPointF(tubeRect.right() + 3.5, tubeRect.center().y()));
+        drawRadiation(mouthRect, true);
     } else {
         const QRectF tubeRect(rect.left(), tubeY,
                               rect.width() - mouthWidth * 0.55, tubeHeight);
@@ -1075,6 +1115,7 @@ void CircuitOut::drawPort(QPainter& painter, const QRectF& rect, bool leftFacing
         painter.drawEllipse(mouthRect);
         painter.drawLine(QPointF(tubeRect.left() - 3.5, tubeRect.center().y()),
                          QPointF(tubeRect.left(), tubeRect.center().y()));
+        drawRadiation(mouthRect, false);
     }
 }
 
@@ -1132,11 +1173,33 @@ void CircuitOut::drawBoxParameterText(QPainter& painter, const QRectF& boxRect, 
     const QFontMetrics fm(textFont);
     const int lineHeight = fm.height();
     const qreal totalHeight = lineHeight * lines.size();
-    const QRectF textRect(boxRect.left() + 4,
+
+    QRectF textRect(boxRect.left() + 4,
+                    boxRect.center().y() - totalHeight / 2.0,
+                    boxRect.width() - 8,
+                    totalHeight + 2);
+    Qt::Alignment textAlignment = Qt::AlignCenter;
+
+    if (boxType == 1) {
+        // In the sealed-enclosure view keep the parameter block left of the
+        // equivalent circuit so the text does not collide with the shunt R symbol.
+        textRect = QRectF(boxRect.left() + 6,
                           boxRect.center().y() - totalHeight / 2.0,
-                          boxRect.width() - 8,
+                          boxRect.width() * 0.42,
                           totalHeight + 2);
-    painter.drawText(textRect, Qt::AlignCenter, lines.join(QStringLiteral("\n")));
+        textAlignment = Qt::AlignLeft | Qt::AlignVCenter;
+    } else if (boxType >= 3) {
+        // In the bandpass view keep the parameter block clearly inside the
+        // left chamber so it stays readable next to the partition-mounted
+        // loudspeaker symbol.
+        textRect = QRectF(boxRect.left() + 4,
+                          boxRect.center().y() - totalHeight / 2.0,
+                          boxRect.width() * 0.33,
+                          totalHeight + 2);
+        textAlignment = Qt::AlignLeft | Qt::AlignVCenter;
+    }
+
+    painter.drawText(textRect, textAlignment, lines.join(QStringLiteral("\n")));
     painter.setFont(oldFont);
 }
 
@@ -1232,17 +1295,22 @@ void CircuitOut::drawDriver(QPainter& painter, const QRectF& rect, int signalY, 
     painter.setPen(QPen(primaryInkColor(), 1.2));
     const QRectF portRect(outerRect.left() + 2, returnY - 19, 40, 18);
     drawPort(painter, portRect, true);
-    const QRectF eqRect(partitionX - 34, rect.top() + 8, 68, returnY - rect.top() - 16);
+
+    // Give the bandpass equivalent circuit more room in the right chamber and
+    // keep the shunt R/C/L branch to the right of the partition-mounted speaker.
+    const QRectF speakerRect(partitionX - 6, outerRect.center().y() - 18, 30, 36);
+    const qreal eqLeft = partitionX - 50;
+    const QRectF eqRect(eqLeft,
+                        rect.top() + 8,
+                        outerRect.right() - eqLeft - 8,
+                        returnY - rect.top() - 16);
     painter.drawLine(QPointF(outerRect.left(), signalY), QPointF(eqRect.left(), signalY));
-    drawEquivalentDriverCircuit(painter, eqRect, signalY, returnY);
-    // hint at the driver position in the partition wall
-    QPainterPath cone;
-    cone.moveTo(partitionX - 3, outerRect.center().y() - 12);
-    cone.lineTo(partitionX + 10, outerRect.center().y());
-    cone.lineTo(partitionX - 3, outerRect.center().y() + 12);
-    painter.drawPath(cone);
+    drawEquivalentDriverCircuit(painter, eqRect, signalY, returnY, speakerRect.right() + 6.0);
     painter.drawLine(QPointF(outerRect.left(), returnY), QPointF(outerRect.right() + 16, returnY));
-    drawSpeakerSymbol(painter, QRectF(outerRect.right() - 2, outerRect.center().y() - 18, 30, 36));
+
+    // In the bandpass view, show the driver directly at the partition instead
+    // of keeping a separate symbol at the far right.
+    drawSpeakerSymbol(painter, speakerRect);
 }
 
 void CircuitOut::drawGround(QPainter& painter, QPointF center) const

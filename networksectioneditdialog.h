@@ -15,7 +15,8 @@ class QTimer;
 
 class QDialogButtonBox;
 class QLabel;
-class QLineEdit;
+class QDoubleSpinBox;
+class QSlider;
 
 /**
  * Small Qt6 editor for one logical network section group.
@@ -58,21 +59,42 @@ private slots:
     void emitPreviewValues();
 
 private:
-    static QString displayNumber(double value);
-    bool readField(QLineEdit *field,
+    void schedulePreview(int intervalMilliseconds, bool restartActiveTimer);
+    void scheduleTextPreview();
+    void scheduleSliderPreview();
+    void handleVariationSliderChanged(QSlider *slider,
+                                      QDoubleSpinBox *field,
+                                      double baseValue,
+                                      int position);
+    void syncSlidersFromFields();
+    void syncSliderFromField(QSlider *slider,
+                             QDoubleSpinBox *field,
+                             double& baseValue);
+    void setVariationSliderEnabled(QSlider *slider, bool enabled);
+    static double valueFromSliderPosition(double baseValue, int position);
+    static int sliderPositionFromValue(double baseValue, double value);
+
+    bool readField(QDoubleSpinBox *field,
                    const QString& label,
                    double& value,
                    QString *errorMessage = nullptr) const;
     bool validateFields(QString *errorMessage = nullptr) const;
 
-    QLineEdit *m_resistanceEdit = nullptr;
-    QLineEdit *m_capacitanceEdit = nullptr;
-    QLineEdit *m_inductanceEdit = nullptr;
+    QDoubleSpinBox *m_resistanceEdit = nullptr;
+    QDoubleSpinBox *m_capacitanceEdit = nullptr;
+    QDoubleSpinBox *m_inductanceEdit = nullptr;
+    QSlider *m_resistanceSlider = nullptr;
+    QSlider *m_capacitanceSlider = nullptr;
+    QSlider *m_inductanceSlider = nullptr;
     QLabel *m_validationLabel = nullptr;
     QDialogButtonBox *m_buttonBox = nullptr;
     QTimer *m_previewTimer = nullptr;
     Values m_values;
     Values m_originalValues;
+    double m_resistanceSliderBase = 0.0;
+    double m_capacitanceSliderBase = 0.0;
+    double m_inductanceSliderBase = 0.0;
+    bool m_updatingVariationControls = false;
 };
 
 #endif // NETWORKSECTIONEDITDIALOG_H

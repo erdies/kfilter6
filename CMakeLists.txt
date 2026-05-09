@@ -9,6 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Qt6 REQUIRED COMPONENTS Core)
 
 qt_standard_project_setup()
+set(CMAKE_AUTORCC ON)
 
 option(KFILTER_ENABLE_WIZARD "Build the optional legacy wizard component" OFF)
 option(KFILTER_BUILD_DRIVER_SMOKETEST "Build a small compile/link test for the UI-independent driver core" ON)
@@ -60,6 +61,7 @@ if(KFILTER_BUILD_QT6_APP)
         circuitout.h
         kfilterview.cpp
         kfilterview.h
+        resources/kfilter6.qrc
     )
     target_link_libraries(kfilter_qt6
         PRIVATE

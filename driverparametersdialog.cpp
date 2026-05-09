@@ -19,6 +19,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QSettings>
 #include <QString>
@@ -191,8 +192,22 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     leftForm->addRow(QString(), qtsButton);
 
     auto *boxForm = new QFormLayout;
-    addRow(boxForm, tr("Vb"), page.vb);
-    addRow(boxForm, tr("Fb"), page.fb);
+
+    auto *hogeLayoutWidget = new QWidget(page.page);
+    auto *hogeLayout = new QGridLayout(hogeLayoutWidget);
+    hogeLayout->setContentsMargins(0, 0, 0, 0);
+    hogeLayout->addWidget(new QLabel(tr("Vb"), hogeLayoutWidget), 0, 0);
+    hogeLayout->addWidget(page.vb, 0, 1);
+    auto *hogeButton = new QPushButton(tr("Hoge"), hogeLayoutWidget);
+    hogeButton->setToolTip(tr("Calculate Vb and Fb from Fs, Qts, and Vas using the legacy Hoge formula."));
+    hogeLayout->addWidget(hogeButton, 0, 2, 2, 1);
+    hogeLayout->addWidget(new QLabel(tr("Fb"), hogeLayoutWidget), 1, 0);
+    hogeLayout->addWidget(page.fb, 1, 1);
+    hogeLayout->setColumnStretch(1, 1);
+    boxForm->addRow(QString(), hogeLayoutWidget);
+    connect(hogeButton, &QPushButton::clicked, this, [this, index]() {
+        calculateHogeForPage(m_pages.at(index));
+    });
 
     auto *tubeLayoutWidget = new QWidget(page.page);
     auto *tubeLayout = new QHBoxLayout(tubeLayoutWidget);
@@ -351,6 +366,42 @@ void DriverParametersDialog::updateTubeLengthForPage(DriverPage& page)
     } else {
         page.tubeLength->setText(tr("n. a."));
     }
+}
+
+void DriverParametersDialog::calculateHogeForPage(DriverPage& page)
+{
+    const double qts = page.qts->value();
+    const double vasLiter = page.vas->value();
+    const double fsHz = page.f0->value();
+
+    if (qts >= 0.8) {
+        QMessageBox::warning(this,
+                             tr("Hoge calculation"),
+                             tr("The legacy Hoge formula is intended for bass reflex alignments with Qts < 0.8."));
+        return;
+    }
+
+    if (qts <= 0.0 || vasLiter <= 0.0 || fsHz <= 0.0 ||
+        !std::isfinite(qts) || !std::isfinite(vasLiter) || !std::isfinite(fsHz)) {
+        QMessageBox::warning(this,
+                             tr("Hoge calculation"),
+                             tr("The Hoge calculation requires positive Fs, Qts, and Vas values."));
+        return;
+    }
+
+    const double vbLiter = 15.0 * vasLiter * std::pow(qts, 2.87);
+    const double fbHz = 0.42 * fsHz / std::pow(qts, 0.9);
+
+    if (!std::isfinite(vbLiter) || !std::isfinite(fbHz)) {
+        QMessageBox::warning(this,
+                             tr("Hoge calculation"),
+                             tr("The Hoge calculation did not produce finite Vb and Fb values."));
+        return;
+    }
+
+    page.vb->setValue(vbLiter);
+    page.fb->setValue(fbHz);
+    updateTubeLengthForPage(page);
 }
 
 void DriverParametersDialog::updateQtsFromQesQms()

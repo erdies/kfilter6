@@ -45,6 +45,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 
 
 namespace
@@ -325,6 +326,10 @@ void KFilterQt6App::setStatusBarVisible(bool visible)
 
 void KFilterQt6App::resetWindowLayout()
 {
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
     if (m_mainSplitter == nullptr) {
         return;
     }
@@ -336,6 +341,10 @@ void KFilterQt6App::resetWindowLayout()
 
 void KFilterQt6App::chooseCircuitPreviewBackgroundColor()
 {
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
     if (m_circuitPreview == nullptr) {
         return;
     }
@@ -363,6 +372,10 @@ void KFilterQt6App::chooseCircuitPreviewBackgroundColor()
 
 void KFilterQt6App::resetCircuitPreviewBackgroundColor()
 {
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
     if (m_circuitPreview == nullptr) {
         return;
     }
@@ -377,6 +390,10 @@ void KFilterQt6App::resetCircuitPreviewBackgroundColor()
 
 void KFilterQt6App::showNetworkSectionHoverFromPreview(int driverIndex, int sectionIndex, int groupValue)
 {
+    if (networkSectionEditInProgress()) {
+        return;
+    }
+
     if (driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount ||
         sectionIndex < 0 || sectionIndex >= 8) {
         return;
@@ -398,6 +415,10 @@ void KFilterQt6App::showNetworkSectionHoverFromPreview(int driverIndex, int sect
 
 void KFilterQt6App::showDriverHoverFromPreview(int driverIndex)
 {
+    if (networkSectionEditInProgress()) {
+        return;
+    }
+
     if (driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount) {
         return;
     }
@@ -418,6 +439,10 @@ void KFilterQt6App::clearNetworkSectionHoverFromPreview()
 
 void KFilterQt6App::showNetworkSectionContextMenuFromPreview(int driverIndex, int sectionIndex, int groupValue, const QPoint& globalPosition)
 {
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
     if (driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount ||
         sectionIndex < 0 || sectionIndex >= 8) {
         return;
@@ -454,6 +479,10 @@ void KFilterQt6App::showNetworkSectionContextMenuFromPreview(int driverIndex, in
 
 void KFilterQt6App::clearNetworkSectionFromPreview(int driverIndex, int sectionIndex, int groupValue)
 {
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
     if (driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount ||
         sectionIndex < 0 || sectionIndex >= 8) {
         return;
@@ -521,6 +550,10 @@ void KFilterQt6App::clearNetworkSectionFromPreview(int driverIndex, int sectionI
 
 void KFilterQt6App::editNetworkSectionFromPreview(int driverIndex, int sectionIndex, int groupValue)
 {
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
     if (driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount ||
         sectionIndex < 0 || sectionIndex >= 8) {
         return;
@@ -593,11 +626,12 @@ void KFilterQt6App::editNetworkSectionFromPreview(int driverIndex, int sectionIn
         internalValues.inductance = internalFromDisplay(firstRow + 2, values.inductanceMilliHenry);
         return internalValues;
     };
-    auto applyInternalValues = [&drv, resistanceUnit, capacitanceUnit, inductanceUnit](const SectionInternalValues& values) {
-        drv.setUnit(resistanceUnit, values.resistance);
-        drv.setUnit(capacitanceUnit, values.capacitance);
-        drv.setUnit(inductanceUnit, values.inductance);
-        drv.Berechneparameter();
+    auto applyInternalValues = [this, driverIndex, resistanceUnit, capacitanceUnit, inductanceUnit](const SectionInternalValues& values) {
+        driver& targetDriver = m_doc->m_driverDriver[driverIndex];
+        targetDriver.setUnit(resistanceUnit, values.resistance);
+        targetDriver.setUnit(capacitanceUnit, values.capacitance);
+        targetDriver.setUnit(inductanceUnit, values.inductance);
+        targetDriver.Berechneparameter();
     };
     auto sameInternalValues = [](const SectionInternalValues& lhs, const SectionInternalValues& rhs) {
         return nearlyEqual(lhs.resistance, rhs.resistance) &&
@@ -605,58 +639,98 @@ void KFilterQt6App::editNetworkSectionFromPreview(int driverIndex, int sectionIn
                nearlyEqual(lhs.inductance, rhs.inductance);
     };
 
-    const SectionInternalValues originalInternalValues = readInternalValues();
-    SectionInternalValues previewInternalValues = originalInternalValues;
-    const NetworkSectionEditDialog::Values initialValues = displayValuesFromInternal(originalInternalValues);
+    struct SectionEditState
+    {
+        SectionInternalValues originalInternalValues;
+        SectionInternalValues previewInternalValues;
+    };
 
-    NetworkSectionEditDialog dialog(driverIndex, sectionIndex, groupName, initialValues, this);
-    connect(&dialog, &NetworkSectionEditDialog::previewValuesChanged, this,
-            [this, &previewInternalValues, internalValuesFromDisplay, applyInternalValues, sameInternalValues](const NetworkSectionEditDialog::Values& previewValues) {
+    auto state = std::make_shared<SectionEditState>();
+    state->originalInternalValues = readInternalValues();
+    state->previewInternalValues = state->originalInternalValues;
+    const NetworkSectionEditDialog::Values initialValues = displayValuesFromInternal(state->originalInternalValues);
+
+    auto *dialog = new NetworkSectionEditDialog(driverIndex, sectionIndex, groupName, initialValues, this);
+    dialog->setModal(false);
+    dialog->setWindowModality(Qt::NonModal);
+    m_activeNetworkSectionEditDialog = dialog;
+    updateActionState();
+
+    connect(dialog, &NetworkSectionEditDialog::previewValuesChanged, this,
+            [this, state, internalValuesFromDisplay, applyInternalValues, sameInternalValues](const NetworkSectionEditDialog::Values& previewValues) {
         const SectionInternalValues nextPreviewValues = internalValuesFromDisplay(previewValues);
-        if (sameInternalValues(previewInternalValues, nextPreviewValues)) {
+        if (sameInternalValues(state->previewInternalValues, nextPreviewValues)) {
             return;
         }
 
         applyInternalValues(nextPreviewValues);
-        previewInternalValues = nextPreviewValues;
+        state->previewInternalValues = nextPreviewValues;
         m_doc->viewrefresh();
     });
 
-    if (dialog.exec() != QDialog::Accepted) {
-        if (!sameInternalValues(previewInternalValues, originalInternalValues)) {
-            applyInternalValues(originalInternalValues);
-            m_doc->viewrefresh();
+    connect(dialog, &QDialog::finished, this,
+            [this,
+             dialog,
+             state,
+             internalValuesFromDisplay,
+             applyInternalValues,
+             sameInternalValues,
+             driverIndex,
+             sectionIndex,
+             groupName](int result) {
+        auto clearActiveDialog = [this, dialog]() {
+            if (m_activeNetworkSectionEditDialog == dialog) {
+                m_activeNetworkSectionEditDialog = nullptr;
+                updateActionState();
+            }
+        };
+
+        if (result != QDialog::Accepted) {
+            if (!sameInternalValues(state->previewInternalValues, state->originalInternalValues)) {
+                applyInternalValues(state->originalInternalValues);
+                m_doc->viewrefresh();
+            }
+            statusBar()->showMessage(tr("Network section edit cancelled."), 3000);
+            clearActiveDialog();
+            dialog->deleteLater();
+            return;
         }
-        statusBar()->showMessage(tr("Network section edit cancelled."), 3000);
-        return;
-    }
 
-    const SectionInternalValues newInternalValues = internalValuesFromDisplay(dialog.values());
-    const bool previewAlreadyMatchesFinal = sameInternalValues(previewInternalValues, newInternalValues);
-    if (!previewAlreadyMatchesFinal) {
-        applyInternalValues(newInternalValues);
-    }
-
-    if (sameInternalValues(originalInternalValues, newInternalValues)) {
+        const SectionInternalValues newInternalValues = internalValuesFromDisplay(dialog->values());
+        const bool previewAlreadyMatchesFinal = sameInternalValues(state->previewInternalValues, newInternalValues);
         if (!previewAlreadyMatchesFinal) {
-            m_doc->viewrefresh();
+            applyInternalValues(newInternalValues);
         }
-        statusBar()->showMessage(tr("Driver %1, Section %2, %3 R/C/L unchanged.")
+
+        if (sameInternalValues(state->originalInternalValues, newInternalValues)) {
+            if (!previewAlreadyMatchesFinal) {
+                m_doc->viewrefresh();
+            }
+            statusBar()->showMessage(tr("Driver %1, Section %2, %3 R/C/L unchanged.")
+                                         .arg(driverIndex + 1)
+                                         .arg(sectionIndex + 1)
+                                         .arg(groupName),
+                                     3000);
+            clearActiveDialog();
+            dialog->deleteLater();
+            return;
+        }
+
+        m_lastNetworkParametersDriverIndex = driverIndex;
+        m_doc->setModified(true);
+        m_doc->viewrefresh();
+        statusBar()->showMessage(tr("Driver %1, Section %2, %3 R/C/L updated.")
                                      .arg(driverIndex + 1)
                                      .arg(sectionIndex + 1)
                                      .arg(groupName),
                                  3000);
-        return;
-    }
+        clearActiveDialog();
+        dialog->deleteLater();
+    });
 
-    m_lastNetworkParametersDriverIndex = driverIndex;
-    m_doc->setModified(true);
-    m_doc->viewrefresh();
-    statusBar()->showMessage(tr("Driver %1, Section %2, %3 R/C/L updated.")
-                                 .arg(driverIndex + 1)
-                                 .arg(sectionIndex + 1)
-                                 .arg(groupName),
-                             3000);
+    dialog->show();
+    dialog->raise();
+    dialog->activateWindow();
 }
 
 void KFilterQt6App::loadSettings()
@@ -738,6 +812,11 @@ void KFilterQt6App::saveSettings() const
 
 void KFilterQt6App::closeEvent(QCloseEvent *event)
 {
+    if (raiseActiveNetworkSectionEditor()) {
+        event->ignore();
+        return;
+    }
+
     if (maybeSave()) {
         saveSettings();
         event->accept();
@@ -748,6 +827,10 @@ void KFilterQt6App::closeEvent(QCloseEvent *event)
 
 void KFilterQt6App::newFile()
 {
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
     if (!maybeSave()) {
         return;
     }
@@ -759,6 +842,10 @@ void KFilterQt6App::newFile()
 
 void KFilterQt6App::openFile()
 {
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
     if (!maybeSave()) {
         return;
     }
@@ -778,6 +865,10 @@ void KFilterQt6App::openFile()
 
 bool KFilterQt6App::openDocumentFile(const QUrl &url)
 {
+    if (raiseActiveNetworkSectionEditor()) {
+        return false;
+    }
+
     if (!url.isLocalFile()) {
         QMessageBox::warning(this, tr("Open KFilter6 Project"),
                              tr("Only local project files are currently supported."));
@@ -798,6 +889,10 @@ bool KFilterQt6App::openDocumentFile(const QUrl &url)
 
 bool KFilterQt6App::saveFile()
 {
+    if (raiseActiveNetworkSectionEditor()) {
+        return false;
+    }
+
     const QString path = currentLocalPath();
     if (path.isEmpty()) {
         return saveFileAs();
@@ -808,6 +903,10 @@ bool KFilterQt6App::saveFile()
 
 bool KFilterQt6App::saveFileAs()
 {
+    if (raiseActiveNetworkSectionEditor()) {
+        return false;
+    }
+
     QString proposedPath = currentLocalPath();
     if (proposedPath.isEmpty()) {
         proposedPath = QDir(dialogStartDirectory()).filePath(QStringLiteral("Untitled.kfp"));
@@ -943,6 +1042,10 @@ void KFilterQt6App::refreshCircuitPreview()
 
 void KFilterQt6App::setCircuitPreviewDriverIndex(int driverIndex, bool showStatusMessage)
 {
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
     if (driverIndex < 0 || driverIndex > KFilterProjectIo::DriverCount ||
         (driverIndex < KFilterProjectIo::DriverCount && !circuitPreviewDriverSlotAvailable(driverIndex))) {
         driverIndex = KFilterProjectIo::DriverCount;
@@ -965,8 +1068,10 @@ void KFilterQt6App::setCircuitPreviewDriverIndex(int driverIndex, bool showStatu
 
 void KFilterQt6App::updateCircuitPreviewDriverActions()
 {
+    const bool locked = networkSectionEditInProgress();
+
     if (m_circuitPreviewAllDriversAction != nullptr) {
-        m_circuitPreviewAllDriversAction->setEnabled(true);
+        m_circuitPreviewAllDriversAction->setEnabled(!locked);
         m_circuitPreviewAllDriversAction->setChecked(m_circuitPreviewDriverIndex == KFilterProjectIo::DriverCount);
     }
 
@@ -978,7 +1083,7 @@ void KFilterQt6App::updateCircuitPreviewDriverActions()
 
         const bool available = circuitPreviewDriverSlotAvailable(index);
         driverAction->setText(circuitPreviewDriverMenuText(index));
-        driverAction->setEnabled(available);
+        driverAction->setEnabled(!locked && available);
         driverAction->setChecked(available && m_circuitPreviewDriverIndex == index);
     }
 }
@@ -1018,10 +1123,68 @@ void KFilterQt6App::updateWindowTitle()
 
 void KFilterQt6App::updateActionState()
 {
-    // Keep Save available: for untitled documents it behaves like Save As.
-    m_saveAction->setEnabled(true);
-    m_saveAsAction->setEnabled(true);
+    const bool locked = networkSectionEditInProgress();
+
+    if (m_newAction != nullptr) {
+        m_newAction->setEnabled(!locked);
+    }
+    if (m_openAction != nullptr) {
+        m_openAction->setEnabled(!locked);
+    }
+    // Keep Save available normally: for untitled documents it behaves like Save As.
+    if (m_saveAction != nullptr) {
+        m_saveAction->setEnabled(!locked);
+    }
+    if (m_saveAsAction != nullptr) {
+        m_saveAsAction->setEnabled(!locked);
+    }
+    if (m_driverParametersAction != nullptr) {
+        m_driverParametersAction->setEnabled(!locked);
+    }
+    if (m_networkParametersAction != nullptr) {
+        m_networkParametersAction->setEnabled(!locked);
+    }
+    if (m_quitAction != nullptr) {
+        m_quitAction->setEnabled(!locked);
+    }
+    if (m_showFileToolBarAction != nullptr) {
+        m_showFileToolBarAction->setEnabled(!locked);
+    }
+    if (m_showEditToolBarAction != nullptr) {
+        m_showEditToolBarAction->setEnabled(!locked);
+    }
+    if (m_showStatusBarAction != nullptr) {
+        m_showStatusBarAction->setEnabled(!locked);
+    }
+    if (m_resetLayoutAction != nullptr) {
+        m_resetLayoutAction->setEnabled(!locked);
+    }
+    if (m_circuitPreviewBackgroundColorAction != nullptr) {
+        m_circuitPreviewBackgroundColorAction->setEnabled(!locked);
+    }
+    if (m_resetCircuitPreviewBackgroundColorAction != nullptr) {
+        m_resetCircuitPreviewBackgroundColorAction->setEnabled(!locked);
+    }
+
     updateCircuitPreviewDriverActions();
+}
+
+bool KFilterQt6App::networkSectionEditInProgress() const
+{
+    return m_activeNetworkSectionEditDialog != nullptr;
+}
+
+bool KFilterQt6App::raiseActiveNetworkSectionEditor()
+{
+    if (m_activeNetworkSectionEditDialog == nullptr) {
+        return false;
+    }
+
+    m_activeNetworkSectionEditDialog->show();
+    m_activeNetworkSectionEditDialog->raise();
+    m_activeNetworkSectionEditDialog->activateWindow();
+    statusBar()->showMessage(tr("Finish or cancel the open network section editor first."), 3000);
+    return true;
 }
 
 void KFilterQt6App::showAboutDialog()
@@ -1038,11 +1201,19 @@ void KFilterQt6App::showAboutDialog()
 
 void KFilterQt6App::editDriverParameters()
 {
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
     openDriverParametersDialog(m_lastDriverParametersDriverIndex);
 }
 
 void KFilterQt6App::editDriverParametersFromPreview(int driverIndex)
 {
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
     if (driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount) {
         return;
     }
@@ -1052,6 +1223,10 @@ void KFilterQt6App::editDriverParametersFromPreview(int driverIndex)
 
 void KFilterQt6App::openDriverParametersDialog(int initialDriverIndex)
 {
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
     const int safeInitialDriverIndex =
         std::clamp(initialDriverIndex, 0, KFilterProjectIo::DriverCount - 1);
 
@@ -1068,6 +1243,10 @@ void KFilterQt6App::openDriverParametersDialog(int initialDriverIndex)
 
 void KFilterQt6App::editNetworkParameters()
 {
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
     NetworkParametersDialog dialog(m_doc->m_driverDriver, this, m_lastNetworkParametersDriverIndex);
     connect(&dialog, &NetworkParametersDialog::parametersApplied, this, [this]() {
         m_doc->setModified(true);
