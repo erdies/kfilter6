@@ -38,6 +38,8 @@ public:
                                     QWidget *parent = nullptr,
                                     int initialDriverIndex = 0);
 
+    int currentDriverIndex() const;
+
 signals:
     void parametersApplied();
 

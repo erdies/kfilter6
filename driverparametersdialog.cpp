@@ -121,6 +121,11 @@ DriverParametersDialog::DriverParametersDialog(driver (&drivers)[KFilterProjectI
     loadFromDrivers();
 }
 
+int DriverParametersDialog::currentDriverIndex() const
+{
+    return m_tabs ? m_tabs->currentIndex() : 0;
+}
+
 QWidget *DriverParametersDialog::createDriverPage(int index)
 {
     DriverPage& page = m_pages.at(index);

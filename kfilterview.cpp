@@ -35,7 +35,7 @@ KFilterView::KFilterView(KFilterDoc *document, QWidget *parent)
       m_document(document),
       cgrid(QColor(70, 70, 70)),
       cpressure(Qt::red),
-      cimpedance(Qt::blue),
+      cimpedance(QColor(205, 180, 0)),
       cpressureS(QColor(255, 210, 0)),
       cimpedanceS(QColor(0, 220, 255)),
       cscalarpressureS(Qt::magenta)
@@ -129,9 +129,9 @@ QColor KFilterView::impedanceCurveColor(int driverIndex) const
 {
     switch (driverIndex) {
     case 0: return cimpedance;
-    case 1: return QColor(0, 170, 255);
-    case 2: return QColor(130, 190, 255);
-    case 3: return QColor(180, 220, 255);
+    case 1: return QColor(185, 165, 0);
+    case 2: return QColor(220, 195, 40);
+    case 3: return QColor(170, 150, 0);
     default: return cimpedance;
     }
 }

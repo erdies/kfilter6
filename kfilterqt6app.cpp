@@ -222,7 +222,7 @@ void KFilterQt6App::createActions()
     connect(m_resetCircuitPreviewBackgroundColorAction, &QAction::triggered,
             this, &KFilterQt6App::resetCircuitPreviewBackgroundColor);
 
-    m_aboutAction = new QAction(tr("&About KFilter"), this);
+    m_aboutAction = new QAction(tr("&About KFilter6"), this);
     connect(m_aboutAction, &QAction::triggered, this, &KFilterQt6App::showAboutDialog);
 
     updateCircuitPreviewDriverActions();
@@ -560,33 +560,87 @@ void KFilterQt6App::editNetworkSectionFromPreview(int driverIndex, int sectionIn
         return value;
     };
 
-    driver& drv = m_doc->m_driverDriver[driverIndex];
-    NetworkSectionEditDialog::Values values;
-    values.resistanceOhm = displayFromInternal(firstRow, drv.getUnit(unitIndex(firstRow, sectionIndex)));
-    values.capacitanceMicroFarad = displayFromInternal(firstRow + 1, drv.getUnit(unitIndex(firstRow + 1, sectionIndex)));
-    values.inductanceMilliHenry = displayFromInternal(firstRow + 2, drv.getUnit(unitIndex(firstRow + 2, sectionIndex)));
-
-    NetworkSectionEditDialog dialog(driverIndex, sectionIndex, groupName, values, this);
-    if (dialog.exec() != QDialog::Accepted) {
-        statusBar()->showMessage(tr("Network section edit cancelled."), 3000);
-        return;
-    }
-
-    const NetworkSectionEditDialog::Values newValues = dialog.values();
     const int resistanceUnit = unitIndex(firstRow, sectionIndex);
     const int capacitanceUnit = unitIndex(firstRow + 1, sectionIndex);
     const int inductanceUnit = unitIndex(firstRow + 2, sectionIndex);
 
-    const double oldResistance = drv.getUnit(resistanceUnit);
-    const double oldCapacitance = drv.getUnit(capacitanceUnit);
-    const double oldInductance = drv.getUnit(inductanceUnit);
-    const double newResistance = internalFromDisplay(firstRow, newValues.resistanceOhm);
-    const double newCapacitance = internalFromDisplay(firstRow + 1, newValues.capacitanceMicroFarad);
-    const double newInductance = internalFromDisplay(firstRow + 2, newValues.inductanceMilliHenry);
+    struct SectionInternalValues
+    {
+        double resistance = 0.0;
+        double capacitance = 0.0;
+        double inductance = 0.0;
+    };
 
-    if (nearlyEqual(oldResistance, newResistance) &&
-        nearlyEqual(oldCapacitance, newCapacitance) &&
-        nearlyEqual(oldInductance, newInductance)) {
+    driver& drv = m_doc->m_driverDriver[driverIndex];
+    auto readInternalValues = [&drv, resistanceUnit, capacitanceUnit, inductanceUnit]() {
+        SectionInternalValues values;
+        values.resistance = drv.getUnit(resistanceUnit);
+        values.capacitance = drv.getUnit(capacitanceUnit);
+        values.inductance = drv.getUnit(inductanceUnit);
+        return values;
+    };
+    auto displayValuesFromInternal = [displayFromInternal, firstRow](const SectionInternalValues& values) {
+        NetworkSectionEditDialog::Values displayValues;
+        displayValues.resistanceOhm = displayFromInternal(firstRow, values.resistance);
+        displayValues.capacitanceMicroFarad = displayFromInternal(firstRow + 1, values.capacitance);
+        displayValues.inductanceMilliHenry = displayFromInternal(firstRow + 2, values.inductance);
+        return displayValues;
+    };
+    auto internalValuesFromDisplay = [internalFromDisplay, firstRow](const NetworkSectionEditDialog::Values& values) {
+        SectionInternalValues internalValues;
+        internalValues.resistance = internalFromDisplay(firstRow, values.resistanceOhm);
+        internalValues.capacitance = internalFromDisplay(firstRow + 1, values.capacitanceMicroFarad);
+        internalValues.inductance = internalFromDisplay(firstRow + 2, values.inductanceMilliHenry);
+        return internalValues;
+    };
+    auto applyInternalValues = [&drv, resistanceUnit, capacitanceUnit, inductanceUnit](const SectionInternalValues& values) {
+        drv.setUnit(resistanceUnit, values.resistance);
+        drv.setUnit(capacitanceUnit, values.capacitance);
+        drv.setUnit(inductanceUnit, values.inductance);
+        drv.Berechneparameter();
+    };
+    auto sameInternalValues = [](const SectionInternalValues& lhs, const SectionInternalValues& rhs) {
+        return nearlyEqual(lhs.resistance, rhs.resistance) &&
+               nearlyEqual(lhs.capacitance, rhs.capacitance) &&
+               nearlyEqual(lhs.inductance, rhs.inductance);
+    };
+
+    const SectionInternalValues originalInternalValues = readInternalValues();
+    SectionInternalValues previewInternalValues = originalInternalValues;
+    const NetworkSectionEditDialog::Values initialValues = displayValuesFromInternal(originalInternalValues);
+
+    NetworkSectionEditDialog dialog(driverIndex, sectionIndex, groupName, initialValues, this);
+    connect(&dialog, &NetworkSectionEditDialog::previewValuesChanged, this,
+            [this, &previewInternalValues, internalValuesFromDisplay, applyInternalValues, sameInternalValues](const NetworkSectionEditDialog::Values& previewValues) {
+        const SectionInternalValues nextPreviewValues = internalValuesFromDisplay(previewValues);
+        if (sameInternalValues(previewInternalValues, nextPreviewValues)) {
+            return;
+        }
+
+        applyInternalValues(nextPreviewValues);
+        previewInternalValues = nextPreviewValues;
+        m_doc->viewrefresh();
+    });
+
+    if (dialog.exec() != QDialog::Accepted) {
+        if (!sameInternalValues(previewInternalValues, originalInternalValues)) {
+            applyInternalValues(originalInternalValues);
+            m_doc->viewrefresh();
+        }
+        statusBar()->showMessage(tr("Network section edit cancelled."), 3000);
+        return;
+    }
+
+    const SectionInternalValues newInternalValues = internalValuesFromDisplay(dialog.values());
+    const bool previewAlreadyMatchesFinal = sameInternalValues(previewInternalValues, newInternalValues);
+    if (!previewAlreadyMatchesFinal) {
+        applyInternalValues(newInternalValues);
+    }
+
+    if (sameInternalValues(originalInternalValues, newInternalValues)) {
+        if (!previewAlreadyMatchesFinal) {
+            m_doc->viewrefresh();
+        }
         statusBar()->showMessage(tr("Driver %1, Section %2, %3 R/C/L unchanged.")
                                      .arg(driverIndex + 1)
                                      .arg(sectionIndex + 1)
@@ -594,11 +648,6 @@ void KFilterQt6App::editNetworkSectionFromPreview(int driverIndex, int sectionIn
                                  3000);
         return;
     }
-
-    drv.setUnit(resistanceUnit, newResistance);
-    drv.setUnit(capacitanceUnit, newCapacitance);
-    drv.setUnit(inductanceUnit, newInductance);
-    drv.Berechneparameter();
 
     m_lastNetworkParametersDriverIndex = driverIndex;
     m_doc->setModified(true);
@@ -716,9 +765,9 @@ void KFilterQt6App::openFile()
 
     const QString filePath = QFileDialog::getOpenFileName(
         this,
-        tr("Open KFilter Project"),
+        tr("Open KFilter6 Project"),
         dialogStartDirectory(),
-        tr("KFilter project files (*.kfp);;All files (*)"));
+        tr("KFilter6 project files (*.kfp);;All files (*)"));
 
     if (filePath.isEmpty()) {
         return;
@@ -730,13 +779,13 @@ void KFilterQt6App::openFile()
 bool KFilterQt6App::openDocumentFile(const QUrl &url)
 {
     if (!url.isLocalFile()) {
-        QMessageBox::warning(this, tr("Open KFilter Project"),
+        QMessageBox::warning(this, tr("Open KFilter6 Project"),
                              tr("Only local project files are currently supported."));
         return false;
     }
 
     if (!m_doc->openDocument(url)) {
-        QMessageBox::warning(this, tr("Open KFilter Project"),
+        QMessageBox::warning(this, tr("Open KFilter6 Project"),
                              tr("The project file could not be opened:\n%1").arg(url.toLocalFile()));
         return false;
     }
@@ -766,9 +815,9 @@ bool KFilterQt6App::saveFileAs()
 
     QString filePath = QFileDialog::getSaveFileName(
         this,
-        tr("Save KFilter Project"),
+        tr("Save KFilter6 Project"),
         proposedPath,
-        tr("KFilter project files (*.kfp);;All files (*)"));
+        tr("KFilter6 project files (*.kfp);;All files (*)"));
 
     if (filePath.isEmpty()) {
         return false;
@@ -781,7 +830,7 @@ bool KFilterQt6App::saveFileAs()
 bool KFilterQt6App::saveToUrl(const QUrl &url)
 {
     if (!m_doc->saveDocument(url)) {
-        QMessageBox::warning(this, tr("Save KFilter Project"),
+        QMessageBox::warning(this, tr("Save KFilter6 Project"),
                              tr("The project file could not be saved:\n%1").arg(url.toLocalFile()));
         return false;
     }
@@ -800,7 +849,7 @@ bool KFilterQt6App::maybeSave()
 
     const QMessageBox::StandardButton ret = QMessageBox::question(
         this,
-        tr("KFilter"),
+        tr("KFilter6"),
         tr("The document '%1' has unsaved changes.\nDo you want to save them?").arg(currentDisplayName()),
         QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
         QMessageBox::Save);
@@ -964,7 +1013,7 @@ void KFilterQt6App::updateWindowTitle()
     const QString path = currentLocalPath();
     setWindowFilePath(path.isEmpty() ? currentDisplayName() : path);
     setWindowModified(m_doc->isModified());
-    setWindowTitle(QStringLiteral("%1[*] - KFilter").arg(currentDisplayName()));
+    setWindowTitle(QStringLiteral("%1[*] - KFilter6").arg(currentDisplayName()));
 }
 
 void KFilterQt6App::updateActionState()
@@ -979,17 +1028,17 @@ void KFilterQt6App::showAboutDialog()
 {
     QMessageBox::about(
         this,
-        tr("About KFilter"),
-        tr("<b>KFilter</b><br>"
-           "Qt6 porting build<br><br>"
-           "Core calculation, project file I/O, driver parameters, "
-           "network parameters, plot view and schematic preview are currently "
-           "available."));
+        tr("About KFilter6"),
+        tr("<b>KFilter6</b><br>"
+           "KFilter6 is a Qt6-based loudspeaker design and crossover modelling tool.<br><br>"
+           "It visualizes driver response, impedance, enclosure behaviour, "
+           "crossover networks, vector SPL summation, energetic SPL summation, "
+           "and total impedance while preserving the legacy KFilter project model."));
 }
 
 void KFilterQt6App::editDriverParameters()
 {
-    openDriverParametersDialog(0);
+    openDriverParametersDialog(m_lastDriverParametersDriverIndex);
 }
 
 void KFilterQt6App::editDriverParametersFromPreview(int driverIndex)
@@ -1014,6 +1063,7 @@ void KFilterQt6App::openDriverParametersDialog(int initialDriverIndex)
     });
 
     dialog.exec();
+    m_lastDriverParametersDriverIndex = dialog.currentDriverIndex();
 }
 
 void KFilterQt6App::editNetworkParameters()

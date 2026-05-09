@@ -11,6 +11,8 @@
 #include <QDialog>
 #include <QString>
 
+class QTimer;
+
 class QDialogButtonBox;
 class QLabel;
 class QLineEdit;
@@ -40,12 +42,20 @@ public:
                                       QWidget *parent = nullptr);
 
     Values values() const;
+    Values originalValues() const;
+    bool currentValues(Values *values, QString *errorMessage = nullptr) const;
+
+signals:
+    void previewValuesChanged(const Values& values);
 
 public slots:
     void accept() override;
+    void reject() override;
 
 private slots:
+    void handleInputChanged();
     void validateInput();
+    void emitPreviewValues();
 
 private:
     static QString displayNumber(double value);
@@ -60,7 +70,9 @@ private:
     QLineEdit *m_inductanceEdit = nullptr;
     QLabel *m_validationLabel = nullptr;
     QDialogButtonBox *m_buttonBox = nullptr;
+    QTimer *m_previewTimer = nullptr;
     Values m_values;
+    Values m_originalValues;
 };
 
 #endif // NETWORKSECTIONEDITDIALOG_H

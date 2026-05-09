@@ -94,6 +94,7 @@ private:
     KFilterView *m_plotView = nullptr;
     CircuitOut *m_circuitPreview = nullptr;
     int m_circuitPreviewDriverIndex = CircuitPreviewDriverActionCount;
+    int m_lastDriverParametersDriverIndex = 0;
     int m_lastNetworkParametersDriverIndex = 0;
     QSplitter *m_mainSplitter = nullptr;
     QToolBar *m_fileToolBar = nullptr;

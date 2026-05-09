@@ -17,15 +17,15 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     QApplication::setOrganizationName(QStringLiteral("KFilter"));
     QApplication::setOrganizationDomain(QStringLiteral("kfilter.local"));
-    QApplication::setApplicationName(QStringLiteral("KFilter"));
-    QApplication::setApplicationDisplayName(QStringLiteral("KFilter"));
+    QApplication::setApplicationName(QStringLiteral("KFilter6"));
+    QApplication::setApplicationDisplayName(QStringLiteral("KFilter6"));
     QApplication::setApplicationVersion(QStringLiteral("0.1.0-qt6-port"));
 
     QCommandLineParser parser;
-    parser.setApplicationDescription(QStringLiteral("KFilter Qt6 port"));
+    parser.setApplicationDescription(QStringLiteral("KFilter6 loudspeaker design and crossover modelling tool"));
     parser.addHelpOption();
     parser.addVersionOption();
-    parser.addPositionalArgument(QStringLiteral("file"), QStringLiteral("KFilter .kfp project file to open."));
+    parser.addPositionalArgument(QStringLiteral("file"), QStringLiteral("KFilter6 .kfp project file to open."));
     parser.process(app);
 
     KFilterQt6App window;

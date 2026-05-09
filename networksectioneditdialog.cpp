@@ -11,20 +11,120 @@
 
 #include <QDialogButtonBox>
 #include <QGridLayout>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QObject>
+#include <QTimer>
 #include <QVBoxLayout>
+#include <QWheelEvent>
+
+#include <cmath>
 
 
 namespace
 {
+class AdjustableNetworkValueEdit : public QLineEdit
+{
+public:
+    explicit AdjustableNetworkValueEdit(const QString& text, QWidget *parent = nullptr)
+        : QLineEdit(text, parent)
+    {
+    }
+
+protected:
+    void wheelEvent(QWheelEvent *event) override
+    {
+        const QPoint angleDelta = event == nullptr ? QPoint() : event->angleDelta();
+        if (angleDelta.y() == 0) {
+            QLineEdit::wheelEvent(event);
+            return;
+        }
+
+        int steps = angleDelta.y() / 120;
+        if (steps == 0) {
+            steps = angleDelta.y() > 0 ? 1 : -1;
+        }
+
+        if (adjustBySteps(steps, event->modifiers())) {
+            event->accept();
+            return;
+        }
+
+        QLineEdit::wheelEvent(event);
+    }
+
+    void keyPressEvent(QKeyEvent *event) override
+    {
+        if (event != nullptr && (event->key() == Qt::Key_Up || event->key() == Qt::Key_Down)) {
+            const int steps = event->key() == Qt::Key_Up ? 1 : -1;
+            if (adjustBySteps(steps, event->modifiers())) {
+                event->accept();
+                return;
+            }
+        }
+
+        QLineEdit::keyPressEvent(event);
+    }
+
+private:
+    bool adjustBySteps(int steps, Qt::KeyboardModifiers modifiers)
+    {
+        double value = 0.0;
+        if (!NetworkValueUtils::parseNonNegativeDisplayValue(text(), value)) {
+            return false;
+        }
+
+        const double stepRatio = relativeStepRatio(modifiers);
+        double adjusted = value;
+        if (value == 0.0) {
+            adjusted = steps > 0
+                ? zeroStartStep(modifiers) * std::pow(1.0 + stepRatio, static_cast<double>(steps - 1))
+                : 0.0;
+        } else {
+            adjusted = value * std::pow(1.0 + stepRatio, static_cast<double>(steps));
+        }
+
+        if (!std::isfinite(adjusted) || adjusted < 0.0) {
+            return false;
+        }
+
+        setText(NetworkValueUtils::displayNumber(adjusted, 10));
+        selectAll();
+        return true;
+    }
+
+    static double relativeStepRatio(Qt::KeyboardModifiers modifiers)
+    {
+        if (modifiers.testFlag(Qt::ShiftModifier)) {
+            return 0.10;
+        }
+        if (modifiers.testFlag(Qt::ControlModifier)) {
+            return 0.002;
+        }
+        return 0.02;
+    }
+
+    static double zeroStartStep(Qt::KeyboardModifiers modifiers)
+    {
+        if (modifiers.testFlag(Qt::ShiftModifier)) {
+            return 0.10;
+        }
+        if (modifiers.testFlag(Qt::ControlModifier)) {
+            return 0.002;
+        }
+        return 0.01;
+    }
+};
+
 void configureNumericEdit(QLineEdit *edit)
 {
     edit->setAlignment(Qt::AlignRight);
     edit->setClearButtonEnabled(true);
     edit->setPlaceholderText(QStringLiteral("0"));
+    edit->setToolTip(QObject::tr("Use mouse wheel or Up/Down to adjust. Shift = coarse, Ctrl = fine."));
 }
 }
 
@@ -34,7 +134,8 @@ NetworkSectionEditDialog::NetworkSectionEditDialog(int driverIndex,
                                                    const Values& initialValues,
                                                    QWidget *parent)
     : QDialog(parent),
-      m_values(initialValues)
+      m_values(initialValues),
+      m_originalValues(initialValues)
 {
     setWindowTitle(tr("Edit %1 Section").arg(groupName));
 
@@ -47,9 +148,9 @@ NetworkSectionEditDialog::NetworkSectionEditDialog(int driverIndex,
     mainLayout->addWidget(infoLabel);
 
     auto *grid = new QGridLayout();
-    m_resistanceEdit = new QLineEdit(displayNumber(initialValues.resistanceOhm), this);
-    m_capacitanceEdit = new QLineEdit(displayNumber(initialValues.capacitanceMicroFarad), this);
-    m_inductanceEdit = new QLineEdit(displayNumber(initialValues.inductanceMilliHenry), this);
+    m_resistanceEdit = new AdjustableNetworkValueEdit(displayNumber(initialValues.resistanceOhm), this);
+    m_capacitanceEdit = new AdjustableNetworkValueEdit(displayNumber(initialValues.capacitanceMicroFarad), this);
+    m_inductanceEdit = new AdjustableNetworkValueEdit(displayNumber(initialValues.inductanceMilliHenry), this);
     configureNumericEdit(m_resistanceEdit);
     configureNumericEdit(m_capacitanceEdit);
     configureNumericEdit(m_inductanceEdit);
@@ -72,9 +173,14 @@ NetworkSectionEditDialog::NetworkSectionEditDialog(int driverIndex,
     connect(m_buttonBox, &QDialogButtonBox::rejected, this, &NetworkSectionEditDialog::reject);
     mainLayout->addWidget(m_buttonBox);
 
-    connect(m_resistanceEdit, &QLineEdit::textChanged, this, &NetworkSectionEditDialog::validateInput);
-    connect(m_capacitanceEdit, &QLineEdit::textChanged, this, &NetworkSectionEditDialog::validateInput);
-    connect(m_inductanceEdit, &QLineEdit::textChanged, this, &NetworkSectionEditDialog::validateInput);
+    m_previewTimer = new QTimer(this);
+    m_previewTimer->setSingleShot(true);
+    m_previewTimer->setInterval(150);
+    connect(m_previewTimer, &QTimer::timeout, this, &NetworkSectionEditDialog::emitPreviewValues);
+
+    connect(m_resistanceEdit, &QLineEdit::textChanged, this, &NetworkSectionEditDialog::handleInputChanged);
+    connect(m_capacitanceEdit, &QLineEdit::textChanged, this, &NetworkSectionEditDialog::handleInputChanged);
+    connect(m_inductanceEdit, &QLineEdit::textChanged, this, &NetworkSectionEditDialog::handleInputChanged);
     validateInput();
 
     m_resistanceEdit->selectAll();
@@ -87,21 +193,64 @@ NetworkSectionEditDialog::Values NetworkSectionEditDialog::values() const
     return m_values;
 }
 
+NetworkSectionEditDialog::Values NetworkSectionEditDialog::originalValues() const
+{
+    return m_originalValues;
+}
+
+bool NetworkSectionEditDialog::currentValues(Values *values, QString *errorMessage) const
+{
+    Values parsedValues;
+    if (!readField(m_resistanceEdit, tr("R [Ohm]"), parsedValues.resistanceOhm, errorMessage) ||
+        !readField(m_capacitanceEdit, tr("C [uF]"), parsedValues.capacitanceMicroFarad, errorMessage) ||
+        !readField(m_inductanceEdit, tr("L [mH]"), parsedValues.inductanceMilliHenry, errorMessage)) {
+        return false;
+    }
+
+    if (values != nullptr) {
+        *values = parsedValues;
+    }
+    return true;
+}
+
 void NetworkSectionEditDialog::accept()
 {
+    if (m_previewTimer != nullptr) {
+        m_previewTimer->stop();
+    }
+
     QString errorMessage;
-    if (!validateFields(&errorMessage)) {
+    Values parsedValues;
+    if (!currentValues(&parsedValues, &errorMessage)) {
         QMessageBox::warning(this, tr("Edit Network Section"), errorMessage);
         return;
     }
 
-    Values parsedValues;
-    readField(m_resistanceEdit, tr("R [Ohm]"), parsedValues.resistanceOhm);
-    readField(m_capacitanceEdit, tr("C [uF]"), parsedValues.capacitanceMicroFarad);
-    readField(m_inductanceEdit, tr("L [mH]"), parsedValues.inductanceMilliHenry);
-
     m_values = parsedValues;
     QDialog::accept();
+}
+
+void NetworkSectionEditDialog::reject()
+{
+    if (m_previewTimer != nullptr) {
+        m_previewTimer->stop();
+    }
+
+    QDialog::reject();
+}
+
+void NetworkSectionEditDialog::handleInputChanged()
+{
+    validateInput();
+
+    Values parsedValues;
+    if (currentValues(&parsedValues)) {
+        if (m_previewTimer != nullptr) {
+            m_previewTimer->start();
+        }
+    } else if (m_previewTimer != nullptr) {
+        m_previewTimer->stop();
+    }
 }
 
 void NetworkSectionEditDialog::validateInput()
@@ -115,6 +264,14 @@ void NetworkSectionEditDialog::validateInput()
     if (m_validationLabel != nullptr) {
         m_validationLabel->setText(valid ? NetworkValueUtils::validationHint()
                                          : errorMessage);
+    }
+}
+
+void NetworkSectionEditDialog::emitPreviewValues()
+{
+    Values parsedValues;
+    if (currentValues(&parsedValues)) {
+        emit previewValuesChanged(parsedValues);
     }
 }
 
@@ -141,8 +298,5 @@ bool NetworkSectionEditDialog::readField(QLineEdit *field,
 
 bool NetworkSectionEditDialog::validateFields(QString *errorMessage) const
 {
-    double unused = 0.0;
-    return readField(m_resistanceEdit, tr("R [Ohm]"), unused, errorMessage) &&
-           readField(m_capacitanceEdit, tr("C [uF]"), unused, errorMessage) &&
-           readField(m_inductanceEdit, tr("L [mH]"), unused, errorMessage);
+    return currentValues(nullptr, errorMessage);
 }
