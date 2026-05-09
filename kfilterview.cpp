@@ -21,13 +21,17 @@
 
 #include <QBrush>
 #include <QFont>
+#include <QFontMetrics>
+#include <QLineF>
 #include <QPaintEvent>
 #include <QPainter>
 #include <QPalette>
 #include <QPen>
 #include <QPoint>
+#include <QRectF>
 #include <Qt>
 
+#include <algorithm>
 #include <cmath>
 
 KFilterView::KFilterView(KFilterDoc *document, QWidget *parent)
@@ -103,6 +107,73 @@ int KFilterView::YScale(double value, int flag) const
     return static_cast<int>(h / 6.0 - value * h / 60.0);
 }
 
+KFilterView::CurveLabelAnchor KFilterView::findLastVisibleCurvePoint(const double values[200], int type) const
+{
+    const QRectF visibleRect = QRectF(rect()).adjusted(1.0, 1.0, -1.0, -1.0);
+    if (!visibleRect.isValid()) {
+        return {};
+    }
+
+    QPointF points[150];
+    bool valid[150] = {};
+    for (int i = 0; i < 150; i++) {
+        if (!std::isfinite(values[i])) {
+            continue;
+        }
+        points[i] = QPointF(XK(Xvalue[i]), YScale(values[i], type));
+        valid[i] = true;
+    }
+
+    auto bestRightmostIntersection = [&](const QPointF& first, const QPointF& second) -> CurveLabelAnchor {
+        const QLineF segment(first, second);
+        const QLineF edges[] = {
+            QLineF(visibleRect.topLeft(), visibleRect.topRight()),
+            QLineF(visibleRect.topRight(), visibleRect.bottomRight()),
+            QLineF(visibleRect.bottomRight(), visibleRect.bottomLeft()),
+            QLineF(visibleRect.bottomLeft(), visibleRect.topLeft())
+        };
+
+        CurveLabelAnchor best;
+        for (const QLineF& edge : edges) {
+            QPointF intersection;
+            if (segment.intersects(edge, &intersection) == QLineF::BoundedIntersection) {
+                if (!best.valid || intersection.x() > best.point.x()) {
+                    best.point = intersection;
+                    best.valid = true;
+                }
+            }
+        }
+        return best;
+    };
+
+    for (int i = 148; i >= 0; i--) {
+        if (!valid[i] || !valid[i + 1]) {
+            continue;
+        }
+
+        const QPointF first = points[i];
+        const QPointF second = points[i + 1];
+        if (visibleRect.contains(second)) {
+            return {second, true};
+        }
+
+        CurveLabelAnchor intersection = bestRightmostIntersection(first, second);
+        if (intersection.valid) {
+            return intersection;
+        }
+
+        if (visibleRect.contains(first)) {
+            return {first, true};
+        }
+    }
+
+    if (valid[0] && visibleRect.contains(points[0])) {
+        return {points[0], true};
+    }
+
+    return {};
+}
+
 void KFilterView::drawCurve(QPainter& painter, const double values[200], int type)
 {
     QPoint lastPoint(XK(Xvalue[0]), YScale(values[0], type));
@@ -113,6 +184,61 @@ void KFilterView::drawCurve(QPainter& painter, const double values[200], int typ
     }
 }
 
+void KFilterView::drawCurveLabel(QPainter& painter, const QPointF& point, const QString& label) const
+{
+    const QString trimmedLabel = label.trimmed();
+    if (trimmedLabel.isEmpty()) {
+        return;
+    }
+
+    QFont labelFont(QStringLiteral("Sans Serif"), 9);
+    labelFont.setBold(true);
+    painter.setFont(labelFont);
+
+    const QFontMetrics metrics(labelFont);
+    const int textWidth = metrics.horizontalAdvance(trimmedLabel);
+    const int margin = 4;
+    const int spacing = 6;
+
+    int x = static_cast<int>(std::round(point.x())) + spacing;
+    if (x + textWidth + margin > width()) {
+        x = static_cast<int>(std::round(point.x())) - textWidth - spacing;
+    }
+    x = std::max(margin, std::min(x, width() - textWidth - margin));
+
+    int baseline = static_cast<int>(std::round(point.y())) + metrics.ascent() / 2;
+    baseline = std::max(margin + metrics.ascent(), std::min(baseline, height() - margin - metrics.descent()));
+
+    painter.setPen(QPen(Qt::black));
+    painter.drawText(x + 1, baseline + 1, trimmedLabel);
+    painter.setPen(QPen(Qt::white));
+    painter.drawText(x, baseline, trimmedLabel);
+}
+
+void KFilterView::drawDriverCurveLabels(QPainter& painter)
+{
+    KFilterDoc* mydoc = getDocument();
+    if (mydoc == nullptr) {
+        return;
+    }
+
+    for (int count = 0; count < 4; count++) {
+        if (!mydoc->Sound(count)) {
+            continue;
+        }
+
+        CurveLabelAnchor anchor = findLastVisibleCurvePoint(mydoc->m_doubleXContainer[count], 0);
+        if (!anchor.valid) {
+            continue;
+        }
+
+        QString label = mydoc->m_driverDriver[count].GetTitle();
+        if (label.trimmed().isEmpty()) {
+            label = tr("Driver %1").arg(count + 1);
+        }
+        drawCurveLabel(painter, anchor.point, label);
+    }
+}
 
 QColor KFilterView::pressureCurveColor(int driverIndex) const
 {
@@ -274,6 +400,8 @@ void KFilterView::paintEvent(QPaintEvent *event)
     mypainter.drawText(1, 300 * height() / 605, QStringLiteral("-20 dB"));
     mypainter.drawText(1, 400 * height() / 605, QStringLiteral("10 Ohm"));
     mypainter.drawText(1, 500 * height() / 605, QStringLiteral("0 Ohm"));
+
+    drawDriverCurveLabels(mypainter);
 
     if (width() >= 760 && height() >= 420) {
         drawLegend(mypainter);

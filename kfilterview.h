@@ -19,6 +19,8 @@
 #define KFILTERVIEW_H
 
 #include <QColor>
+#include <QPointF>
+#include <QString>
 #include <QWidget>
 
 class KFilterDoc;
@@ -103,7 +105,15 @@ private:
     int XK(double x) const;
     QColor pressureCurveColor(int driverIndex) const;
     QColor impedanceCurveColor(int driverIndex) const;
+    struct CurveLabelAnchor {
+        QPointF point;
+        bool valid = false;
+    };
+
+    CurveLabelAnchor findLastVisibleCurvePoint(const double values[200], int type) const;
     void drawCurve(QPainter& painter, const double values[200], int type);
+    void drawCurveLabel(QPainter& painter, const QPointF& point, const QString& label) const;
+    void drawDriverCurveLabels(QPainter& painter);
     void drawLegend(QPainter& painter);
 };
 

@@ -26,11 +26,17 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QDialog>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
+#include <QEvent>
 #include <QKeySequence>
 #include <QLabel>
+#include <QList>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QGroupBox>
 #include <QSizePolicy>
 #include <QScrollArea>
@@ -71,6 +77,8 @@ KFilterQt6App::KFilterQt6App(QWidget *parent)
       m_doc(new KFilterDoc(this)),
       m_lastDirectory(QDir::homePath())
 {
+    setAcceptDrops(true);
+
     auto *central = new QWidget(this);
     auto *layout = new QVBoxLayout(central);
     layout->setContentsMargins(6, 6, 6, 6);
@@ -130,6 +138,16 @@ KFilterQt6App::KFilterQt6App(QWidget *parent)
     layout->addWidget(m_stateLabel);
     layout->addWidget(m_mainSplitter, 1);
     setCentralWidget(central);
+
+    enableProjectDropTarget(central);
+    enableProjectDropTarget(m_stateLabel);
+    enableProjectDropTarget(m_plotView);
+    enableProjectDropTarget(plotBox);
+    enableProjectDropTarget(circuitScrollArea);
+    enableProjectDropTarget(circuitScrollArea->viewport());
+    enableProjectDropTarget(m_circuitPreview);
+    enableProjectDropTarget(circuitBox);
+    enableProjectDropTarget(m_mainSplitter);
 
     createActions();
     createMenusAndToolBar();
@@ -825,6 +843,40 @@ void KFilterQt6App::closeEvent(QCloseEvent *event)
     }
 }
 
+bool KFilterQt6App::eventFilter(QObject *watched, QEvent *event)
+{
+    Q_UNUSED(watched);
+
+    switch (event->type()) {
+    case QEvent::DragEnter:
+        return acceptProjectDragEvent(static_cast<QDragEnterEvent *>(event));
+    case QEvent::DragMove:
+        return acceptProjectDragEvent(static_cast<QDragMoveEvent *>(event));
+    case QEvent::Drop:
+        return openProjectFromDropEvent(static_cast<QDropEvent *>(event));
+    default:
+        break;
+    }
+
+    return QMainWindow::eventFilter(watched, event);
+}
+
+
+void KFilterQt6App::dragEnterEvent(QDragEnterEvent *event)
+{
+    acceptProjectDragEvent(event);
+}
+
+void KFilterQt6App::dragMoveEvent(QDragMoveEvent *event)
+{
+    acceptProjectDragEvent(event);
+}
+
+void KFilterQt6App::dropEvent(QDropEvent *event)
+{
+    openProjectFromDropEvent(event);
+}
+
 void KFilterQt6App::newFile()
 {
     if (raiseActiveNetworkSectionEditor()) {
@@ -937,6 +989,64 @@ bool KFilterQt6App::saveToUrl(const QUrl &url)
     rememberDirectoryForPath(url.toLocalFile());
     statusBar()->showMessage(tr("Saved %1").arg(url.toLocalFile()), 3000);
     refreshOverview();
+    return true;
+}
+
+void KFilterQt6App::enableProjectDropTarget(QWidget *widget)
+{
+    if (widget == nullptr) {
+        return;
+    }
+
+    widget->setAcceptDrops(true);
+    widget->installEventFilter(this);
+}
+
+bool KFilterQt6App::acceptProjectDragEvent(QDropEvent *event) const
+{
+    if (event == nullptr) {
+        return false;
+    }
+
+    QUrl url;
+    if (!projectUrlFromDropMimeData(event->mimeData(), url)) {
+        event->ignore();
+        return false;
+    }
+
+    event->acceptProposedAction();
+    return true;
+}
+
+bool KFilterQt6App::openProjectFromDropEvent(QDropEvent *event)
+{
+    if (event == nullptr) {
+        return false;
+    }
+
+    QUrl url;
+    if (!projectUrlFromDropMimeData(event->mimeData(), url)) {
+        event->ignore();
+        return false;
+    }
+
+    if (raiseActiveNetworkSectionEditor()) {
+        event->ignore();
+        return true;
+    }
+
+    if (!maybeSave()) {
+        event->ignore();
+        statusBar()->showMessage(tr("Open cancelled."), 3000);
+        return true;
+    }
+
+    if (!openDocumentFile(url)) {
+        event->ignore();
+        return true;
+    }
+
+    event->acceptProposedAction();
     return true;
 }
 
@@ -1184,6 +1294,32 @@ bool KFilterQt6App::raiseActiveNetworkSectionEditor()
     m_activeNetworkSectionEditDialog->raise();
     m_activeNetworkSectionEditDialog->activateWindow();
     statusBar()->showMessage(tr("Finish or cancel the open network section editor first."), 3000);
+    return true;
+}
+
+
+bool KFilterQt6App::projectUrlFromDropMimeData(const QMimeData *mimeData, QUrl &url) const
+{
+    if (mimeData == nullptr || !mimeData->hasUrls()) {
+        return false;
+    }
+
+    const QList<QUrl> urls = mimeData->urls();
+    if (urls.size() != 1) {
+        return false;
+    }
+
+    const QUrl candidateUrl = urls.constFirst();
+    if (!candidateUrl.isLocalFile()) {
+        return false;
+    }
+
+    const QString filePath = candidateUrl.toLocalFile();
+    if (!filePath.endsWith(QStringLiteral(".kfp"), Qt::CaseInsensitive)) {
+        return false;
+    }
+
+    url = candidateUrl;
     return true;
 }
 

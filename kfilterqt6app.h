@@ -19,9 +19,15 @@ class QAction;
 class QActionGroup;
 class CircuitOut;
 class driver;
+class QDragEnterEvent;
+class QDragMoveEvent;
+class QDropEvent;
+class QEvent;
 class QLabel;
+class QMimeData;
 class QSplitter;
 class QToolBar;
+class QWidget;
 class KFilterDoc;
 class KFilterView;
 class NetworkSectionEditDialog;
@@ -45,6 +51,10 @@ public:
 
 protected:
     void closeEvent(QCloseEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
+    void dragEnterEvent(QDragEnterEvent *event) override;
+    void dragMoveEvent(QDragMoveEvent *event) override;
+    void dropEvent(QDropEvent *event) override;
 
 private slots:
     void newFile();
@@ -77,6 +87,9 @@ private:
     void createMenusAndToolBar();
     void updateWindowTitle();
     void updateActionState();
+    void enableProjectDropTarget(QWidget *widget);
+    bool acceptProjectDragEvent(QDropEvent *event) const;
+    bool openProjectFromDropEvent(QDropEvent *event);
     bool maybeSave();
     bool saveToUrl(const QUrl &url);
     void rememberDirectoryForPath(const QString &filePath);
@@ -90,6 +103,7 @@ private:
     void openDriverParametersDialog(int initialDriverIndex);
     bool networkSectionEditInProgress() const;
     bool raiseActiveNetworkSectionEditor();
+    bool projectUrlFromDropMimeData(const QMimeData *mimeData, QUrl &url) const;
 
     static constexpr int CircuitPreviewDriverActionCount = 4;
 
