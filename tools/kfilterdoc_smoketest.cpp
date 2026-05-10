@@ -1,3 +1,9 @@
+/*
+ * KFilter6
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2002-2026 Martin Erdtmann
+ */
+
 #include "kfilterdoc.h"
 #include "kfilterprojectio.h"
 

@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (C) 2002-2026 Martin Erdtmann
+-->
+
 # KFilter6
 
 KFilter6 is a standalone Qt6 Widgets port of the original KFilter loudspeaker design tool.
@@ -337,4 +342,8 @@ Terminology note:
 
 ## License
 
-Add the applicable license information for this repository here, or refer to a separate `LICENSE` file if one exists.
+KFilter6 is licensed under the GNU General Public License version 3 or later.
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+See the `LICENSE` file for the full GNU GPL version 3 license text.

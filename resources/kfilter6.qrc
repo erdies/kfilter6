@@ -1,3 +1,7 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (C) 2002-2026 Martin Erdtmann
+-->
 <RCC>
     <qresource prefix="/icons">
         <file alias="kfilter6.svg">icons/kfilter6.svg</file>

@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (C) 2002-2026 Martin Erdtmann
+-->
+
 # KFilter Qt6/KF6 porting notes
 
 ## Current baseline

@@ -1,9 +1,8 @@
-/***************************************************************************
-                          kfilterqt6app.cpp  -  Qt6 application shell
-                             -------------------
-    begin                : May 2026
-    copyright            : (C) 2002-2026 by Martin Erdtmann
- ***************************************************************************/
+/*
+ * KFilter6
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2002-2026 Martin Erdtmann
+ */
 
 #include "kfilterqt6app.h"
 
@@ -55,6 +54,10 @@
 
 #ifndef KFILTER_PATCH_LEVEL_STRING
 #define KFILTER_PATCH_LEVEL_STRING "unknown"
+#endif
+
+#ifndef KFILTER_LICENSE_STRING
+#define KFILTER_LICENSE_STRING "unknown"
 #endif
 
 #include <algorithm>
@@ -1338,13 +1341,16 @@ void KFilterQt6App::showAboutDialog()
         tr("About KFilter6"),
         tr("<b>KFilter6</b><br>"
            "Version %1<br>"
-           "Patch %2<br><br>"
+           "Patch %2<br>"
+           "License %3<br>"
+           "Copyright &copy; 2002-2026 Martin Erdtmann<br><br>"
            "KFilter6 is a Qt6-based loudspeaker design and crossover modelling tool.<br><br>"
            "It visualizes driver response, impedance, enclosure behaviour, "
            "crossover networks, vector SPL summation, energetic SPL summation, "
            "and total impedance while preserving the legacy KFilter project model.")
             .arg(QStringLiteral(KFILTER_VERSION_STRING))
-            .arg(QStringLiteral(KFILTER_PATCH_LEVEL_STRING)));
+            .arg(QStringLiteral(KFILTER_PATCH_LEVEL_STRING))
+            .arg(QStringLiteral(KFILTER_LICENSE_STRING)));
 }
 
 void KFilterQt6App::editDriverParameters()

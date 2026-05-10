@@ -1,9 +1,8 @@
-/***************************************************************************
-                          networkvalueutils.cpp  -  shared network value helpers
-                             -------------------
-    begin                : May 2026
-    copyright            : (C) 2002-2026 by Martin Erdtmann
- ***************************************************************************/
+/*
+ * KFilter6
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2002-2026 Martin Erdtmann
+ */
 
 #include "networkvalueutils.h"
 

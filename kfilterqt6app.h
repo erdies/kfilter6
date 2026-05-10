@@ -1,9 +1,8 @@
-/***************************************************************************
-                          kfilterqt6app.h  -  Qt6 application shell
-                             -------------------
-    begin                : May 2026
-    copyright            : (C) 2002-2026 by Martin Erdtmann
- ***************************************************************************/
+/*
+ * KFilter6
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2002-2026 Martin Erdtmann
+ */
 
 #ifndef KFILTERQT6APP_H
 #define KFILTERQT6APP_H
