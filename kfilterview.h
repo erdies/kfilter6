@@ -7,6 +7,8 @@
 #ifndef KFILTERVIEW_H
 #define KFILTERVIEW_H
 
+#include <array>
+
 #include <QColor>
 #include <QPointF>
 #include <QString>
@@ -31,6 +33,18 @@ class KFilterView : public QWidget
     Q_OBJECT
 
 public:
+    struct PlotColorSettings
+    {
+        QColor background;
+        QColor grid;
+        QColor thresholdGrid;
+        std::array<QColor, 4> pressureCurves;
+        std::array<QColor, 4> impedanceCurves;
+        QColor pressureSummary;
+        QColor impedanceSummary;
+        QColor scalarPressureSummary;
+    };
+
     explicit KFilterView(KFilterDoc *document, QWidget *parent = nullptr);
     ~KFilterView() override;
 
@@ -38,6 +52,14 @@ public:
 
     /** contains the implementation for printing functionality */
     void print(QPrinter *pPrinter);
+
+    static PlotColorSettings defaultPlotColorSettings();
+    PlotColorSettings plotColorSettings() const;
+    void setPlotColorSettings(const PlotColorSettings& settings);
+    void resetPlotColorSettings();
+
+    QColor backgroundColor() const;
+    void setBackgroundColor(const QColor& color);
 
     /** sets the gridcolor */
     void setGridColor(const QColor& color);
@@ -75,7 +97,11 @@ protected:
 private:
     KFilterDoc *m_document = nullptr;
 
+    QColor m_backgroundColor;
     QColor cgrid;
+    QColor cthresholdGrid;
+    std::array<QColor, 4> m_pressureCurveColors;
+    std::array<QColor, 4> m_impedanceCurveColors;
     QColor cpressure;
     QColor cimpedance;
     QColor cpressureS;
@@ -94,6 +120,8 @@ private:
     int XK(double x) const;
     QColor pressureCurveColor(int driverIndex) const;
     QColor impedanceCurveColor(int driverIndex) const;
+    QColor foregroundTextColor() const;
+    QColor shadowTextColor() const;
     struct CurveLabelAnchor {
         QPointF point;
         bool valid = false;

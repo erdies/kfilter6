@@ -299,6 +299,7 @@ Some UI settings are stored through `QSettings` and are intentionally not part o
 Examples:
 
 - Network-preview background color.
+- Plot-window background, grid, threshold and curve colors.
 - Last used bass-reflex tube diameter per driver tab.
 - Window and toolbar layout settings.
 

@@ -4,6 +4,26 @@
  * Copyright (C) 2002-2026 Martin Erdtmann
  */
 
+/*
+ * Historical note:
+ *
+ * This file contains code derived from the original KFilter calculation core,
+ * which started as Turbo Pascal code developed on an 8088-based PC. Some of the
+ * structure still reflects performance optimizations that were necessary on
+ * that hardware, including many explicit special-case branches.
+ *
+ * The remaining German comments are also a historical artifact of the original
+ * code base. They were written during the early development of KFilter and have
+ * intentionally not been translated mechanically, because some of them may
+ * capture implementation details or domain-specific reasoning that should be
+ * reviewed carefully during refactoring.
+ *
+ * These optimizations improved runtime performance in the original version, but
+ * reduce readability today. The intended long-term direction is to refactor this
+ * code into clearer and more maintainable calculation modules while preserving
+ * the established numerical behaviour.
+ */
+
 #include "driver.h"
 #include <cmath>
 

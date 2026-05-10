@@ -67,6 +67,8 @@ private slots:
     void refreshCircuitPreview();
     void showAboutDialog();
     void resetWindowLayout();
+    void configurePlotColors();
+    void resetPlotColors();
     void chooseCircuitPreviewBackgroundColor();
     void resetCircuitPreviewBackgroundColor();
     void editNetworkSectionFromPreview(int driverIndex, int sectionIndex, int groupValue);
@@ -74,6 +76,7 @@ private slots:
     void clearNetworkSectionFromPreview(int driverIndex, int sectionIndex, int groupValue);
     void showNetworkSectionHoverFromPreview(int driverIndex, int sectionIndex, int groupValue);
     void showDriverHoverFromPreview(int driverIndex);
+    void toggleDriverPlotVisibilityFromPreview(int driverIndex);
     void clearNetworkSectionHoverFromPreview();
     void setFileToolBarVisible(bool visible);
     void setEditToolBarVisible(bool visible);
@@ -130,6 +133,8 @@ private:
     QAction *m_showEditToolBarAction = nullptr;
     QAction *m_showStatusBarAction = nullptr;
     QAction *m_resetLayoutAction = nullptr;
+    QAction *m_configurePlotColorsAction = nullptr;
+    QAction *m_resetPlotColorsAction = nullptr;
     QActionGroup *m_circuitPreviewDriverActionGroup = nullptr;
     QAction *m_circuitPreviewAllDriversAction = nullptr;
     std::array<QAction *, CircuitPreviewDriverActionCount> m_circuitPreviewDriverActions{};

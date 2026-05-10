@@ -25,18 +25,10 @@
 
 KFilterView::KFilterView(KFilterDoc *document, QWidget *parent)
     : QWidget(parent),
-      m_document(document),
-      cgrid(QColor(70, 70, 70)),
-      cpressure(Qt::red),
-      cimpedance(QColor(205, 180, 0)),
-      cpressureS(QColor(255, 210, 0)),
-      cimpedanceS(QColor(0, 220, 255)),
-      cscalarpressureS(Qt::magenta)
+      m_document(document)
 {
     setAutoFillBackground(true);
-    QPalette pal = palette();
-    pal.setColor(QPalette::Window, Qt::black);
-    setPalette(pal);
+    setPlotColorSettings(defaultPlotColorSettings());
 
     setMinimumSize(640, 360);
     Start = 125.6637061;
@@ -198,9 +190,9 @@ void KFilterView::drawCurveLabel(QPainter& painter, const QPointF& point, const 
     int baseline = static_cast<int>(std::round(point.y())) + metrics.ascent() / 2;
     baseline = std::max(margin + metrics.ascent(), std::min(baseline, height() - margin - metrics.descent()));
 
-    painter.setPen(QPen(Qt::black));
+    painter.setPen(QPen(shadowTextColor()));
     painter.drawText(x + 1, baseline + 1, trimmedLabel);
-    painter.setPen(QPen(Qt::white));
+    painter.setPen(QPen(foregroundTextColor()));
     painter.drawText(x, baseline, trimmedLabel);
 }
 
@@ -231,28 +223,37 @@ void KFilterView::drawDriverCurveLabels(QPainter& painter)
 
 QColor KFilterView::pressureCurveColor(int driverIndex) const
 {
-    switch (driverIndex) {
-    case 0: return cpressure;
-    case 1: return QColor(0, 210, 0);
-    case 2: return QColor(255, 140, 0);
-    case 3: return QColor(190, 120, 255);
-    default: return cpressure;
+    if (driverIndex >= 0 && driverIndex < static_cast<int>(m_pressureCurveColors.size())) {
+        return m_pressureCurveColors[driverIndex];
     }
+    return cpressure;
 }
 
 QColor KFilterView::impedanceCurveColor(int driverIndex) const
 {
-    switch (driverIndex) {
-    case 0: return cimpedance;
-    case 1: return QColor(185, 165, 0);
-    case 2: return QColor(220, 195, 40);
-    case 3: return QColor(170, 150, 0);
-    default: return cimpedance;
+    if (driverIndex >= 0 && driverIndex < static_cast<int>(m_impedanceCurveColors.size())) {
+        return m_impedanceCurveColors[driverIndex];
     }
+    return cimpedance;
+}
+
+QColor KFilterView::foregroundTextColor() const
+{
+    return m_backgroundColor.lightness() < 128 ? QColor(Qt::white) : QColor(Qt::black);
+}
+
+QColor KFilterView::shadowTextColor() const
+{
+    return m_backgroundColor.lightness() < 128 ? QColor(Qt::black) : QColor(Qt::white);
 }
 
 void KFilterView::drawLegend(QPainter& painter)
 {
+    KFilterDoc* mydoc = getDocument();
+    if (mydoc == nullptr) {
+        return;
+    }
+
     QFont font(QStringLiteral("Sans Serif"), 8);
     painter.setFont(font);
 
@@ -267,18 +268,47 @@ void KFilterView::drawLegend(QPainter& painter)
         pen.setWidth(width);
         painter.setPen(pen);
         painter.drawLine(left, y - 4, left + lineWidth, y - 4);
-        painter.setPen(QPen(Qt::lightGray));
+        painter.setPen(QPen(foregroundTextColor()));
         painter.drawText(left + lineWidth + 8, y, label);
         y += rowHeight;
     };
 
-    drawEntry(pressureCurveColor(0), Qt::SolidLine, 1, tr("Driver 1 SPL"));
-    drawEntry(pressureCurveColor(1), Qt::SolidLine, 1, tr("Driver 2 SPL"));
-    drawEntry(pressureCurveColor(2), Qt::SolidLine, 1, tr("Driver 3 SPL"));
-    drawEntry(pressureCurveColor(3), Qt::SolidLine, 1, tr("Driver 4 SPL"));
-    drawEntry(cpressureS, Qt::SolidLine, 3, tr("Vector SPL sum"));
-    drawEntry(cscalarpressureS, Qt::SolidLine, 2, tr("Energetic SPL sum"));
-    drawEntry(cimpedanceS, Qt::DotLine, 2, tr("Total impedance"));
+    for (int driverIndex = 0; driverIndex < 4; ++driverIndex) {
+        if (mydoc->m_driverDriver[driverIndex].PressureisActive) {
+            drawEntry(pressureCurveColor(driverIndex),
+                      Qt::SolidLine,
+                      1,
+                      tr("Driver %1 SPL").arg(driverIndex + 1));
+        }
+
+        if (mydoc->m_driverDriver[driverIndex].ImpedanzisActive) {
+            drawEntry(impedanceCurveColor(driverIndex),
+                      Qt::DotLine,
+                      1,
+                      tr("Driver %1 impedance").arg(driverIndex + 1));
+        }
+    }
+
+    if (mydoc->m_driverDriver[0].SummaryisActive ||
+        mydoc->m_driverDriver[1].SummaryisActive ||
+        mydoc->m_driverDriver[2].SummaryisActive ||
+        mydoc->m_driverDriver[3].SummaryisActive) {
+        drawEntry(cpressureS, Qt::SolidLine, 3, tr("Vector SPL sum"));
+    }
+
+    if (mydoc->m_driverDriver[0].ScalarSummaryisActive ||
+        mydoc->m_driverDriver[1].ScalarSummaryisActive ||
+        mydoc->m_driverDriver[2].ScalarSummaryisActive ||
+        mydoc->m_driverDriver[3].ScalarSummaryisActive) {
+        drawEntry(cscalarpressureS, Qt::SolidLine, 2, tr("Energetic SPL sum"));
+    }
+
+    if (mydoc->m_driverDriver[0].ImpedanzSummaryisActive ||
+        mydoc->m_driverDriver[1].ImpedanzSummaryisActive ||
+        mydoc->m_driverDriver[2].ImpedanzSummaryisActive ||
+        mydoc->m_driverDriver[3].ImpedanzSummaryisActive) {
+        drawEntry(cimpedanceS, Qt::DotLine, 2, tr("Total impedance"));
+    }
 }
 
 void KFilterView::paintEvent(QPaintEvent *event)
@@ -287,7 +317,7 @@ void KFilterView::paintEvent(QPaintEvent *event)
 
     KFilterDoc* mydoc = getDocument();
     QPainter mypainter(this);
-    mypainter.fillRect(rect(), palette().window());
+    mypainter.fillRect(rect(), m_backgroundColor);
 
     QPen pen;
     pen.setColor(cgrid);
@@ -310,24 +340,22 @@ void KFilterView::paintEvent(QPaintEvent *event)
     }
 
     for (i = 1; i <= 30; i++) {
-        if ((i != 5) | (i != 10) | (i != 15) | (i != 20) | (i != 25) | (i != 30)) {
+        if ((i != 5) && (i != 10) && (i != 15) && (i != 20) && (i != 25) && (i != 30)) {
             mypainter.drawLine(0, i * height() / 30, width(), i * height() / 30);
         }
     }
 
-    pen.setColor(Qt::yellow);
+    pen.setColor(cthresholdGrid);
     pen.setStyle(Qt::DotLine);
+    pen.setWidth(1);
     mypainter.setPen(pen);
     for (i = 1; i <= 5; i++) {
         mypainter.drawLine(0, i * height() / 6, width(), i * height() / 6);
     }
 
-    pen.setColor(Qt::black);
-    pen.setStyle(Qt::SolidLine);
-    mypainter.setPen(pen);
-
-    pen.setColor(Qt::white);
+    pen.setColor(foregroundTextColor());
     pen.setStyle(Qt::DotLine);
+    pen.setWidth(1);
     mypainter.setPen(pen);
     mypainter.drawLine(0, height() / 6, width(), height() / 6);
 
@@ -374,7 +402,7 @@ void KFilterView::paintEvent(QPaintEvent *event)
         }
     }
 
-    pen.setColor(Qt::lightGray);
+    pen.setColor(foregroundTextColor());
     pen.setStyle(Qt::SolidLine);
     pen.setWidth(1);
     QFont font(QStringLiteral("Times"), 10);
@@ -397,6 +425,94 @@ void KFilterView::paintEvent(QPaintEvent *event)
     }
 }
 
+
+KFilterView::PlotColorSettings KFilterView::defaultPlotColorSettings()
+{
+    PlotColorSettings settings;
+    settings.background = QColor(Qt::black);
+    settings.grid = QColor(70, 70, 70);
+    settings.thresholdGrid = QColor(Qt::yellow);
+    settings.pressureCurves = {QColor(Qt::red),
+                               QColor(0, 210, 0),
+                               QColor(255, 140, 0),
+                               QColor(190, 120, 255)};
+    settings.impedanceCurves = {QColor(205, 180, 0),
+                                QColor(185, 165, 0),
+                                QColor(220, 195, 40),
+                                QColor(170, 150, 0)};
+    settings.pressureSummary = QColor(255, 210, 0);
+    settings.impedanceSummary = QColor(0, 220, 255);
+    settings.scalarPressureSummary = QColor(Qt::magenta);
+    return settings;
+}
+
+KFilterView::PlotColorSettings KFilterView::plotColorSettings() const
+{
+    PlotColorSettings settings;
+    settings.background = m_backgroundColor;
+    settings.grid = cgrid;
+    settings.thresholdGrid = cthresholdGrid;
+    settings.pressureCurves = m_pressureCurveColors;
+    settings.impedanceCurves = m_impedanceCurveColors;
+    settings.pressureSummary = cpressureS;
+    settings.impedanceSummary = cimpedanceS;
+    settings.scalarPressureSummary = cscalarpressureS;
+    return settings;
+}
+
+void KFilterView::setPlotColorSettings(const PlotColorSettings& settings)
+{
+    m_backgroundColor = settings.background.isValid() ? settings.background : QColor(Qt::black);
+    cgrid = settings.grid.isValid() ? settings.grid : QColor(70, 70, 70);
+    cthresholdGrid = settings.thresholdGrid.isValid() ? settings.thresholdGrid : QColor(Qt::yellow);
+    m_pressureCurveColors = settings.pressureCurves;
+    m_impedanceCurveColors = settings.impedanceCurves;
+    cpressure = m_pressureCurveColors[0].isValid() ? m_pressureCurveColors[0] : QColor(Qt::red);
+    cimpedance = m_impedanceCurveColors[0].isValid() ? m_impedanceCurveColors[0] : QColor(205, 180, 0);
+    cpressureS = settings.pressureSummary.isValid() ? settings.pressureSummary : QColor(255, 210, 0);
+    cimpedanceS = settings.impedanceSummary.isValid() ? settings.impedanceSummary : QColor(0, 220, 255);
+    cscalarpressureS = settings.scalarPressureSummary.isValid() ? settings.scalarPressureSummary : QColor(Qt::magenta);
+
+    const PlotColorSettings defaults = defaultPlotColorSettings();
+    for (int index = 0; index < static_cast<int>(m_pressureCurveColors.size()); ++index) {
+        if (!m_pressureCurveColors[index].isValid()) {
+            m_pressureCurveColors[index] = defaults.pressureCurves[index];
+        }
+        if (!m_impedanceCurveColors[index].isValid()) {
+            m_impedanceCurveColors[index] = defaults.impedanceCurves[index];
+        }
+    }
+
+    cpressure = m_pressureCurveColors[0];
+    cimpedance = m_impedanceCurveColors[0];
+
+    QPalette pal = palette();
+    pal.setColor(QPalette::Window, m_backgroundColor);
+    setPalette(pal);
+    update();
+}
+
+void KFilterView::resetPlotColorSettings()
+{
+    setPlotColorSettings(defaultPlotColorSettings());
+}
+
+QColor KFilterView::backgroundColor() const
+{
+    return m_backgroundColor;
+}
+
+void KFilterView::setBackgroundColor(const QColor& color)
+{
+    if (!color.isValid()) {
+        return;
+    }
+
+    PlotColorSettings settings = plotColorSettings();
+    settings.background = color;
+    setPlotColorSettings(settings);
+}
+
 /** gives back the gridcolor */
 QColor& KFilterView::gridColor()
 {
@@ -406,7 +522,11 @@ QColor& KFilterView::gridColor()
 /** sets the gridcolor */
 void KFilterView::setGridColor(const QColor& color)
 {
+    if (!color.isValid()) {
+        return;
+    }
     cgrid = color;
+    update();
 }
 
 /** gives back the pressurecolor */
@@ -418,7 +538,12 @@ QColor& KFilterView::pressureColor()
 /** sets the pressurecolor */
 void KFilterView::setPressureColor(const QColor& color)
 {
+    if (!color.isValid()) {
+        return;
+    }
     cpressure = color;
+    m_pressureCurveColors[0] = color;
+    update();
 }
 
 /** gives back the impedancecolor */
@@ -430,7 +555,12 @@ QColor& KFilterView::impedanceColor()
 /** sets the impedancecolor */
 void KFilterView::setImpedanceColor(const QColor& color)
 {
+    if (!color.isValid()) {
+        return;
+    }
     cimpedance = color;
+    m_impedanceCurveColors[0] = color;
+    update();
 }
 
 /** gives back the pressuresummarycolor */
@@ -442,7 +572,11 @@ QColor& KFilterView::pressureSummaryColor()
 /** sets the pressuresummarycolor */
 void KFilterView::setPressureSummaryColor(const QColor& color)
 {
+    if (!color.isValid()) {
+        return;
+    }
     cpressureS = color;
+    update();
 }
 
 /** gives back the impedancesummarycolor */
@@ -454,7 +588,11 @@ QColor& KFilterView::impedanceSummaryColor()
 /** sets the impedancesummarycolor */
 void KFilterView::setImpedanceSummaryColor(const QColor& color)
 {
+    if (!color.isValid()) {
+        return;
+    }
     cimpedanceS = color;
+    update();
 }
 
 /** gives back the scalarpressuresummarycolor */
@@ -466,5 +604,9 @@ QColor& KFilterView::scalarPressureSummaryColor()
 /** sets the scalarpressuresummarycolor */
 void KFilterView::setScalarPressureSummaryColor(const QColor& color)
 {
+    if (!color.isValid()) {
+        return;
+    }
     cscalarpressureS = color;
+    update();
 }

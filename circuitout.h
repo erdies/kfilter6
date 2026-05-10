@@ -61,6 +61,7 @@ signals:
     void networkSectionHoverLeft();
     void driverClicked(int driverIndex);
     void driverHovered(int driverIndex);
+    void driverActivityLampClicked(int driverIndex);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -97,11 +98,18 @@ private:
         int driverIndex = 0;
     };
 
+    struct DriverActivityLampHit
+    {
+        QRectF bounds;
+        int driverIndex = 0;
+    };
+
     enum class HoverHitKind
     {
         None = 0,
         NetworkSection,
-        Driver
+        Driver,
+        DriverActivityLamp
     };
 
     struct DriverSnapshot
@@ -123,10 +131,13 @@ private:
     void applyPreviewGeometry();
     void registerSectionHit(int section, NetworkHitGroup group, const QRectF& bounds) const;
     void registerDriverHit(const QRectF& bounds) const;
+    void registerDriverActivityLampHit(const QRectF& bounds) const;
     bool findSectionHit(const QPoint& position, NetworkSectionHit& hit) const;
     bool findDriverHit(const QPoint& position, DriverHit& hit) const;
+    bool findDriverActivityLampHit(const QPoint& position, DriverActivityLampHit& hit) const;
     bool sameSectionHit(const NetworkSectionHit& lhs, const NetworkSectionHit& rhs) const;
     bool sameDriverHit(const DriverHit& lhs, const DriverHit& rhs) const;
+    bool sameDriverActivityLampHit(const DriverActivityLampHit& lhs, const DriverActivityLampHit& rhs) const;
     void updateHoverHit(const QPoint& position);
     void clearHoverHit();
     void drawCurrentDriverPreview(QPainter& painter, const QRect& previewRect) const;
@@ -181,8 +192,10 @@ private:
     QColor m_backgroundColor = defaultBackgroundColor();
     mutable QVector<NetworkSectionHit> m_sectionHits;
     mutable QVector<DriverHit> m_driverHits;
+    mutable QVector<DriverActivityLampHit> m_driverActivityLampHits;
     NetworkSectionHit m_hoverSectionHit;
     DriverHit m_hoverDriverHit;
+    DriverActivityLampHit m_hoverDriverActivityLampHit;
     HoverHitKind m_hoverHitKind = HoverHitKind::None;
 };
 

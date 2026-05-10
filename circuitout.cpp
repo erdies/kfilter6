@@ -64,6 +64,7 @@ CircuitOut::CircuitOut(QWidget *parent)
 {
     setAutoFillBackground(true);
     setMouseTracking(true);
+    setToolTip(tr("Click a driver activity lamp to toggle plot visibility for that driver."));
     setMinimumHeight(300);
 }
 
@@ -245,6 +246,7 @@ void CircuitOut::paintEvent(QPaintEvent *event)
     QWidget::paintEvent(event);
     m_sectionHits.clear();
     m_driverHits.clear();
+    m_driverActivityLampHits.clear();
 
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
@@ -299,6 +301,13 @@ void CircuitOut::paintEvent(QPaintEvent *event)
 void CircuitOut::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
+        DriverActivityLampHit lampHit;
+        if (findDriverActivityLampHit(event->pos(), lampHit)) {
+            emit driverActivityLampClicked(lampHit.driverIndex);
+            event->accept();
+            return;
+        }
+
         NetworkSectionHit hit;
         if (findSectionHit(event->pos(), hit)) {
             emit networkSectionClicked(hit.driverIndex, hit.sectionIndex, hit.group);
@@ -370,6 +379,18 @@ void CircuitOut::registerDriverHit(const QRectF& bounds) const
     m_driverHits.append(hit);
 }
 
+void CircuitOut::registerDriverActivityLampHit(const QRectF& bounds) const
+{
+    if (!bounds.isValid()) {
+        return;
+    }
+
+    DriverActivityLampHit hit;
+    hit.bounds = bounds;
+    hit.driverIndex = std::clamp(m_driverNumber - 1, 0, 3);
+    m_driverActivityLampHits.append(hit);
+}
+
 bool CircuitOut::findSectionHit(const QPoint& position, NetworkSectionHit& hit) const
 {
     for (auto it = m_sectionHits.crbegin(); it != m_sectionHits.crend(); ++it) {
@@ -392,6 +413,17 @@ bool CircuitOut::findDriverHit(const QPoint& position, DriverHit& hit) const
     return false;
 }
 
+bool CircuitOut::findDriverActivityLampHit(const QPoint& position, DriverActivityLampHit& hit) const
+{
+    for (auto it = m_driverActivityLampHits.crbegin(); it != m_driverActivityLampHits.crend(); ++it) {
+        if (it->bounds.contains(position)) {
+            hit = *it;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool CircuitOut::sameSectionHit(const NetworkSectionHit& lhs, const NetworkSectionHit& rhs) const
 {
     return lhs.driverIndex == rhs.driverIndex &&
@@ -404,8 +436,25 @@ bool CircuitOut::sameDriverHit(const DriverHit& lhs, const DriverHit& rhs) const
     return lhs.driverIndex == rhs.driverIndex;
 }
 
+bool CircuitOut::sameDriverActivityLampHit(const DriverActivityLampHit& lhs, const DriverActivityLampHit& rhs) const
+{
+    return lhs.driverIndex == rhs.driverIndex;
+}
+
 void CircuitOut::updateHoverHit(const QPoint& position)
 {
+    DriverActivityLampHit lampHit;
+    if (findDriverActivityLampHit(position, lampHit)) {
+        setCursor(Qt::PointingHandCursor);
+        if (m_hoverHitKind != HoverHitKind::DriverActivityLamp ||
+            !sameDriverActivityLampHit(m_hoverDriverActivityLampHit, lampHit)) {
+            m_hoverDriverActivityLampHit = lampHit;
+            m_hoverHitKind = HoverHitKind::DriverActivityLamp;
+            emit networkSectionHoverLeft();
+        }
+        return;
+    }
+
     NetworkSectionHit sectionHit;
     if (findSectionHit(position, sectionHit)) {
         setCursor(Qt::PointingHandCursor);
@@ -486,6 +535,7 @@ void CircuitOut::drawCurrentDriverPreview(QPainter& painter, const QRect& previe
                           lampSize,
                           lampSize);
     drawDriverActivityLamp(painter, lampRect, m_curveOrTotalFlagActive);
+    registerDriverActivityLampHit(lampRect.adjusted(-5.0, -5.0, 5.0, 5.0));
 
     const int titleLeft = static_cast<int>(lampRect.right() + lampGap);
     painter.drawText(titleLeft, drawingRect.top(), drawingRect.right() - titleLeft, 22,

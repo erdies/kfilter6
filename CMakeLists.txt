@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(kfilter VERSION 0.1.0 LANGUAGES CXX)
 
-set(KFILTER_PATCH_LEVEL "101")
+set(KFILTER_PATCH_LEVEL "106")
 set(KFILTER_LICENSE_STRING "GPL-3.0-or-later")
 
 set(CMAKE_CXX_STANDARD 17)
@@ -61,6 +61,8 @@ if(KFILTER_BUILD_QT6_APP)
         networkparametersdialog.h
         networksectioneditdialog.cpp
         networksectioneditdialog.h
+        plotcolorsdialog.cpp
+        plotcolorsdialog.h
         networkvalueutils.cpp
         networkvalueutils.h
         circuitout.cpp

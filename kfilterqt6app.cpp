@@ -11,6 +11,7 @@
 #include "driverparametersdialog.h"
 #include "networkparametersdialog.h"
 #include "networksectioneditdialog.h"
+#include "plotcolorsdialog.h"
 #include "kfilterdoc.h"
 #include "kfilterprojectio.h"
 #include "kfilterview.h"
@@ -46,6 +47,7 @@
 #include <QStatusBar>
 #include <QToolBar>
 #include <QVBoxLayout>
+#include <QVariant>
 #include <QWidget>
 
 #ifndef KFILTER_VERSION_STRING
@@ -79,6 +81,87 @@ bool nearlyEqual(double lhs, double rhs)
 {
     const double scale = std::max(1.0, std::max(std::abs(lhs), std::abs(rhs)));
     return std::abs(lhs - rhs) <= 1e-12 * scale;
+}
+
+QColor readColorSetting(const QSettings& settings, const QString& key, const QColor& defaultColor)
+{
+    const QVariant value = settings.value(key);
+    if (!value.isValid()) {
+        return defaultColor;
+    }
+
+    const QColor color = value.value<QColor>();
+    return color.isValid() ? color : defaultColor;
+}
+
+void writeColorSetting(QSettings& settings,
+                       const QString& key,
+                       const QColor& color,
+                       const QColor& defaultColor)
+{
+    if (!color.isValid() || color == defaultColor) {
+        settings.remove(key);
+        return;
+    }
+
+    settings.setValue(key, color);
+}
+
+QString plotPressureColorKey(int index)
+{
+    return QStringLiteral("PlotWindow/pressureColor%1").arg(index);
+}
+
+QString plotImpedanceColorKey(int index)
+{
+    return QStringLiteral("PlotWindow/impedanceColor%1").arg(index);
+}
+
+KFilterView::PlotColorSettings readPlotColorSettings(const QSettings& settings)
+{
+    KFilterView::PlotColorSettings colors = KFilterView::defaultPlotColorSettings();
+    const KFilterView::PlotColorSettings defaults = KFilterView::defaultPlotColorSettings();
+
+    colors.background = readColorSetting(settings, QStringLiteral("PlotWindow/backgroundColor"), defaults.background);
+    colors.grid = readColorSetting(settings, QStringLiteral("PlotWindow/gridColor"), defaults.grid);
+    colors.thresholdGrid = readColorSetting(settings, QStringLiteral("PlotWindow/thresholdGridColor"), defaults.thresholdGrid);
+    for (int index = 0; index < static_cast<int>(colors.pressureCurves.size()); ++index) {
+        colors.pressureCurves[index] = readColorSetting(settings,
+                                                        plotPressureColorKey(index),
+                                                        defaults.pressureCurves[index]);
+        colors.impedanceCurves[index] = readColorSetting(settings,
+                                                         plotImpedanceColorKey(index),
+                                                         defaults.impedanceCurves[index]);
+    }
+    colors.pressureSummary = readColorSetting(settings,
+                                              QStringLiteral("PlotWindow/pressureSummaryColor"),
+                                              defaults.pressureSummary);
+    colors.scalarPressureSummary = readColorSetting(settings,
+                                                    QStringLiteral("PlotWindow/scalarPressureSummaryColor"),
+                                                    defaults.scalarPressureSummary);
+    colors.impedanceSummary = readColorSetting(settings,
+                                               QStringLiteral("PlotWindow/impedanceSummaryColor"),
+                                               defaults.impedanceSummary);
+    return colors;
+}
+
+void writePlotColorSettings(QSettings& settings, const KFilterView::PlotColorSettings& colors)
+{
+    const KFilterView::PlotColorSettings defaults = KFilterView::defaultPlotColorSettings();
+
+    writeColorSetting(settings, QStringLiteral("PlotWindow/backgroundColor"), colors.background, defaults.background);
+    writeColorSetting(settings, QStringLiteral("PlotWindow/gridColor"), colors.grid, defaults.grid);
+    writeColorSetting(settings, QStringLiteral("PlotWindow/thresholdGridColor"), colors.thresholdGrid, defaults.thresholdGrid);
+    for (int index = 0; index < static_cast<int>(colors.pressureCurves.size()); ++index) {
+        writeColorSetting(settings, plotPressureColorKey(index), colors.pressureCurves[index], defaults.pressureCurves[index]);
+        writeColorSetting(settings, plotImpedanceColorKey(index), colors.impedanceCurves[index], defaults.impedanceCurves[index]);
+    }
+    writeColorSetting(settings, QStringLiteral("PlotWindow/pressureSummaryColor"),
+                      colors.pressureSummary, defaults.pressureSummary);
+    writeColorSetting(settings, QStringLiteral("PlotWindow/scalarPressureSummaryColor"),
+                      colors.scalarPressureSummary, defaults.scalarPressureSummary);
+    writeColorSetting(settings, QStringLiteral("PlotWindow/impedanceSummaryColor"),
+                      colors.impedanceSummary, defaults.impedanceSummary);
 }
 
 }
@@ -127,6 +210,8 @@ KFilterQt6App::KFilterQt6App(QWidget *parent)
             this, &KFilterQt6App::editDriverParametersFromPreview);
     connect(m_circuitPreview, &CircuitOut::driverHovered,
             this, &KFilterQt6App::showDriverHoverFromPreview);
+    connect(m_circuitPreview, &CircuitOut::driverActivityLampClicked,
+            this, &KFilterQt6App::toggleDriverPlotVisibilityFromPreview);
 
     auto *circuitScrollArea = new QScrollArea(central);
     circuitScrollArea->setWidgetResizable(true);
@@ -223,6 +308,12 @@ void KFilterQt6App::createActions()
     m_resetLayoutAction = new QAction(tr("Reset &Window Layout"), this);
     connect(m_resetLayoutAction, &QAction::triggered, this, &KFilterQt6App::resetWindowLayout);
 
+    m_configurePlotColorsAction = new QAction(tr("&Grid and Plot Colors..."), this);
+    connect(m_configurePlotColorsAction, &QAction::triggered, this, &KFilterQt6App::configurePlotColors);
+
+    m_resetPlotColorsAction = new QAction(tr("&Reset Grid and Plot Colors"), this);
+    connect(m_resetPlotColorsAction, &QAction::triggered, this, &KFilterQt6App::resetPlotColors);
+
     m_circuitPreviewDriverActionGroup = new QActionGroup(this);
     m_circuitPreviewDriverActionGroup->setExclusive(true);
 
@@ -278,6 +369,10 @@ void KFilterQt6App::createMenusAndToolBar()
     viewMenu->addAction(m_showEditToolBarAction);
     viewMenu->addAction(m_showStatusBarAction);
     viewMenu->addSeparator();
+
+    QMenu *plotWindowMenu = viewMenu->addMenu(tr("&Plot Window"));
+    plotWindowMenu->addAction(m_configurePlotColorsAction);
+    plotWindowMenu->addAction(m_resetPlotColorsAction);
 
     QMenu *networkPreviewMenu = viewMenu->addMenu(tr("&Network Preview"));
     QMenu *driverViewMenu = networkPreviewMenu->addMenu(tr("&Driver View"));
@@ -366,6 +461,48 @@ void KFilterQt6App::resetWindowLayout()
     // Keep the plot slightly larger than the schematic, while leaving enough
     // room for the complete 8-section network preview and value table.
     m_mainSplitter->setSizes({520, 360});
+}
+
+void KFilterQt6App::configurePlotColors()
+{
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
+    if (m_plotView == nullptr) {
+        return;
+    }
+
+    PlotColorsDialog dialog(m_plotView->plotColorSettings(), this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    const KFilterView::PlotColorSettings colors = dialog.settings();
+    m_plotView->setPlotColorSettings(colors);
+
+    QSettings settings;
+    writePlotColorSettings(settings, colors);
+
+    statusBar()->showMessage(tr("Plot colors changed."), 3000);
+}
+
+void KFilterQt6App::resetPlotColors()
+{
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
+    if (m_plotView == nullptr) {
+        return;
+    }
+
+    m_plotView->resetPlotColorSettings();
+
+    QSettings settings;
+    writePlotColorSettings(settings, m_plotView->plotColorSettings());
+
+    statusBar()->showMessage(tr("Plot colors reset."), 3000);
 }
 
 void KFilterQt6App::chooseCircuitPreviewBackgroundColor()
@@ -804,6 +941,10 @@ void KFilterQt6App::loadSettings()
         m_circuitPreview->setBackgroundColor(previewBackgroundColor);
     }
 
+    if (m_plotView != nullptr) {
+        m_plotView->setPlotColorSettings(readPlotColorSettings(settings));
+    }
+
     settings.remove(QStringLiteral("CircuitPreview/driverIndex"));
     setCircuitPreviewDriverIndex(KFilterProjectIo::DriverCount, false);
 }
@@ -836,6 +977,10 @@ void KFilterQt6App::saveSettings() const
         } else {
             settings.setValue(QStringLiteral("CircuitPreview/backgroundColor"), previewBackgroundColor);
         }
+    }
+
+    if (m_plotView != nullptr) {
+        writePlotColorSettings(settings, m_plotView->plotColorSettings());
     }
 }
 
@@ -1280,6 +1425,12 @@ void KFilterQt6App::updateActionState()
     if (m_resetLayoutAction != nullptr) {
         m_resetLayoutAction->setEnabled(!locked);
     }
+    if (m_configurePlotColorsAction != nullptr) {
+        m_configurePlotColorsAction->setEnabled(!locked);
+    }
+    if (m_resetPlotColorsAction != nullptr) {
+        m_resetPlotColorsAction->setEnabled(!locked);
+    }
     if (m_circuitPreviewBackgroundColorAction != nullptr) {
         m_circuitPreviewBackgroundColorAction->setEnabled(!locked);
     }
@@ -1373,6 +1524,39 @@ void KFilterQt6App::editDriverParametersFromPreview(int driverIndex)
     }
 
     openDriverParametersDialog(driverIndex);
+}
+
+void KFilterQt6App::toggleDriverPlotVisibilityFromPreview(int driverIndex)
+{
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
+    if (m_doc == nullptr || driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount) {
+        return;
+    }
+
+    driver& selectedDriver = m_doc->m_driverDriver[driverIndex];
+    const bool hasActivePlotFlag = selectedDriver.PressureisActive ||
+                                   selectedDriver.ImpedanzisActive ||
+                                   selectedDriver.SummaryisActive ||
+                                   selectedDriver.ScalarSummaryisActive ||
+                                   selectedDriver.ImpedanzSummaryisActive;
+
+    selectedDriver.PressureisActive = !hasActivePlotFlag;
+    selectedDriver.ImpedanzisActive = false;
+    selectedDriver.SummaryisActive = false;
+    selectedDriver.ScalarSummaryisActive = false;
+    selectedDriver.ImpedanzSummaryisActive = false;
+
+    m_doc->setModified(true);
+    m_doc->viewrefresh();
+
+    if (hasActivePlotFlag) {
+        statusBar()->showMessage(tr("All plot flags disabled for Driver %1.").arg(driverIndex + 1), 3000);
+    } else {
+        statusBar()->showMessage(tr("SPL curve enabled for Driver %1.").arg(driverIndex + 1), 3000);
+    }
 }
 
 void KFilterQt6App::openDriverParametersDialog(int initialDriverIndex)
