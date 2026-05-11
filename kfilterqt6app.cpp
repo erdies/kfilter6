@@ -317,7 +317,7 @@ void KFilterQt6App::createActions()
     m_circuitPreviewDriverActionGroup = new QActionGroup(this);
     m_circuitPreviewDriverActionGroup->setExclusive(true);
 
-    m_circuitPreviewAllDriversAction = new QAction(tr("&All Active Drivers"), this);
+    m_circuitPreviewAllDriversAction = new QAction(tr("&All Drivers"), this);
     m_circuitPreviewAllDriversAction->setCheckable(true);
     m_circuitPreviewAllDriversAction->setChecked(true);
     m_circuitPreviewDriverActionGroup->addAction(m_circuitPreviewAllDriversAction);
@@ -1044,6 +1044,7 @@ void KFilterQt6App::newFile()
     }
 
     m_doc->newDocument();
+    clearDriverPlotVisibilityMemory();
     statusBar()->showMessage(tr("New document created."), 3000);
     refreshOverview();
 }
@@ -1071,6 +1072,13 @@ void KFilterQt6App::openFile()
     openDocumentFile(QUrl::fromLocalFile(filePath));
 }
 
+void KFilterQt6App::clearDriverPlotVisibilityMemory()
+{
+    for (DriverPlotVisibilityMemory& rememberedVisibility : m_driverPlotVisibilityMemory) {
+        rememberedVisibility = DriverPlotVisibilityMemory{};
+    }
+}
+
 bool KFilterQt6App::openDocumentFile(const QUrl &url)
 {
     if (raiseActiveNetworkSectionEditor()) {
@@ -1089,6 +1097,7 @@ bool KFilterQt6App::openDocumentFile(const QUrl &url)
         return false;
     }
 
+    clearDriverPlotVisibilityMemory();
     rememberDirectoryForPath(url.toLocalFile());
     statusBar()->showMessage(tr("Opened %1").arg(url.toLocalFile()), 3000);
     refreshOverview();
@@ -1326,7 +1335,7 @@ void KFilterQt6App::setCircuitPreviewDriverIndex(int driverIndex, bool showStatu
     }
 
     if (driverIndex == KFilterProjectIo::DriverCount) {
-        statusBar()->showMessage(tr("Network preview shows all active drivers."), 3000);
+        statusBar()->showMessage(tr("Network preview shows all drivers."), 3000);
     } else {
         statusBar()->showMessage(tr("Network preview shows Driver %1.").arg(driverIndex + 1), 3000);
     }
@@ -1543,20 +1552,44 @@ void KFilterQt6App::toggleDriverPlotVisibilityFromPreview(int driverIndex)
                                    selectedDriver.ScalarSummaryisActive ||
                                    selectedDriver.ImpedanzSummaryisActive;
 
-    selectedDriver.PressureisActive = !hasActivePlotFlag;
-    selectedDriver.ImpedanzisActive = false;
-    selectedDriver.SummaryisActive = false;
-    selectedDriver.ScalarSummaryisActive = false;
-    selectedDriver.ImpedanzSummaryisActive = false;
+    DriverPlotVisibilityMemory& rememberedVisibility = m_driverPlotVisibilityMemory[driverIndex];
+
+    if (hasActivePlotFlag) {
+        rememberedVisibility.valid = true;
+        rememberedVisibility.pressure = selectedDriver.PressureisActive;
+        rememberedVisibility.impedance = selectedDriver.ImpedanzisActive;
+        rememberedVisibility.vectorSum = selectedDriver.SummaryisActive;
+        rememberedVisibility.scalarSum = selectedDriver.ScalarSummaryisActive;
+        rememberedVisibility.impedanceSum = selectedDriver.ImpedanzSummaryisActive;
+
+        selectedDriver.PressureisActive = false;
+        selectedDriver.ImpedanzisActive = false;
+        selectedDriver.SummaryisActive = false;
+        selectedDriver.ScalarSummaryisActive = false;
+        selectedDriver.ImpedanzSummaryisActive = false;
+
+        statusBar()->showMessage(tr("All plot flags disabled for Driver %1.").arg(driverIndex + 1), 3000);
+    } else if (rememberedVisibility.valid) {
+        selectedDriver.PressureisActive = rememberedVisibility.pressure;
+        selectedDriver.ImpedanzisActive = rememberedVisibility.impedance;
+        selectedDriver.SummaryisActive = rememberedVisibility.vectorSum;
+        selectedDriver.ScalarSummaryisActive = rememberedVisibility.scalarSum;
+        selectedDriver.ImpedanzSummaryisActive = rememberedVisibility.impedanceSum;
+        rememberedVisibility = DriverPlotVisibilityMemory{};
+
+        statusBar()->showMessage(tr("Previous plot flags restored for Driver %1.").arg(driverIndex + 1), 3000);
+    } else {
+        selectedDriver.PressureisActive = true;
+        selectedDriver.ImpedanzisActive = false;
+        selectedDriver.SummaryisActive = false;
+        selectedDriver.ScalarSummaryisActive = false;
+        selectedDriver.ImpedanzSummaryisActive = false;
+
+        statusBar()->showMessage(tr("SPL curve enabled for Driver %1.").arg(driverIndex + 1), 3000);
+    }
 
     m_doc->setModified(true);
     m_doc->viewrefresh();
-
-    if (hasActivePlotFlag) {
-        statusBar()->showMessage(tr("All plot flags disabled for Driver %1.").arg(driverIndex + 1), 3000);
-    } else {
-        statusBar()->showMessage(tr("SPL curve enabled for Driver %1.").arg(driverIndex + 1), 3000);
-    }
 }
 
 void KFilterQt6App::openDriverParametersDialog(int initialDriverIndex)

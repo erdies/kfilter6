@@ -106,8 +106,19 @@ private:
     bool networkSectionEditInProgress() const;
     bool raiseActiveNetworkSectionEditor();
     bool projectUrlFromDropMimeData(const QMimeData *mimeData, QUrl &url) const;
+    void clearDriverPlotVisibilityMemory();
 
     static constexpr int CircuitPreviewDriverActionCount = 4;
+
+    struct DriverPlotVisibilityMemory
+    {
+        bool valid = false;
+        bool pressure = false;
+        bool impedance = false;
+        bool vectorSum = false;
+        bool scalarSum = false;
+        bool impedanceSum = false;
+    };
 
     KFilterDoc *m_doc = nullptr;
     KFilterView *m_plotView = nullptr;
@@ -138,6 +149,7 @@ private:
     QActionGroup *m_circuitPreviewDriverActionGroup = nullptr;
     QAction *m_circuitPreviewAllDriversAction = nullptr;
     std::array<QAction *, CircuitPreviewDriverActionCount> m_circuitPreviewDriverActions{};
+    std::array<DriverPlotVisibilityMemory, CircuitPreviewDriverActionCount> m_driverPlotVisibilityMemory{};
     QAction *m_circuitPreviewBackgroundColorAction = nullptr;
     QAction *m_resetCircuitPreviewBackgroundColorAction = nullptr;
     QAction *m_aboutAction = nullptr;

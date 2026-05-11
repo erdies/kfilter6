@@ -122,7 +122,6 @@ private:
         double fb = 0.0;
         double v2 = 0.0;
         bool curveOrTotalFlagActive = false;
-        bool active = false;
         bool valid = false;
     };
 
@@ -141,7 +140,7 @@ private:
     void updateHoverHit(const QPoint& position);
     void clearHoverHit();
     void drawCurrentDriverPreview(QPainter& painter, const QRect& previewRect) const;
-    void drawNoActiveDriversMessage(QPainter& painter, const QRect& messageRect) const;
+    void drawNoDriversMessage(QPainter& painter, const QRect& messageRect) const;
 
     bool useLightInk() const;
     QColor panelBorderColor() const;

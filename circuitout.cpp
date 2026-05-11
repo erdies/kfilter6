@@ -52,7 +52,7 @@ bool driverHasActiveCurveOrTotalFlag(const driver& drv)
            drv.ImpedanzSummaryisActive;
 }
 
-int allActiveDriversPreviewHeight(int driverCount)
+int allDriversPreviewHeight(int driverCount)
 {
     const int visibleRowCount = std::max(1, driverCount);
     return 16 + visibleRowCount * 320 + (visibleRowCount - 1) * 10;
@@ -80,15 +80,10 @@ CircuitOut::DriverSnapshot CircuitOut::snapshotFromDriver(driver& drv, int drive
     if (drv.Vb == 0.0 || snapshot.boxTypeProposal < 0) {
         snapshot.boxTypeProposal = 0;
     }
-    bool hasNetworkTopology = false;
     for (int unitIndex = 1; unitIndex <= NetworkUnitCount; ++unitIndex) {
         snapshot.network[unitIndex] = drv.getUnit(unitIndex);
-        if (isActive(snapshot.network[unitIndex])) {
-            hasNetworkTopology = true;
-        }
     }
     snapshot.curveOrTotalFlagActive = driverHasActiveCurveOrTotalFlag(drv);
-    snapshot.active = snapshot.curveOrTotalFlagActive || hasNetworkTopology;
     snapshot.valid = true;
     return snapshot;
 }
@@ -128,11 +123,7 @@ void CircuitOut::setDrivers(driver drivers[], int driverCount)
 
     const int availableDriverCount = std::clamp(driverCount, 0, static_cast<int>(m_driverSnapshots.size()));
     for (int index = 0; index < availableDriverCount; ++index) {
-        const DriverSnapshot snapshot = snapshotFromDriver(drivers[index], index + 1);
-        if (!snapshot.active) {
-            continue;
-        }
-        m_driverSnapshots[m_driverSnapshotCount] = snapshot;
+        m_driverSnapshots[m_driverSnapshotCount] = snapshotFromDriver(drivers[index], index + 1);
         ++m_driverSnapshotCount;
     }
     for (int index = m_driverSnapshotCount; index < static_cast<int>(m_driverSnapshots.size()); ++index) {
@@ -228,7 +219,7 @@ QColor CircuitOut::enclosureOutlineColor() const
 QSize CircuitOut::minimumSizeHint() const
 {
     if (m_showAllDrivers) {
-        return QSize(860, allActiveDriversPreviewHeight(m_driverSnapshotCount));
+        return QSize(860, allDriversPreviewHeight(m_driverSnapshotCount));
     }
     return QSize(860, 330);
 }
@@ -236,7 +227,7 @@ QSize CircuitOut::minimumSizeHint() const
 QSize CircuitOut::sizeHint() const
 {
     if (m_showAllDrivers) {
-        return QSize(1140, allActiveDriversPreviewHeight(m_driverSnapshotCount));
+        return QSize(1140, allDriversPreviewHeight(m_driverSnapshotCount));
     }
     return QSize(1140, 330);
 }
@@ -260,7 +251,7 @@ void CircuitOut::paintEvent(QPaintEvent *event)
     }
 
     if (m_driverSnapshotCount <= 0) {
-        drawNoActiveDriversMessage(painter, rect().adjusted(12, 10, -12, -10));
+        drawNoDriversMessage(painter, rect().adjusted(12, 10, -12, -10));
         return;
     }
 
@@ -493,7 +484,7 @@ void CircuitOut::clearHoverHit()
     emit networkSectionHoverLeft();
 }
 
-void CircuitOut::drawNoActiveDriversMessage(QPainter& painter, const QRect& messageRect) const
+void CircuitOut::drawNoDriversMessage(QPainter& painter, const QRect& messageRect) const
 {
     const QFont oldFont = painter.font();
     QFont titleFont = oldFont;
@@ -504,14 +495,14 @@ void CircuitOut::drawNoActiveDriversMessage(QPainter& painter, const QRect& mess
     painter.setPen(QPen(primaryInkColor(), 1.2));
     painter.drawText(messageRect.left(), messageRect.top(), messageRect.width(), 24,
                      Qt::AlignLeft | Qt::AlignVCenter,
-                     tr("No active drivers."));
+                     tr("No drivers available."));
 
     painter.setFont(oldFont);
     painter.setPen(QPen(secondaryInkColor(), 1.0));
     painter.drawText(QRectF(messageRect.left(), messageRect.top() + 34,
                             messageRect.width(), 42),
                      Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap,
-                     tr("Enable a curve/total flag or define a network topology to show a driver here."));
+                     tr("No driver slots are available for the network preview."));
 }
 
 void CircuitOut::drawCurrentDriverPreview(QPainter& painter, const QRect& previewRect) const
@@ -1112,12 +1103,14 @@ void CircuitOut::drawDriverActivityLamp(QPainter& painter, const QRectF& rect, b
 
 void CircuitOut::drawPort(QPainter& painter, const QRectF& rect, bool leftFacing) const
 {
-    painter.setPen(QPen(primaryInkColor(), 1.2));
+    const QPen portPen(primaryInkColor(), 1.2);
+    painter.setPen(portPen);
     painter.setBrush(Qt::NoBrush);
 
-    const qreal tubeHeight = std::max<qreal>(8.0, rect.height() * 0.62);
+    const qreal tubeHeight = std::max<qreal>(10.0, rect.height() * 0.74);
     const qreal tubeY = rect.center().y() - tubeHeight / 2.0;
-    const qreal mouthWidth = std::max<qreal>(10.0, rect.height() * 0.90);
+    const qreal mouthWidth = std::max<qreal>(6.5, rect.height() * 0.42);
+    const qreal mouthHeight = std::max<qreal>(tubeHeight + 3.0, rect.height() * 0.92);
 
     const auto drawRadiation = [&](const QRectF& mouthRect, bool radiatesLeft) {
         const qreal centerY = mouthRect.center().y();
@@ -1145,23 +1138,37 @@ void CircuitOut::drawPort(QPainter& painter, const QRectF& rect, bool leftFacing
         }
     };
 
-    if (leftFacing) {
-        const QRectF tubeRect(rect.left() + mouthWidth * 0.55, tubeY,
-                              rect.width() - mouthWidth * 0.55, tubeHeight);
-        painter.drawRoundedRect(tubeRect, 1.8, 1.8);
-        const QRectF mouthRect(rect.left() - mouthWidth * 0.15, tubeY - 1.5,
-                               mouthWidth, tubeHeight + 3.0);
+    const auto drawMouth = [&](const QRectF& mouthRect) {
+        // Fill the mouth with the panel background so the tube side wall stays hidden
+        // behind the opening while preserving a simple outlined port symbol.
+        painter.save();
+        painter.setPen(portPen);
+        painter.setBrush(backgroundColor());
         painter.drawEllipse(mouthRect);
+        painter.restore();
+    };
+
+    if (leftFacing) {
+        const QRectF tubeRect(rect.left() + mouthWidth * 0.18, tubeY,
+                              rect.width() - mouthWidth * 0.18, tubeHeight);
+        painter.drawRoundedRect(tubeRect, 1.8, 1.8);
+        const QRectF mouthRect(tubeRect.left() - mouthWidth * 0.60,
+                               rect.center().y() - mouthHeight / 2.0,
+                               mouthWidth,
+                               mouthHeight);
+        drawMouth(mouthRect);
         painter.drawLine(QPointF(tubeRect.right(), tubeRect.center().y()),
                          QPointF(tubeRect.right() + 3.5, tubeRect.center().y()));
         drawRadiation(mouthRect, true);
     } else {
         const QRectF tubeRect(rect.left(), tubeY,
-                              rect.width() - mouthWidth * 0.55, tubeHeight);
+                              rect.width() - mouthWidth * 0.18, tubeHeight);
         painter.drawRoundedRect(tubeRect, 1.8, 1.8);
-        const QRectF mouthRect(rect.right() - mouthWidth * 0.85, tubeY - 1.5,
-                               mouthWidth, tubeHeight + 3.0);
-        painter.drawEllipse(mouthRect);
+        const QRectF mouthRect(tubeRect.right() - mouthWidth * 0.40,
+                               rect.center().y() - mouthHeight / 2.0,
+                               mouthWidth,
+                               mouthHeight);
+        drawMouth(mouthRect);
         painter.drawLine(QPointF(tubeRect.left() - 3.5, tubeRect.center().y()),
                          QPointF(tubeRect.left(), tubeRect.center().y()));
         drawRadiation(mouthRect, false);

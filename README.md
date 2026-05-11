@@ -52,7 +52,7 @@ Current major functionality includes:
 - Total impedance curve.
 - Interactive graphical network preview.
 - Network preview modes:
-  - All Active Drivers
+  - All Drivers
   - Driver 1
   - Driver 2
   - Driver 3
@@ -82,7 +82,7 @@ The network preview is a schematic visualization of the current crossover topolo
 
 The section R/C/L groups in the preview can be clicked for targeted network-section editing. The driver/enclosure sketch on the right-hand side can be clicked to open the driver parameter dialog on the matching driver tab. The small lamp next to each driver title shows whether at least one curve/total flag is enabled for that driver.
 
-The default view is **All Active Drivers**. A driver is considered active if at least one curve/total flag is enabled or at least one network-topology value is non-zero.
+The default view is **All Drivers**. It shows all four driver slots regardless of the current plot visibility flags. The small lamp remains a plot-status indicator and can be clicked to toggle plot visibility for the corresponding driver.
 
 Explicit single-driver views remain available through:
 
@@ -255,12 +255,12 @@ If Section 8 already contains shunt values, KFilter asks before replacing them.
 
 ### 5. Use the network preview
 
-The network preview shows the current network topology graphically. Click a section R/C/L group to edit that section, or click the driver/enclosure sketch on the right to open the matching driver parameter tab. The small lamp next to each driver title is lit when at least one curve/total flag is enabled for that driver.
+The network preview shows the current network topology graphically. Click a section R/C/L group to edit that section, or click the driver/enclosure sketch on the right to open the matching driver parameter tab. The small lamp next to each driver title is lit when at least one curve/total flag is enabled for that driver; clicking it toggles plot visibility for that driver.
 
 The default mode is:
 
 ```text
-All Active Drivers
+All Drivers
 ```
 
 You can switch to a single driver through:

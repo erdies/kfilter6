@@ -470,7 +470,7 @@ parameter dialog:
 - the driver/enclosure sketch on the right-hand side of each preview row now has
   a hit-test area
 - left-clicking that sketch opens `DriverParametersDialog`
-- in the `All Active Drivers` view, the dialog opens on the tab belonging to the
+- in the `All Drivers` view, the dialog opens on the tab belonging to the
   clicked driver
 - the network preview selection itself is left unchanged
 - hover feedback uses the pointing-hand cursor and a status-bar hint
