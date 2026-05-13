@@ -409,9 +409,9 @@ void KFilterView::paintEvent(QPaintEvent *event)
     mypainter.setPen(pen);
     mypainter.setFont(font);
 
-    mypainter.drawText(XK(80 * 6.28), 50 * height() / 63, QStringLiteral("100 Hz"));
-    mypainter.drawText(XK(800 * 6.28), 50 * height() / 63, QStringLiteral("1 kHz"));
-    mypainter.drawText(XK(8000 * 6.28), 50 * height() / 63, QStringLiteral("10 kHz"));
+    mypainter.drawText(XK(100 * 6.28), 50 * height() / 63, QStringLiteral("100 Hz"));
+    mypainter.drawText(XK(1000 * 6.28), 50 * height() / 63, QStringLiteral("1 kHz"));
+    mypainter.drawText(XK(10000 * 6.28), 50 * height() / 63, QStringLiteral("10 kHz"));
     mypainter.drawText(5, 100 * height() / 625, QStringLiteral("0 dB"));
     mypainter.drawText(1, 200 * height() / 610, QStringLiteral("-10 dB"));
     mypainter.drawText(1, 300 * height() / 605, QStringLiteral("-20 dB"));

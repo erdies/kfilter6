@@ -57,6 +57,67 @@ int allDriversPreviewHeight(int driverCount)
     const int visibleRowCount = std::max(1, driverCount);
     return 16 + visibleRowCount * 320 + (visibleRowCount - 1) * 10;
 }
+
+struct EquivalentDriverGeometry
+{
+    qreal topY = 0.0;
+    qreal bottomY = 0.0;
+    QRectF rSeriesRect;
+    QRectF lSeriesRect;
+    qreal busLeftX = 0.0;
+    qreal busRightX = 0.0;
+    std::array<qreal, 3> branchX{};
+};
+
+EquivalentDriverGeometry buildEquivalentDriverGeometry(const QRectF& rect, int signalY, int returnY,
+                                                       qreal shuntStartX, qreal shuntBranchShiftX = 0.0)
+{
+    EquivalentDriverGeometry geometry;
+    geometry.topY = std::max(rect.top() + 8.0, static_cast<qreal>(signalY));
+    geometry.bottomY = static_cast<qreal>(returnY);
+
+    // Keep the series RL branch a bit further to the left so the shunt elements
+    // can be spread out more clearly in narrow box-symbol layouts.
+    const qreal rSeriesWidth = 20;
+    const qreal lSeriesWidth = 26;
+    const qreal gap = 4;
+
+    geometry.rSeriesRect = QRectF(rect.left() + 1, geometry.topY - 7, rSeriesWidth, 14);
+    geometry.lSeriesRect = QRectF(geometry.rSeriesRect.right() + gap, geometry.topY - 8, lSeriesWidth, 16);
+
+    geometry.busLeftX = geometry.lSeriesRect.right() + 4;
+    geometry.busRightX = rect.right() - 2;
+
+    if (shuntStartX > 0.0) {
+        const qreal clampedShuntStartX = std::clamp(shuntStartX, geometry.busLeftX, geometry.busRightX - 22.0);
+        const qreal shuntWidth = std::max<qreal>(22.0, geometry.busRightX - clampedShuntStartX);
+        geometry.branchX = {
+            clampedShuntStartX + shuntWidth * 0.08,
+            clampedShuntStartX + shuntWidth * 0.52,
+            clampedShuntStartX + shuntWidth * 0.92
+        };
+    } else {
+        const qreal usableWidth = std::max<qreal>(30.0, geometry.busRightX - geometry.busLeftX);
+        geometry.branchX = {
+            geometry.busLeftX + usableWidth * 0.03,
+            geometry.busLeftX + usableWidth * 0.50,
+            geometry.busLeftX + usableWidth * 0.97
+        };
+    }
+
+    if (std::abs(shuntBranchShiftX) > 0.0) {
+        // Shift only the parallel R/C/L branch group while keeping it inside
+        // the existing upper and lower bus connections.
+        const qreal maxLeftShift = geometry.busLeftX - geometry.branchX.front();
+        const qreal maxRightShift = geometry.busRightX - geometry.branchX.back();
+        const qreal effectiveShift = std::clamp(shuntBranchShiftX, maxLeftShift, maxRightShift);
+        for (qreal& branchX : geometry.branchX) {
+            branchX += effectiveShift;
+        }
+    }
+
+    return geometry;
+}
 }
 
 CircuitOut::CircuitOut(QWidget *parent)
@@ -979,67 +1040,53 @@ void CircuitOut::drawInductor(QPainter& painter, const QRectF& rect, Qt::Orienta
     }
 }
 
-void CircuitOut::drawEquivalentDriverCircuit(QPainter& painter, const QRectF& rect, int signalY, int returnY, qreal shuntStartX) const
+void CircuitOut::drawEquivalentDriverCircuit(QPainter& painter, const QRectF& rect, int signalY, int returnY,
+                                             qreal shuntStartX, bool drawUpperShuntBus,
+                                             qreal shuntBranchShiftX) const
 {
-    const qreal topY = std::max(rect.top() + 8.0, static_cast<qreal>(signalY));
-    const qreal bottomY = static_cast<qreal>(returnY);
-
-    // Keep the series RL branch a bit further to the left so the shunt elements
-    // can be spread out more clearly in narrow box-symbol layouts.
-    const qreal rSeriesWidth = 20;
-    const qreal lSeriesWidth = 26;
-    const qreal gap = 4;
-
-    const QRectF rSeriesRect(rect.left() + 1, topY - 7, rSeriesWidth, 14);
-    const QRectF lSeriesRect(rSeriesRect.right() + gap, topY - 8, lSeriesWidth, 16);
-
-    const qreal busLeftX = lSeriesRect.right() + 4;
-    const qreal busRightX = rect.right() - 2;
-
-    std::array<qreal, 3> branchX{};
-    if (shuntStartX > 0.0) {
-        const qreal clampedShuntStartX = std::clamp(shuntStartX, busLeftX, busRightX - 22.0);
-        const qreal shuntWidth = std::max<qreal>(22.0, busRightX - clampedShuntStartX);
-        branchX = {
-            clampedShuntStartX + shuntWidth * 0.08,
-            clampedShuntStartX + shuntWidth * 0.52,
-            clampedShuntStartX + shuntWidth * 0.92
-        };
-    } else {
-        const qreal usableWidth = std::max<qreal>(30.0, busRightX - busLeftX);
-        branchX = {
-            busLeftX + usableWidth * 0.03,
-            busLeftX + usableWidth * 0.50,
-            busLeftX + usableWidth * 0.97
-        };
-    }
+    const EquivalentDriverGeometry geometry = buildEquivalentDriverGeometry(rect, signalY, returnY,
+                                                                           shuntStartX, shuntBranchShiftX);
 
     painter.setPen(QPen(primaryInkColor(), 1.2));
-    painter.drawLine(QPointF(rect.left(), topY), QPointF(rSeriesRect.left(), topY));
-    drawResistor(painter, rSeriesRect, Qt::Horizontal);
-    painter.drawLine(QPointF(rSeriesRect.right(), topY), QPointF(lSeriesRect.left(), topY));
-    drawInductor(painter, lSeriesRect, Qt::Horizontal);
-    painter.drawLine(QPointF(lSeriesRect.right(), topY), QPointF(busRightX, topY));
+    painter.drawLine(QPointF(rect.left(), geometry.topY), QPointF(geometry.rSeriesRect.left(), geometry.topY));
+    drawResistor(painter, geometry.rSeriesRect, Qt::Horizontal);
+    painter.drawLine(QPointF(geometry.rSeriesRect.right(), geometry.topY), QPointF(geometry.lSeriesRect.left(), geometry.topY));
+    drawInductor(painter, geometry.lSeriesRect, Qt::Horizontal);
+    painter.drawLine(QPointF(geometry.lSeriesRect.right(), geometry.topY), QPointF(geometry.busRightX, geometry.topY));
 
-    const qreal componentTop = topY + 10;
-    const qreal componentHeight = std::max<qreal>(24.0, bottomY - componentTop - 10);
+    const qreal componentTop = geometry.topY + 10;
+    const qreal componentHeight = std::max<qreal>(24.0, geometry.bottomY - componentTop - 10);
+
+    if (drawUpperShuntBus) {
+        painter.drawLine(QPointF(geometry.branchX.front(), componentTop),
+                         QPointF(geometry.branchX.back(), componentTop));
+    }
 
     for (int i = 0; i < 3; ++i) {
-        const qreal x = branchX[static_cast<std::size_t>(i)];
-        QRectF componentRect;
+        const qreal x = geometry.branchX[static_cast<std::size_t>(i)];
+        // Keep the shunt R/C/L symbols visually compact and use explicit
+        // connector lines above and below so the branch looks less bulky.
+        qreal compactHeight = componentHeight;
+        qreal componentWidth = 10.0;
         switch (i) {
         case 0:
-            componentRect = QRectF(x - 5, componentTop, 10, componentHeight);
+            compactHeight = std::min<qreal>(24.0, componentHeight);
+            componentWidth = 10.0;
             break;
         case 1:
-            componentRect = QRectF(x - 6, componentTop, 12, componentHeight);
+            compactHeight = std::min<qreal>(18.0, componentHeight);
+            componentWidth = 12.0;
             break;
         default:
-            componentRect = QRectF(x - 7, componentTop, 14, componentHeight);
+            compactHeight = std::min<qreal>(26.0, componentHeight);
+            componentWidth = 14.0;
             break;
         }
 
-        painter.drawLine(QPointF(x, topY), QPointF(x, componentRect.top()));
+        const qreal compactTop = componentTop + (componentHeight - compactHeight) / 2.0;
+        const QRectF componentRect(x - componentWidth / 2.0, compactTop, componentWidth, compactHeight);
+
+        painter.drawLine(QPointF(x, geometry.topY), QPointF(x, componentRect.top()));
         switch (i) {
         case 0:
             drawResistor(painter, componentRect, Qt::Vertical);
@@ -1051,10 +1098,11 @@ void CircuitOut::drawEquivalentDriverCircuit(QPainter& painter, const QRectF& re
             drawInductor(painter, componentRect, Qt::Vertical);
             break;
         }
-        painter.drawLine(QPointF(x, componentRect.bottom()), QPointF(x, bottomY));
+        painter.drawLine(QPointF(x, componentRect.bottom()), QPointF(x, geometry.bottomY));
     }
 
-    painter.drawLine(QPointF(branchX.front() - 8, bottomY), QPointF(branchX.back() + 8, bottomY));
+    painter.drawLine(QPointF(geometry.branchX.front() - 8, geometry.bottomY),
+                     QPointF(geometry.branchX.back(), geometry.bottomY));
 }
 
 void CircuitOut::drawDriverActivityLamp(QPainter& painter, const QRectF& rect, bool active) const
@@ -1205,6 +1253,32 @@ void CircuitOut::drawSpeakerSymbol(QPainter& painter, const QRectF& rect) const
     }
 }
 
+void CircuitOut::drawEnclosureHatching(QPainter& painter, const QRectF& rect) const
+{
+    if (rect.width() < 8.0 || rect.height() < 8.0) {
+        return;
+    }
+
+    painter.save();
+
+    // Keep the hatching subtle so the box still reads as visually transparent
+    // and the parameter text / equivalent circuit remain easy to read.
+    QColor hatchColor = enclosureOutlineColor();
+    hatchColor.setAlpha(useLightInk() ? 42 : 58);
+    painter.setPen(QPen(hatchColor, 0.8));
+
+    const QRectF hatchRect = rect.adjusted(1.5, 1.5, -1.5, -1.5);
+    painter.setClipRect(hatchRect);
+
+    const qreal spacing = 10.0;
+    for (qreal x = hatchRect.left() - hatchRect.height(); x < hatchRect.right(); x += spacing) {
+        painter.drawLine(QPointF(x, hatchRect.bottom()),
+                         QPointF(x + hatchRect.height(), hatchRect.top()));
+    }
+
+    painter.restore();
+}
+
 void CircuitOut::drawBoxParameterText(QPainter& painter, const QRectF& boxRect, int boxType) const
 {
     if (boxType <= 0) {
@@ -1244,6 +1318,10 @@ void CircuitOut::drawBoxParameterText(QPainter& painter, const QRectF& boxRect, 
                           boxRect.width() * 0.42,
                           totalHeight + 2);
         textAlignment = Qt::AlignLeft | Qt::AlignVCenter;
+    } else if (boxType == 2) {
+        // In the vented-enclosure view, move the parameter text a little further
+        // left while keeping the existing centered layout otherwise unchanged.
+        textRect.translate(-12.0, 0.0);
     } else if (boxType >= 3) {
         // In the bandpass view keep the parameter block clearly inside the
         // left chamber so it stays readable next to the partition-mounted
@@ -1312,13 +1390,22 @@ void CircuitOut::drawDriver(QPainter& painter, const QRectF& rect, int signalY, 
         const QRectF boxRect(rect.left() + 6, boxTop, rect.width() - 28, boxBottom - boxTop);
         painter.setPen(QPen(enclosureOutlineColor(), 1.3));
         painter.drawRect(boxRect);
+        drawEnclosureHatching(painter, boxRect);
         painter.setPen(QPen(primaryInkColor(), 1.2));
         drawBoxParameterText(painter, boxRect, boxType);
         painter.setPen(QPen(primaryInkColor(), 1.2));
-        const QRectF eqRect(boxRect.left() + 10, rect.top() + 8, boxRect.width() - 26, returnY - rect.top() - 16);
+        const qreal enclosureCircuitShift = 8.0;
+        const QRectF eqRect(boxRect.left() + 10 - enclosureCircuitShift,
+                            rect.top() + 8,
+                            boxRect.width() - 26,
+                            returnY - rect.top() - 16);
+        const qreal sealedShuntBranchShiftX = 12.0;
+        const EquivalentDriverGeometry eqGeometry = buildEquivalentDriverGeometry(eqRect, signalY, returnY,
+                                                                                 -1.0, sealedShuntBranchShiftX);
         painter.drawLine(QPointF(boxRect.left(), signalY), QPointF(eqRect.left(), signalY));
-        drawEquivalentDriverCircuit(painter, eqRect, signalY, returnY);
-        painter.drawLine(QPointF(boxRect.left(), returnY), QPointF(boxRect.right(), returnY));
+        drawEquivalentDriverCircuit(painter, eqRect, signalY, returnY,
+                                    -1.0, false, sealedShuntBranchShiftX);
+        painter.drawLine(QPointF(boxRect.left(), returnY), QPointF(eqGeometry.branchX.back(), returnY));
         drawSpeakerSymbol(painter, QRectF(boxRect.right() - 2, boxRect.center().y() - 18, 30, 36));
         return;
     }
@@ -1327,15 +1414,25 @@ void CircuitOut::drawDriver(QPainter& painter, const QRectF& rect, int signalY, 
         const QRectF boxRect(rect.left() + 6, boxTop, rect.width() - 28, boxBottom - boxTop);
         painter.setPen(QPen(enclosureOutlineColor(), 1.3));
         painter.drawRect(boxRect);
+        drawEnclosureHatching(painter, boxRect);
         painter.setPen(QPen(primaryInkColor(), 1.2));
         drawBoxParameterText(painter, boxRect, boxType);
         painter.setPen(QPen(primaryInkColor(), 1.2));
         const QRectF portRect(boxRect.left() + 2, returnY - 19, 40, 18);
         drawPort(painter, portRect, true);
-        const QRectF eqRect(boxRect.left() + 38, rect.top() + 8, boxRect.width() - 62, returnY - rect.top() - 16);
+        const qreal enclosureCircuitShift = 8.0;
+        const QRectF eqRect(boxRect.left() + 38 - enclosureCircuitShift,
+                            rect.top() + 8,
+                            boxRect.width() - 62,
+                            returnY - rect.top() - 16);
+        const EquivalentDriverGeometry eqGeometry = buildEquivalentDriverGeometry(eqRect, signalY, returnY, -1.0);
         painter.drawLine(QPointF(boxRect.left(), signalY), QPointF(eqRect.left(), signalY));
         drawEquivalentDriverCircuit(painter, eqRect, signalY, returnY);
-        painter.drawLine(QPointF(boxRect.left() - 4, returnY), QPointF(boxRect.right() + 16, returnY));
+        // In the vented-enclosure view, keep the upper signal connection to the
+        // shunt branch explicit up to the rightmost parallel L connection.
+        painter.drawLine(QPointF(eqGeometry.lSeriesRect.right(), signalY),
+                         QPointF(eqGeometry.branchX.back(), signalY));
+        painter.drawLine(QPointF(boxRect.left() - 4, returnY), QPointF(eqGeometry.branchX.back(), returnY));
         drawSpeakerSymbol(painter, QRectF(boxRect.right() - 2, boxRect.center().y() - 18, 30, 36));
         return;
     }
@@ -1344,6 +1441,7 @@ void CircuitOut::drawDriver(QPainter& painter, const QRectF& rect, int signalY, 
     const QRectF outerRect(rect.left() + 4, boxTop, rect.width() - 12, boxBottom - boxTop);
     painter.setPen(QPen(enclosureOutlineColor(), 1.3));
     painter.drawRect(outerRect);
+    drawEnclosureHatching(painter, outerRect);
     drawBoxParameterText(painter, outerRect, boxType);
     const qreal partitionX = outerRect.left() + outerRect.width() * 0.48;
     painter.setPen(QPen(enclosureOutlineColor(), 1.3));
@@ -1361,8 +1459,9 @@ void CircuitOut::drawDriver(QPainter& painter, const QRectF& rect, int signalY, 
                         outerRect.right() - eqLeft - 8,
                         returnY - rect.top() - 16);
     painter.drawLine(QPointF(outerRect.left(), signalY), QPointF(eqRect.left(), signalY));
+    const EquivalentDriverGeometry eqGeometry = buildEquivalentDriverGeometry(eqRect, signalY, returnY, speakerRect.right() + 6.0);
     drawEquivalentDriverCircuit(painter, eqRect, signalY, returnY, speakerRect.right() + 6.0);
-    painter.drawLine(QPointF(outerRect.left(), returnY), QPointF(outerRect.right() + 16, returnY));
+    painter.drawLine(QPointF(outerRect.left(), returnY), QPointF(eqGeometry.branchX.back(), returnY));
 
     // In the bandpass view, show the driver directly at the partition instead
     // of keeping a separate symbol at the far right.

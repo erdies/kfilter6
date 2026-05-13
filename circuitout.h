@@ -168,10 +168,13 @@ private:
     void drawInductor(QPainter& painter, const QRectF& rect, Qt::Orientation orientation) const;
     void drawAcSource(QPainter& painter, qreal centerX, qreal signalY, qreal returnY) const;
     void drawDriver(QPainter& painter, const QRectF& rect, int signalY, int returnY) const;
-    void drawEquivalentDriverCircuit(QPainter& painter, const QRectF& rect, int signalY, int returnY, qreal shuntStartX = -1.0) const;
+    void drawEquivalentDriverCircuit(QPainter& painter, const QRectF& rect, int signalY, int returnY,
+                                     qreal shuntStartX = -1.0, bool drawUpperShuntBus = false,
+                                     qreal shuntBranchShiftX = 0.0) const;
     void drawDriverActivityLamp(QPainter& painter, const QRectF& rect, bool active) const;
     void drawPort(QPainter& painter, const QRectF& rect, bool leftFacing) const;
     void drawSpeakerSymbol(QPainter& painter, const QRectF& rect) const;
+    void drawEnclosureHatching(QPainter& painter, const QRectF& rect) const;
     void drawBoxParameterText(QPainter& painter, const QRectF& boxRect, int boxType) const;
     void drawGround(QPainter& painter, QPointF center) const;
 
