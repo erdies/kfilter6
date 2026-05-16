@@ -38,6 +38,11 @@
 #include <QMessageBox>
 #include <QMimeData>
 #include <QGroupBox>
+#include <QMarginsF>
+#include <QPageLayout>
+#include <QPageSize>
+#include <QPainter>
+#include <QPdfWriter>
 #include <QSizePolicy>
 #include <QScrollArea>
 #include <QSettings>
@@ -73,6 +78,14 @@ QString ensureProjectSuffix(QString filePath)
 {
     if (!filePath.endsWith(QStringLiteral(".kfp"), Qt::CaseInsensitive)) {
         filePath += QStringLiteral(".kfp");
+    }
+    return filePath;
+}
+
+QString ensurePdfSuffix(QString filePath)
+{
+    if (!filePath.endsWith(QStringLiteral(".pdf"), Qt::CaseInsensitive)) {
+        filePath += QStringLiteral(".pdf");
     }
     return filePath;
 }
@@ -280,6 +293,10 @@ void KFilterQt6App::createActions()
     m_saveAsAction->setShortcut(QKeySequence::SaveAs);
     connect(m_saveAsAction, &QAction::triggered, this, &KFilterQt6App::saveFileAs);
 
+    m_exportNetworkSchematicPdfAction = new QAction(tr("Export Network Schematic as &PDF..."), this);
+    connect(m_exportNetworkSchematicPdfAction, &QAction::triggered,
+            this, &KFilterQt6App::exportNetworkSchematicPdf);
+
     m_quitAction = new QAction(tr("&Quit"), this);
     m_quitAction->setShortcut(QKeySequence::Quit);
     connect(m_quitAction, &QAction::triggered, this, &QWidget::close);
@@ -357,6 +374,8 @@ void KFilterQt6App::createMenusAndToolBar()
     fileMenu->addSeparator();
     fileMenu->addAction(m_saveAction);
     fileMenu->addAction(m_saveAsAction);
+    fileMenu->addSeparator();
+    fileMenu->addAction(m_exportNetworkSchematicPdfAction);
     fileMenu->addSeparator();
     fileMenu->addAction(m_quitAction);
 
@@ -1143,6 +1162,63 @@ bool KFilterQt6App::saveFileAs()
     return saveToUrl(QUrl::fromLocalFile(filePath));
 }
 
+void KFilterQt6App::exportNetworkSchematicPdf()
+{
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
+    if (m_circuitPreview == nullptr) {
+        QMessageBox::warning(this, tr("Export Network Schematic"),
+                             tr("The network schematic preview is not available."));
+        return;
+    }
+
+    refreshCircuitPreview();
+
+    QString proposedPath;
+    const QString path = currentLocalPath();
+    if (!path.isEmpty()) {
+        const QFileInfo info(path);
+        proposedPath = QDir(dialogStartDirectory()).filePath(
+            QStringLiteral("%1_network.pdf").arg(info.completeBaseName()));
+    } else {
+        proposedPath = QDir(dialogStartDirectory()).filePath(QStringLiteral("Untitled_network.pdf"));
+    }
+
+    QString filePath = QFileDialog::getSaveFileName(
+        this,
+        tr("Export Network Schematic as PDF"),
+        proposedPath,
+        tr("PDF files (*.pdf);;All files (*)"));
+
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    filePath = ensurePdfSuffix(filePath);
+
+    QPdfWriter writer(filePath);
+    writer.setResolution(96);
+    writer.setPageSize(QPageSize(QPageSize::A4));
+    writer.setPageOrientation(QPageLayout::Portrait);
+    writer.setPageMargins(QMarginsF(12.0, 12.0, 12.0, 12.0), QPageLayout::Millimeter);
+
+    QPainter painter;
+    if (!painter.begin(&writer)) {
+        QMessageBox::warning(this, tr("Export Network Schematic"),
+                             tr("The PDF file could not be created:\n%1").arg(filePath));
+        return;
+    }
+
+    const QRectF pageRect = QRectF(writer.pageLayout().paintRectPixels(writer.resolution()));
+    m_circuitPreview->renderForPrint(painter, pageRect);
+    painter.end();
+
+    rememberDirectoryForPath(filePath);
+    statusBar()->showMessage(tr("Network schematic exported to %1").arg(filePath), 3000);
+}
+
 bool KFilterQt6App::saveToUrl(const QUrl &url)
 {
     if (!m_doc->saveDocument(url)) {
@@ -1412,6 +1488,9 @@ void KFilterQt6App::updateActionState()
     }
     if (m_saveAsAction != nullptr) {
         m_saveAsAction->setEnabled(!locked);
+    }
+    if (m_exportNetworkSchematicPdfAction != nullptr) {
+        m_exportNetworkSchematicPdfAction->setEnabled(!locked);
     }
     if (m_driverParametersAction != nullptr) {
         m_driverParametersAction->setEnabled(!locked);

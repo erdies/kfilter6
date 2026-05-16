@@ -268,6 +268,12 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     page.v2 = createSpinBox(0.0, 100000.0, 3, 1.0, tr(" l"));
     page.gainDb = createSpinBox(-60.0, 60.0, 2, 0.5, tr(" dB"));
 
+    const int enclosureEditorWidth = page.gainDb->sizeHint().width();
+    page.vb->setFixedWidth(enclosureEditorWidth);
+    page.fb->setFixedWidth(enclosureEditorWidth);
+    page.tubeDiameter->setFixedWidth(enclosureEditorWidth);
+    page.v2->setFixedWidth(enclosureEditorWidth);
+
     page.alignmentProposal = new QComboBox(page.page);
     page.alignmentProposal->addItem(tr("Open baffle driver"), 0);
     page.alignmentProposal->addItem(tr("Sealed enclosure"), 1);
@@ -311,18 +317,16 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
 
     auto *boxForm = new QFormLayout;
 
-    auto *hogeLayoutWidget = new QWidget(page.page);
-    auto *hogeLayout = new QGridLayout(hogeLayoutWidget);
-    hogeLayout->setContentsMargins(0, 0, 0, 0);
-    hogeLayout->addWidget(new QLabel(tr("Vb"), hogeLayoutWidget), 0, 0);
-    hogeLayout->addWidget(page.vb, 0, 1);
-    auto *hogeButton = new QPushButton(tr("Hoge"), hogeLayoutWidget);
+    auto *vbLayoutWidget = new QWidget(page.page);
+    auto *vbLayout = new QHBoxLayout(vbLayoutWidget);
+    vbLayout->setContentsMargins(0, 0, 0, 0);
+    vbLayout->addWidget(page.vb);
+    auto *hogeButton = new QPushButton(tr("Hoge"), vbLayoutWidget);
     hogeButton->setToolTip(tr("Calculate Vb and Fb from Fs, Qts, and Vas using the legacy Hoge formula."));
-    hogeLayout->addWidget(hogeButton, 0, 2, 2, 1);
-    hogeLayout->addWidget(new QLabel(tr("Fb"), hogeLayoutWidget), 1, 0);
-    hogeLayout->addWidget(page.fb, 1, 1);
-    hogeLayout->setColumnStretch(1, 1);
-    boxForm->addRow(QString(), hogeLayoutWidget);
+    vbLayout->addWidget(hogeButton);
+    vbLayout->addStretch(1);
+    addRow(boxForm, tr("Vb"), vbLayoutWidget);
+    addRow(boxForm, tr("Fb"), page.fb);
     connect(hogeButton, &QPushButton::clicked, this, [this, index]() {
         calculateHogeForPage(m_pages.at(index));
     });
@@ -336,8 +340,8 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     addRow(boxForm, tr("Tube diameter"), tubeLayoutWidget);
 
     addRow(boxForm, tr("V2"), page.v2);
-    addRow(boxForm, tr("Enclosure type"), page.alignmentProposal);
     addRow(boxForm, tr("Gain"), page.gainDb);
+    addRow(boxForm, tr("Enclosure type"), page.alignmentProposal);
 
     auto *optionsLayout = new QVBoxLayout;
     optionsLayout->addWidget(page.pressureActive);
@@ -522,9 +526,3 @@ void DriverParametersDialog::calculateHogeForPage(DriverPage& page)
     updateTubeLengthForPage(page);
 }
 
-void DriverParametersDialog::updateQtsFromQesQms()
-{
-    for (DriverPage& page : m_pages) {
-        updateQtsForPage(page);
-    }
-}

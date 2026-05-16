@@ -60,6 +60,7 @@ private slots:
     void openFile();
     bool saveFile();
     bool saveFileAs();
+    void exportNetworkSchematicPdf();
     void refreshOverview();
     void editDriverParameters();
     void editDriverParametersFromPreview(int driverIndex);
@@ -137,6 +138,7 @@ private:
     QAction *m_openAction = nullptr;
     QAction *m_saveAction = nullptr;
     QAction *m_saveAsAction = nullptr;
+    QAction *m_exportNetworkSchematicPdfAction = nullptr;
     QAction *m_quitAction = nullptr;
     QAction *m_driverParametersAction = nullptr;
     QAction *m_networkParametersAction = nullptr;

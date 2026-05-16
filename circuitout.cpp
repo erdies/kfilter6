@@ -236,43 +236,81 @@ void CircuitOut::setBackgroundColor(const QColor& color)
     update();
 }
 
+bool CircuitOut::printRenderStyle() const
+{
+    return m_renderStyle == RenderStyle::Print;
+}
+
+QColor CircuitOut::backgroundFillColor() const
+{
+    return printRenderStyle() ? QColor(Qt::white) : m_backgroundColor;
+}
+
 bool CircuitOut::useLightInk() const
 {
+    if (printRenderStyle()) {
+        return false;
+    }
+
     return perceivedBrightness(m_backgroundColor) < 128;
 }
 
 QColor CircuitOut::panelBorderColor() const
 {
+    if (printRenderStyle()) {
+        return QColor(150, 150, 150);
+    }
+
     return useLightInk() ? QColor(205, 205, 205)
                          : QColor(88, 88, 88);
 }
 
 QColor CircuitOut::primaryInkColor() const
 {
+    if (printRenderStyle()) {
+        return QColor(0, 0, 0);
+    }
+
     return useLightInk() ? QColor(245, 245, 245)
                          : QColor(0, 0, 0);
 }
 
 QColor CircuitOut::secondaryInkColor() const
 {
+    if (printRenderStyle()) {
+        return QColor(50, 50, 50);
+    }
+
     return useLightInk() ? QColor(220, 220, 220)
                          : QColor(45, 45, 45);
 }
 
 QColor CircuitOut::guideInkColor() const
 {
+    if (printRenderStyle()) {
+        return QColor(115, 115, 115);
+    }
+
     return useLightInk() ? QColor(185, 185, 185)
                          : QColor(105, 105, 105);
 }
 
 QColor CircuitOut::placeholderInkColor() const
 {
+    if (printRenderStyle()) {
+        return QColor(165, 165, 165);
+    }
+
     return useLightInk() ? QColor(150, 150, 150)
                          : QColor(175, 175, 175);
 }
 
 QColor CircuitOut::enclosureOutlineColor() const
 {
+    if (printRenderStyle()) {
+        return QColor(65, 65, 65);
+    }
+
     return useLightInk() ? QColor(245, 205, 160)
                          : QColor(120, 85, 50);
 }
@@ -302,17 +340,65 @@ void CircuitOut::paintEvent(QPaintEvent *event)
 
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.fillRect(rect(), m_backgroundColor);
+    drawPreview(painter, rect(), RenderStyle::Screen);
+}
+
+void CircuitOut::renderForPrint(QPainter& painter, const QRectF& targetRect)
+{
+    if (!targetRect.isValid() || targetRect.isEmpty()) {
+        return;
+    }
+
+    QSize sourceSize = sizeHint();
+    if (!sourceSize.isValid() || sourceSize.isEmpty()) {
+        sourceSize = QSize(1140, 330);
+    }
+
+    const qreal leftInset = targetRect.width() * 0.00;
+    const qreal rightInset = targetRect.width() * 0.08;
+    const QRectF contentRect = targetRect.adjusted(leftInset, 0.0, -rightInset, 0.0);
+    if (!contentRect.isValid() || contentRect.isEmpty()) {
+        return;
+    }
+
+    const qreal xScale = contentRect.width() / static_cast<qreal>(sourceSize.width());
+    const qreal yScale = contentRect.height() / static_cast<qreal>(sourceSize.height());
+    const qreal scale = std::min(xScale, yScale);
+    if (scale <= 0.0) {
+        return;
+    }
+
+    const QSizeF scaledSize(sourceSize.width() * scale, sourceSize.height() * scale);
+    const QPointF topLeft(contentRect.left() + (contentRect.width() - scaledSize.width()) / 2.0,
+                          contentRect.top());
+
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.fillRect(targetRect, QColor(Qt::white));
+    painter.translate(topLeft);
+    painter.scale(scale, scale);
+    drawPreview(painter, QRect(QPoint(0, 0), sourceSize), RenderStyle::Print);
+    painter.restore();
+}
+
+void CircuitOut::drawPreview(QPainter& painter, const QRect& previewRect, RenderStyle style)
+{
+    const RenderStyle previousRenderStyle = m_renderStyle;
+    m_renderStyle = style;
+
+    painter.fillRect(previewRect, backgroundFillColor());
     painter.setPen(QPen(panelBorderColor(), 1.0));
-    painter.drawRect(rect().adjusted(0, 0, -1, -1));
+    painter.drawRect(previewRect.adjusted(0, 0, -1, -1));
 
     if (!m_showAllDrivers) {
-        drawCurrentDriverPreview(painter, rect().adjusted(12, 10, -12, -10));
+        drawCurrentDriverPreview(painter, previewRect.adjusted(12, 10, -12, -10));
+        m_renderStyle = previousRenderStyle;
         return;
     }
 
     if (m_driverSnapshotCount <= 0) {
-        drawNoDriversMessage(painter, rect().adjusted(12, 10, -12, -10));
+        drawNoDriversMessage(painter, previewRect.adjusted(12, 10, -12, -10));
+        m_renderStyle = previousRenderStyle;
         return;
     }
 
@@ -327,7 +413,7 @@ void CircuitOut::paintEvent(QPaintEvent *event)
     previousSnapshot.curveOrTotalFlagActive = m_curveOrTotalFlagActive;
     previousSnapshot.valid = true;
 
-    const QRect outerRect = rect().adjusted(8, 8, -8, -8);
+    const QRect outerRect = previewRect.adjusted(8, 8, -8, -8);
     const int rowGap = 10;
     const int previewHeight = std::max(320, (outerRect.height() - (m_driverSnapshotCount - 1) * rowGap) / m_driverSnapshotCount);
 
@@ -338,7 +424,7 @@ void CircuitOut::paintEvent(QPaintEvent *event)
         }
 
         const QRect previewPanel(outerRect.left(), top, outerRect.width(), previewHeight);
-        painter.fillRect(previewPanel, m_backgroundColor);
+        painter.fillRect(previewPanel, backgroundFillColor());
         painter.setPen(QPen(panelBorderColor(), 1.0));
         painter.drawRect(previewPanel.adjusted(0, 0, -1, -1));
 
@@ -348,6 +434,7 @@ void CircuitOut::paintEvent(QPaintEvent *event)
     }
 
     applySnapshot(previousSnapshot);
+    m_renderStyle = previousRenderStyle;
 }
 
 void CircuitOut::mousePressEvent(QMouseEvent *event)
@@ -407,7 +494,7 @@ void CircuitOut::leaveEvent(QEvent *event)
 
 void CircuitOut::registerSectionHit(int section, NetworkHitGroup group, const QRectF& bounds) const
 {
-    if (!bounds.isValid()) {
+    if (printRenderStyle() || !bounds.isValid()) {
         return;
     }
 
@@ -421,7 +508,7 @@ void CircuitOut::registerSectionHit(int section, NetworkHitGroup group, const QR
 
 void CircuitOut::registerDriverHit(const QRectF& bounds) const
 {
-    if (!bounds.isValid()) {
+    if (printRenderStyle() || !bounds.isValid()) {
         return;
     }
 
@@ -433,7 +520,7 @@ void CircuitOut::registerDriverHit(const QRectF& bounds) const
 
 void CircuitOut::registerDriverActivityLampHit(const QRectF& bounds) const
 {
-    if (!bounds.isValid()) {
+    if (printRenderStyle() || !bounds.isValid()) {
         return;
     }
 
@@ -837,6 +924,8 @@ void CircuitOut::drawSeriesSuckCircuit(QPainter& painter, int section, int x0, i
      */
     const double seriesR = unit(section, SeriesR);
     const double seriesL = unit(section, SeriesL);
+    const bool hasSeriesR = isActive(seriesR);
+    const bool hasSeriesL = isActive(seriesL);
 
     const int elementLeft = x0 + 3;
     const int elementRight = x1 - 3;
@@ -847,16 +936,15 @@ void CircuitOut::drawSeriesSuckCircuit(QPainter& painter, int section, int x0, i
     const int cY = signalY;
     const int lY = signalY + 27;
 
-    const QRectF outline(railLeft - 8, rY - 16,
+    const int railTop = hasSeriesR ? rY : cY;
+    const int railBottom = hasSeriesL ? lY : cY;
+
+    const QRectF outline(railLeft - 8, railTop - 16,
                          std::max<qreal>(36.0, railRight - railLeft + 16),
-                         lY - rY + 32);
+                         railBottom - railTop + 32);
     painter.setPen(QPen(guideInkColor(), 1.0, Qt::DashLine));
     painter.setBrush(Qt::NoBrush);
     painter.drawRect(outline);
-
-    QFont markerFont = painter.font();
-    markerFont.setPointSize(std::max(6, markerFont.pointSize() - 2));
-    const QFont oldFont = painter.font();
 
     painter.setPen(QPen(primaryInkColor(), 1.3));
 
@@ -864,9 +952,10 @@ void CircuitOut::drawSeriesSuckCircuit(QPainter& painter, int section, int x0, i
     painter.drawLine(QPointF(x0, signalY), QPointF(railLeft, signalY));
     painter.drawLine(QPointF(railRight, signalY), QPointF(x1, signalY));
 
-    // Left and right rails make the parallel topology explicit.
-    painter.drawLine(QPointF(railLeft, rY), QPointF(railLeft, lY));
-    painter.drawLine(QPointF(railRight, rY), QPointF(railRight, lY));
+    // Draw the vertical rails only as far as actual branches exist so there are
+    // no dangling line segments above/below the capacitor branch.
+    painter.drawLine(QPointF(railLeft, railTop), QPointF(railLeft, railBottom));
+    painter.drawLine(QPointF(railRight, railTop), QPointF(railRight, railBottom));
 
     painter.setBrush(primaryInkColor());
     painter.drawEllipse(QPointF(railLeft, signalY), 2.0, 2.0);
@@ -874,47 +963,43 @@ void CircuitOut::drawSeriesSuckCircuit(QPainter& painter, int section, int x0, i
     painter.setBrush(Qt::NoBrush);
 
     auto drawParallelBranch = [&](NetworkRow row, int y, bool active) {
+        if (!active) {
+            return;
+        }
+
         const int branchLeft = railLeft + 5;
         const int branchRight = railRight - 5;
         const QRectF componentRect(branchLeft, y - 9,
                                    std::max<qreal>(14.0, branchRight - branchLeft),
                                    18.0);
 
-        painter.setPen(active ? QPen(primaryInkColor(), 1.3)
-                              : QPen(placeholderInkColor(), 1.0, Qt::DashLine));
+        painter.setPen(QPen(primaryInkColor(), 1.3));
         painter.drawLine(QPointF(railLeft, y), QPointF(componentRect.left(), y));
 
-        if (active) {
-            switch (row) {
-            case SeriesR:
-                drawResistor(painter, componentRect, Qt::Horizontal);
-                break;
-            case SeriesC:
-                drawCapacitor(painter, componentRect, Qt::Horizontal);
-                break;
-            case SeriesL:
-                drawInductor(painter, componentRect, Qt::Horizontal);
-                break;
-            default:
-                break;
-            }
-            drawComponentValue(painter, componentRect, valueText(unit(section, row), row));
-        } else {
-            painter.drawLine(QPointF(componentRect.left(), y), QPointF(componentRect.right(), y));
+        switch (row) {
+        case SeriesR:
+            drawResistor(painter, componentRect, Qt::Horizontal);
+            break;
+        case SeriesC:
+            drawCapacitor(painter, componentRect, Qt::Horizontal);
+            break;
+        case SeriesL:
+            drawInductor(painter, componentRect, Qt::Horizontal);
+            break;
+        default:
+            break;
         }
+        drawComponentValue(painter, componentRect, valueText(unit(section, row), row));
 
-        painter.setPen(active ? QPen(primaryInkColor(), 1.3)
-                              : QPen(placeholderInkColor(), 1.0, Qt::DashLine));
         painter.drawLine(QPointF(componentRect.right(), y), QPointF(railRight, y));
     };
 
     // Draw in vertical order: R branch above C branch above L branch.
     // The C branch is always active here because this function is called only
-    // for SeriesC != 0.  Zero R/L branches are drawn faintly as placeholders so
-    // the topology remains visibly parallel.
-    drawParallelBranch(SeriesR, rY, isActive(seriesR));
+    // for SeriesC != 0. Optional R/L branches are shown only when they exist.
+    drawParallelBranch(SeriesR, rY, hasSeriesR);
     drawParallelBranch(SeriesC, cY, true);
-    drawParallelBranch(SeriesL, lY, isActive(seriesL));
+    drawParallelBranch(SeriesL, lY, hasSeriesL);
 }
 
 void CircuitOut::drawShuntTrapBranch(QPainter& painter, int section, int branchX, int signalY, int returnY) const
@@ -1110,16 +1195,31 @@ void CircuitOut::drawDriverActivityLamp(QPainter& painter, const QRectF& rect, b
     painter.save();
     painter.setRenderHint(QPainter::Antialiasing, true);
 
-    const QColor rimColor = useLightInk() ? QColor(225, 225, 225)
-                                           : QColor(35, 35, 35);
-    const QColor shadowColor = useLightInk() ? QColor(45, 45, 45)
-                                             : QColor(115, 115, 115);
-    const QColor fillColor = active ? QColor(80, 205, 95)
-                                    : (useLightInk() ? QColor(82, 82, 82)
-                                                     : QColor(118, 118, 118));
-    const QColor coreColor = active ? QColor(40, 150, 55)
-                                    : (useLightInk() ? QColor(58, 58, 58)
-                                                     : QColor(88, 88, 88));
+    QColor rimColor;
+    QColor shadowColor;
+    QColor fillColor;
+    QColor coreColor;
+    QColor highlightColor;
+
+    if (printRenderStyle()) {
+        rimColor = QColor(35, 35, 35);
+        shadowColor = QColor(205, 205, 205);
+        fillColor = QColor(238, 238, 238);
+        coreColor = active ? QColor(45, 45, 45) : QColor(175, 175, 175);
+        highlightColor = QColor(255, 255, 255);
+    } else {
+        rimColor = useLightInk() ? QColor(225, 225, 225)
+                                 : QColor(35, 35, 35);
+        shadowColor = useLightInk() ? QColor(45, 45, 45)
+                                    : QColor(115, 115, 115);
+        fillColor = active ? QColor(80, 205, 95)
+                           : (useLightInk() ? QColor(82, 82, 82)
+                                            : QColor(118, 118, 118));
+        coreColor = active ? QColor(40, 150, 55)
+                           : (useLightInk() ? QColor(58, 58, 58)
+                                            : QColor(88, 88, 88));
+        highlightColor = QColor(210, 255, 215);
+    }
 
     painter.setPen(QPen(shadowColor, 1.0));
     painter.setBrush(QBrush(shadowColor));
@@ -1142,7 +1242,7 @@ void CircuitOut::drawDriverActivityLamp(QPainter& painter, const QRectF& rect, b
                                    rect.top() + rect.height() * 0.18,
                                    rect.width() * 0.27,
                                    rect.height() * 0.27);
-        painter.setBrush(QBrush(QColor(210, 255, 215)));
+        painter.setBrush(QBrush(highlightColor));
         painter.drawEllipse(highlightRect);
     }
 
@@ -1191,7 +1291,7 @@ void CircuitOut::drawPort(QPainter& painter, const QRectF& rect, bool leftFacing
         // behind the opening while preserving a simple outlined port symbol.
         painter.save();
         painter.setPen(portPen);
-        painter.setBrush(backgroundColor());
+        painter.setBrush(backgroundFillColor());
         painter.drawEllipse(mouthRect);
         painter.restore();
     };

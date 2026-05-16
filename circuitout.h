@@ -18,6 +18,7 @@
 #include <array>
 
 class QContextMenuEvent;
+class QPainter;
 class driver;
 
 /**
@@ -43,6 +44,7 @@ public:
     static QColor defaultBackgroundColor();
     QColor backgroundColor() const;
     void setBackgroundColor(const QColor& color);
+    void renderForPrint(QPainter& painter, const QRectF& targetRect);
 
     enum class NetworkHitGroup
     {
@@ -104,6 +106,12 @@ private:
         int driverIndex = 0;
     };
 
+    enum class RenderStyle
+    {
+        Screen = 0,
+        Print = 1
+    };
+
     enum class HoverHitKind
     {
         None = 0,
@@ -139,9 +147,12 @@ private:
     bool sameDriverActivityLampHit(const DriverActivityLampHit& lhs, const DriverActivityLampHit& rhs) const;
     void updateHoverHit(const QPoint& position);
     void clearHoverHit();
+    void drawPreview(QPainter& painter, const QRect& previewRect, RenderStyle style);
     void drawCurrentDriverPreview(QPainter& painter, const QRect& previewRect) const;
     void drawNoDriversMessage(QPainter& painter, const QRect& messageRect) const;
 
+    bool printRenderStyle() const;
+    QColor backgroundFillColor() const;
     bool useLightInk() const;
     QColor panelBorderColor() const;
     QColor primaryInkColor() const;
@@ -199,6 +210,7 @@ private:
     DriverHit m_hoverDriverHit;
     DriverActivityLampHit m_hoverDriverActivityLampHit;
     HoverHitKind m_hoverHitKind = HoverHitKind::None;
+    RenderStyle m_renderStyle = RenderStyle::Screen;
 };
 
 #endif // CIRCUITOUT_H

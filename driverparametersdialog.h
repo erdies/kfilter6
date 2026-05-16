@@ -47,7 +47,6 @@ public slots:
 
 private slots:
     void applyClicked();
-    void updateQtsFromQesQms();
 
 private:
     struct DriverPage
