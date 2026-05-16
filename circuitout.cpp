@@ -938,13 +938,7 @@ void CircuitOut::drawSeriesSuckCircuit(QPainter& painter, int section, int x0, i
 
     const int railTop = hasSeriesR ? rY : cY;
     const int railBottom = hasSeriesL ? lY : cY;
-
-    const QRectF outline(railLeft - 8, railTop - 16,
-                         std::max<qreal>(36.0, railRight - railLeft + 16),
-                         railBottom - railTop + 32);
-    painter.setPen(QPen(guideInkColor(), 1.0, Qt::DashLine));
-    painter.setBrush(Qt::NoBrush);
-    painter.drawRect(outline);
+    const qreal valueLabelYOffset = -6.0;
 
     painter.setPen(QPen(primaryInkColor(), 1.3));
 
@@ -989,7 +983,8 @@ void CircuitOut::drawSeriesSuckCircuit(QPainter& painter, int section, int x0, i
         default:
             break;
         }
-        drawComponentValue(painter, componentRect, valueText(unit(section, row), row));
+        const QRectF valueRect = componentRect.translated(0.0, valueLabelYOffset);
+        drawComponentValue(painter, valueRect, valueText(unit(section, row), row));
 
         painter.drawLine(QPointF(componentRect.right(), y), QPointF(railRight, y));
     };
