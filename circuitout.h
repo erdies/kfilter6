@@ -164,7 +164,6 @@ private:
     QColor primaryInkColor() const;
     QColor secondaryInkColor() const;
     QColor guideInkColor() const;
-    QColor placeholderInkColor() const;
     QColor enclosureOutlineColor() const;
 
     double unit(int section, NetworkRow row) const;

@@ -42,7 +42,6 @@ public:
                                       QWidget *parent = nullptr);
 
     Values values() const;
-    Values originalValues() const;
     bool currentValues(Values *values, QString *errorMessage = nullptr) const;
 
 signals:
@@ -71,7 +70,6 @@ private:
                              double& baseValue);
     void setVariationSliderEnabled(QSlider *slider, bool enabled);
     static double valueFromSliderPosition(double baseValue, int position);
-    static int sliderPositionFromValue(double baseValue, double value);
 
     bool readField(QDoubleSpinBox *field,
                    const QString& label,
@@ -89,7 +87,6 @@ private:
     QDialogButtonBox *m_buttonBox = nullptr;
     QTimer *m_previewTimer = nullptr;
     Values m_values;
-    Values m_originalValues;
     double m_resistanceSliderBase = 0.0;
     double m_capacitanceSliderBase = 0.0;
     double m_inductanceSliderBase = 0.0;

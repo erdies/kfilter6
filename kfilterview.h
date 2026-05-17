@@ -17,7 +17,6 @@
 class KFilterDoc;
 class QPaintEvent;
 class QPainter;
-class QPrinter;
 
 /**
  * Qt6 porting version of the original KFilter plot view.
@@ -49,9 +48,6 @@ public:
     ~KFilterView() override;
 
     KFilterDoc *getDocument() const;
-
-    /** contains the implementation for printing functionality */
-    void print(QPrinter *pPrinter);
 
     static PlotColorSettings defaultPlotColorSettings();
     PlotColorSettings plotColorSettings() const;
@@ -108,9 +104,6 @@ private:
     QColor cimpedanceS;
     QColor cscalarpressureS;
 
-    int m_Schall1 = 0;
-    int m_Schall2 = 0;
-    int m_Schall3 = 0;
     double Faktor = 1.047128548;
     double Start = 125.6637061;
     double Xvalue[150] = {};

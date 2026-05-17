@@ -18,7 +18,6 @@
 
 #include <QAction>
 #include <QActionGroup>
-#include <QApplication>
 #include <QCloseEvent>
 #include <QColor>
 #include <QColorDialog>
@@ -43,6 +42,7 @@
 #include <QPageLayout>
 #include <QPageSize>
 #include <QPainter>
+#include <QPen>
 #include <QPdfWriter>
 #include <QRectF>
 #include <QRegion>
@@ -137,6 +137,14 @@ QColor readColorSetting(const QSettings& settings, const QString& key, const QCo
     return color.isValid() ? color : defaultColor;
 }
 
+int perceivedLuminance(const QColor& color)
+{
+    const QColor rgbColor = color.toRgb();
+    return qRound((0.2126 * rgbColor.red())
+                  + (0.7152 * rgbColor.green())
+                  + (0.0722 * rgbColor.blue()));
+}
+
 QColor darkenedForWhitePaper(const QColor& color)
 {
     if (!color.isValid()) {
@@ -145,8 +153,10 @@ QColor darkenedForWhitePaper(const QColor& color)
 
     const QColor rgbColor = color.toRgb();
     const int alpha = rgbColor.alpha();
-    const int lightness = rgbColor.lightness();
-    if (lightness <= 135) {
+
+    // Use perceived luminance instead of HSL lightness so that bright yellow,
+    // green and cyan lines are also darkened for white paper output.
+    if (perceivedLuminance(rgbColor) <= 120) {
         return rgbColor;
     }
 
@@ -154,10 +164,32 @@ QColor darkenedForWhitePaper(const QColor& color)
     const int hue = hslColor.hslHue();
     const int saturation = hslColor.hslSaturation();
     if (hue < 0) {
-        return QColor(70, 70, 70, alpha);
+        return QColor(65, 65, 65, alpha);
     }
 
-    hslColor.setHsl(hue, std::max(70, saturation), 85, alpha);
+    hslColor.setHsl(hue, std::max(80, saturation), 70, alpha);
+    return hslColor.toRgb();
+}
+
+QColor darkenedPlotCurveForWhitePaper(const QColor& color)
+{
+    if (!color.isValid()) {
+        return QColor(Qt::black);
+    }
+
+    const QColor rgbColor = color.toRgb();
+    const int alpha = rgbColor.alpha();
+    QColor hslColor = rgbColor.toHsl();
+    const int hue = hslColor.hslHue();
+
+    if (hue < 0) {
+        const int gray = std::min(45, hslColor.lightness());
+        return QColor(gray, gray, gray, alpha);
+    }
+
+    const int saturation = std::max(95, hslColor.hslSaturation());
+    const int lightness = std::min(55, hslColor.lightness());
+    hslColor.setHsl(hue, saturation, lightness, alpha);
     return hslColor.toRgb();
 }
 
@@ -166,19 +198,19 @@ KFilterView::PlotColorSettings makePlotPdfColorSettings(const KFilterView::PlotC
     KFilterView::PlotColorSettings printColors = screenColors;
 
     printColors.background = QColor(Qt::white);
-    printColors.grid = QColor(185, 185, 185);
+    printColors.grid = QColor(145, 145, 145);
     printColors.thresholdGrid = darkenedForWhitePaper(screenColors.thresholdGrid);
 
     for (QColor& color : printColors.pressureCurves) {
-        color = darkenedForWhitePaper(color);
+        color = darkenedPlotCurveForWhitePaper(color);
     }
     for (QColor& color : printColors.impedanceCurves) {
-        color = darkenedForWhitePaper(color);
+        color = darkenedPlotCurveForWhitePaper(color);
     }
 
-    printColors.pressureSummary = darkenedForWhitePaper(screenColors.pressureSummary);
-    printColors.impedanceSummary = darkenedForWhitePaper(screenColors.impedanceSummary);
-    printColors.scalarPressureSummary = darkenedForWhitePaper(screenColors.scalarPressureSummary);
+    printColors.pressureSummary = darkenedPlotCurveForWhitePaper(screenColors.pressureSummary);
+    printColors.impedanceSummary = darkenedPlotCurveForWhitePaper(screenColors.impedanceSummary);
+    printColors.scalarPressureSummary = darkenedPlotCurveForWhitePaper(screenColors.scalarPressureSummary);
 
     return printColors;
 }
@@ -273,6 +305,15 @@ QRectF drawPlotImageForPdf(QPainter& painter,
     }
 
     painter.drawImage(imageRect, plotImage, QRectF(plotImage.rect()));
+
+    QPen borderPen(Qt::black);
+    borderPen.setWidthF(0.6);
+    painter.save();
+    painter.setPen(borderPen);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRect(imageRect.adjusted(0.5, 0.5, -0.5, -0.5));
+    painter.restore();
+
     return imageRect;
 }
 
@@ -1466,7 +1507,7 @@ void KFilterQt6App::exportNetworkSchematicPdf()
         preferredLayout.networkScale >= patch134NetworkScale * PreserveNetworkScaleTolerance;
 
     if (preferredPreservesNetwork) {
-        painter.drawImage(preferredLayout.plotImageRect, plotImage, QRectF(plotImage.rect()));
+        drawPlotImageForPdf(painter, plotImage, preferredLayout.plotSlot, PdfVerticalAlignment::Top);
         m_circuitPreview->renderForPrint(painter, preferredLayout.networkRect);
     } else {
         const auto compactLayout = layoutForPlotHeight(pageRect.height() * MinimumPlotHeightRatio);
@@ -1475,7 +1516,7 @@ void KFilterQt6App::exportNetworkSchematicPdf()
             compactLayout.networkScale >= patch134NetworkScale * PreserveNetworkScaleTolerance;
 
         if (compactPreservesNetwork) {
-            painter.drawImage(compactLayout.plotImageRect, plotImage, QRectF(plotImage.rect()));
+            drawPlotImageForPdf(painter, plotImage, compactLayout.plotSlot, PdfVerticalAlignment::Top);
             m_circuitPreview->renderForPrint(painter, compactLayout.networkRect);
         } else {
             drawPlotImageForPdf(painter, plotImage, pageRect);

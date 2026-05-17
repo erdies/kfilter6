@@ -8,7 +8,6 @@
 
 #include "kfilterdoc.h"
 
-#include <QBrush>
 #include <QFont>
 #include <QFontMetrics>
 #include <QLineF>
@@ -33,9 +32,6 @@ KFilterView::KFilterView(KFilterDoc *document, QWidget *parent)
     setMinimumSize(640, 360);
     Start = 125.6637061;
     Faktor = 1.047128548;
-    m_Schall1 = 0;
-    m_Schall2 = 0;
-    m_Schall3 = 0;
     initXvalue();
 }
 
@@ -44,12 +40,6 @@ KFilterView::~KFilterView() = default;
 KFilterDoc *KFilterView::getDocument() const
 {
     return m_document;
-}
-
-void KFilterView::print(QPrinter *pPrinter)
-{
-    // Printing is intentionally left disabled during the first Qt6 view bring-up.
-    Q_UNUSED(pPrinter);
 }
 
 void KFilterView::initXvalue()

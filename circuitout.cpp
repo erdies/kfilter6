@@ -295,16 +295,6 @@ QColor CircuitOut::guideInkColor() const
                          : QColor(105, 105, 105);
 }
 
-QColor CircuitOut::placeholderInkColor() const
-{
-    if (printRenderStyle()) {
-        return QColor(165, 165, 165);
-    }
-
-    return useLightInk() ? QColor(150, 150, 150)
-                         : QColor(175, 175, 175);
-}
-
 QColor CircuitOut::enclosureOutlineColor() const
 {
     if (printRenderStyle()) {

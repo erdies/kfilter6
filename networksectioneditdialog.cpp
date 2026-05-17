@@ -168,7 +168,6 @@ NetworkSectionEditDialog::NetworkSectionEditDialog(int driverIndex,
                                                    QWidget *parent)
     : QDialog(parent),
       m_values(initialValues),
-      m_originalValues(initialValues),
       m_resistanceSliderBase(initialValues.resistanceOhm),
       m_capacitanceSliderBase(initialValues.capacitanceMicroFarad),
       m_inductanceSliderBase(initialValues.inductanceMilliHenry)
@@ -280,11 +279,6 @@ NetworkSectionEditDialog::NetworkSectionEditDialog(int driverIndex,
 NetworkSectionEditDialog::Values NetworkSectionEditDialog::values() const
 {
     return m_values;
-}
-
-NetworkSectionEditDialog::Values NetworkSectionEditDialog::originalValues() const
-{
-    return m_originalValues;
 }
 
 bool NetworkSectionEditDialog::currentValues(Values *values, QString *errorMessage) const
@@ -478,21 +472,6 @@ double NetworkSectionEditDialog::valueFromSliderPosition(double baseValue, int p
     }
 
     return baseValue * std::pow(2.0, static_cast<double>(position) / 100.0);
-}
-
-int NetworkSectionEditDialog::sliderPositionFromValue(double baseValue, double value)
-{
-    if (!std::isfinite(baseValue) || baseValue <= 0.0 || !std::isfinite(value) || value <= 0.0) {
-        return -100;
-    }
-
-    const double rawPosition = 100.0 * std::log(value / baseValue) / std::log(2.0);
-    if (!std::isfinite(rawPosition)) {
-        return 0;
-    }
-
-    const int roundedPosition = static_cast<int>(std::lround(rawPosition));
-    return std::max(-100, std::min(100, roundedPosition));
 }
 
 bool NetworkSectionEditDialog::readField(QDoubleSpinBox *field,
