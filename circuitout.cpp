@@ -331,6 +331,52 @@ QSize CircuitOut::sizeHint() const
     return QSize(1140, 330);
 }
 
+QSize CircuitOut::sourceSizeForRender(RenderStyle style) const
+{
+    if (m_showAllDrivers && style == RenderStyle::Print) {
+        return QSize(1140, allDriversPreviewHeight(static_cast<int>(driverSnapshotIndexesForRender(style).size())));
+    }
+    return sizeHint();
+}
+
+QVector<int> CircuitOut::driverSnapshotIndexesForRender(RenderStyle style) const
+{
+    QVector<int> indexes;
+    indexes.reserve(std::max(0, m_driverSnapshotCount));
+
+    for (int index = 0; index < m_driverSnapshotCount; ++index) {
+        const DriverSnapshot& snapshot = m_driverSnapshots[index];
+        if (!snapshot.valid) {
+            continue;
+        }
+
+        if (style == RenderStyle::Print && !driverSnapshotPrintableInAllDriversPdf(snapshot)) {
+            continue;
+        }
+
+        indexes.append(index);
+    }
+
+    return indexes;
+}
+
+bool CircuitOut::driverSnapshotHasAnyNetworkElement(const DriverSnapshot& snapshot)
+{
+    for (int unitIndex = 1; unitIndex <= NetworkUnitCount; ++unitIndex) {
+        if (isActive(snapshot.network[unitIndex])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool CircuitOut::driverSnapshotPrintableInAllDriversPdf(const DriverSnapshot& snapshot)
+{
+    return snapshot.valid &&
+           (driverSnapshotHasAnyNetworkElement(snapshot) ||
+            snapshot.curveOrTotalFlagActive);
+}
+
 void CircuitOut::paintEvent(QPaintEvent *event)
 {
     QWidget::paintEvent(event);
@@ -349,7 +395,7 @@ void CircuitOut::renderForPrint(QPainter& painter, const QRectF& targetRect)
         return;
     }
 
-    QSize sourceSize = sizeHint();
+    QSize sourceSize = sourceSizeForRender(RenderStyle::Print);
     if (!sourceSize.isValid() || sourceSize.isEmpty()) {
         sourceSize = QSize(1140, 330);
     }
@@ -396,8 +442,13 @@ void CircuitOut::drawPreview(QPainter& painter, const QRect& previewRect, Render
         return;
     }
 
-    if (m_driverSnapshotCount <= 0) {
-        drawNoDriversMessage(painter, previewRect.adjusted(12, 10, -12, -10));
+    const QVector<int> renderIndexes = driverSnapshotIndexesForRender(style);
+    if (renderIndexes.isEmpty()) {
+        if (m_driverSnapshotCount <= 0) {
+            drawNoDriversMessage(painter, previewRect.adjusted(12, 10, -12, -10));
+        } else {
+            drawNoPrintableDriversMessage(painter, previewRect.adjusted(12, 10, -12, -10));
+        }
         m_renderStyle = previousRenderStyle;
         return;
     }
@@ -415,14 +466,11 @@ void CircuitOut::drawPreview(QPainter& painter, const QRect& previewRect, Render
 
     const QRect outerRect = previewRect.adjusted(8, 8, -8, -8);
     const int rowGap = 10;
-    const int previewHeight = std::max(320, (outerRect.height() - (m_driverSnapshotCount - 1) * rowGap) / m_driverSnapshotCount);
+    const int renderDriverCount = static_cast<int>(renderIndexes.size());
+    const int previewHeight = std::max(320, (outerRect.height() - (renderDriverCount - 1) * rowGap) / renderDriverCount);
 
     int top = outerRect.top();
-    for (int index = 0; index < m_driverSnapshotCount; ++index) {
-        if (!m_driverSnapshots[index].valid) {
-            continue;
-        }
-
+    for (const int index : renderIndexes) {
         const QRect previewPanel(outerRect.left(), top, outerRect.width(), previewHeight);
         painter.fillRect(previewPanel, backgroundFillColor());
         painter.setPen(QPen(panelBorderColor(), 1.0));
@@ -651,6 +699,27 @@ void CircuitOut::drawNoDriversMessage(QPainter& painter, const QRect& messageRec
                             messageRect.width(), 42),
                      Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap,
                      tr("No driver slots are available for the network preview."));
+}
+
+void CircuitOut::drawNoPrintableDriversMessage(QPainter& painter, const QRect& messageRect) const
+{
+    const QFont oldFont = painter.font();
+    QFont titleFont = oldFont;
+    titleFont.setBold(true);
+    titleFont.setPointSize(titleFont.pointSize() + 1);
+
+    painter.setFont(titleFont);
+    painter.setPen(QPen(primaryInkColor(), 1.2));
+    painter.drawText(messageRect.left(), messageRect.top(), messageRect.width(), 24,
+                     Qt::AlignLeft | Qt::AlignVCenter,
+                     tr("No printable drivers available."));
+
+    painter.setFont(oldFont);
+    painter.setPen(QPen(secondaryInkColor(), 1.0));
+    painter.drawText(QRectF(messageRect.left(), messageRect.top() + 34,
+                            messageRect.width(), 54),
+                     Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap,
+                     tr("All drivers are empty and have no active plot or summary flag."));
 }
 
 void CircuitOut::drawCurrentDriverPreview(QPainter& painter, const QRect& previewRect) const

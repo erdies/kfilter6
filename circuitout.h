@@ -147,9 +147,14 @@ private:
     bool sameDriverActivityLampHit(const DriverActivityLampHit& lhs, const DriverActivityLampHit& rhs) const;
     void updateHoverHit(const QPoint& position);
     void clearHoverHit();
+    QSize sourceSizeForRender(RenderStyle style) const;
+    QVector<int> driverSnapshotIndexesForRender(RenderStyle style) const;
+    static bool driverSnapshotHasAnyNetworkElement(const DriverSnapshot& snapshot);
+    static bool driverSnapshotPrintableInAllDriversPdf(const DriverSnapshot& snapshot);
     void drawPreview(QPainter& painter, const QRect& previewRect, RenderStyle style);
     void drawCurrentDriverPreview(QPainter& painter, const QRect& previewRect) const;
     void drawNoDriversMessage(QPainter& painter, const QRect& messageRect) const;
+    void drawNoPrintableDriversMessage(QPainter& painter, const QRect& messageRect) const;
 
     bool printRenderStyle() const;
     QColor backgroundFillColor() const;
