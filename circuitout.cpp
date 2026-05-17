@@ -339,6 +339,15 @@ QSize CircuitOut::sourceSizeForRender(RenderStyle style) const
     return sizeHint();
 }
 
+QSize CircuitOut::printSourceSizeHint() const
+{
+    QSize sourceSize = sourceSizeForRender(RenderStyle::Print);
+    if (!sourceSize.isValid() || sourceSize.isEmpty()) {
+        sourceSize = QSize(1140, 330);
+    }
+    return sourceSize;
+}
+
 QVector<int> CircuitOut::driverSnapshotIndexesForRender(RenderStyle style) const
 {
     QVector<int> indexes;
@@ -423,6 +432,7 @@ void CircuitOut::renderForPrint(QPainter& painter, const QRectF& targetRect)
     painter.fillRect(targetRect, QColor(Qt::white));
     painter.translate(topLeft);
     painter.scale(scale, scale);
+
     drawPreview(painter, QRect(QPoint(0, 0), sourceSize), RenderStyle::Print);
     painter.restore();
 }

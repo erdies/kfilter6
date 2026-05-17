@@ -31,6 +31,7 @@
 #include <QDropEvent>
 #include <QEvent>
 #include <QKeySequence>
+#include <QImage>
 #include <QLabel>
 #include <QList>
 #include <QMenu>
@@ -43,6 +44,10 @@
 #include <QPageSize>
 #include <QPainter>
 #include <QPdfWriter>
+#include <QRectF>
+#include <QRegion>
+#include <QSize>
+#include <QSizeF>
 #include <QSizePolicy>
 #include <QScrollArea>
 #include <QSettings>
@@ -90,6 +95,31 @@ QString ensurePdfSuffix(QString filePath)
     return filePath;
 }
 
+enum class PdfVerticalAlignment
+{
+    Center = 0,
+    Top = 1
+};
+
+QRectF aspectFitRect(const QRectF& outerRect,
+                     const QSizeF& sourceSize,
+                     PdfVerticalAlignment verticalAlignment = PdfVerticalAlignment::Center)
+{
+    if (!outerRect.isValid() || sourceSize.width() <= 0.0 || sourceSize.height() <= 0.0) {
+        return QRectF();
+    }
+
+    QSizeF fittedSize = sourceSize;
+    fittedSize.scale(outerRect.size(), Qt::KeepAspectRatio);
+
+    const qreal x = outerRect.x() + (outerRect.width() - fittedSize.width()) / 2.0;
+    const qreal y = verticalAlignment == PdfVerticalAlignment::Top
+                        ? outerRect.y()
+                        : outerRect.y() + (outerRect.height() - fittedSize.height()) / 2.0;
+
+    return QRectF(x, y, fittedSize.width(), fittedSize.height());
+}
+
 bool nearlyEqual(double lhs, double rhs)
 {
     const double scale = std::max(1.0, std::max(std::abs(lhs), std::abs(rhs)));
@@ -106,6 +136,169 @@ QColor readColorSetting(const QSettings& settings, const QString& key, const QCo
     const QColor color = value.value<QColor>();
     return color.isValid() ? color : defaultColor;
 }
+
+QColor darkenedForWhitePaper(const QColor& color)
+{
+    if (!color.isValid()) {
+        return QColor(Qt::black);
+    }
+
+    const QColor rgbColor = color.toRgb();
+    const int alpha = rgbColor.alpha();
+    const int lightness = rgbColor.lightness();
+    if (lightness <= 135) {
+        return rgbColor;
+    }
+
+    QColor hslColor = rgbColor.toHsl();
+    const int hue = hslColor.hslHue();
+    const int saturation = hslColor.hslSaturation();
+    if (hue < 0) {
+        return QColor(70, 70, 70, alpha);
+    }
+
+    hslColor.setHsl(hue, std::max(70, saturation), 85, alpha);
+    return hslColor.toRgb();
+}
+
+KFilterView::PlotColorSettings makePlotPdfColorSettings(const KFilterView::PlotColorSettings& screenColors)
+{
+    KFilterView::PlotColorSettings printColors = screenColors;
+
+    printColors.background = QColor(Qt::white);
+    printColors.grid = QColor(185, 185, 185);
+    printColors.thresholdGrid = darkenedForWhitePaper(screenColors.thresholdGrid);
+
+    for (QColor& color : printColors.pressureCurves) {
+        color = darkenedForWhitePaper(color);
+    }
+    for (QColor& color : printColors.impedanceCurves) {
+        color = darkenedForWhitePaper(color);
+    }
+
+    printColors.pressureSummary = darkenedForWhitePaper(screenColors.pressureSummary);
+    printColors.impedanceSummary = darkenedForWhitePaper(screenColors.impedanceSummary);
+    printColors.scalarPressureSummary = darkenedForWhitePaper(screenColors.scalarPressureSummary);
+
+    return printColors;
+}
+
+class ScopedPlotColorSettings
+{
+public:
+    ScopedPlotColorSettings(KFilterView* view, const KFilterView::PlotColorSettings& temporarySettings)
+        : m_view(view)
+        , m_originalSettings(view != nullptr ? view->plotColorSettings() : KFilterView::PlotColorSettings{})
+    {
+        if (m_view != nullptr) {
+            m_view->setPlotColorSettings(temporarySettings);
+        }
+    }
+
+    ScopedPlotColorSettings(const ScopedPlotColorSettings&) = delete;
+    ScopedPlotColorSettings& operator=(const ScopedPlotColorSettings&) = delete;
+
+    ~ScopedPlotColorSettings()
+    {
+        if (m_view != nullptr) {
+            m_view->setPlotColorSettings(m_originalSettings);
+        }
+    }
+
+private:
+    KFilterView* m_view = nullptr;
+    KFilterView::PlotColorSettings m_originalSettings;
+};
+
+QImage renderPlotViewImageForPdf(KFilterView* plotView, qreal rasterScale)
+{
+    if (plotView == nullptr || rasterScale <= 0.0) {
+        return QImage();
+    }
+
+    QSize plotSize = plotView->size();
+    if (!plotSize.isValid() || plotSize.isEmpty()) {
+        plotSize = QSize(640, 360);
+    }
+
+    const QSize imageSize(qRound(plotSize.width() * rasterScale),
+                          qRound(plotSize.height() * rasterScale));
+    if (!imageSize.isValid() || imageSize.isEmpty()) {
+        return QImage();
+    }
+
+    QImage plotImage(imageSize, QImage::Format_ARGB32_Premultiplied);
+    plotImage.fill(Qt::white);
+
+    const KFilterView::PlotColorSettings printColors = makePlotPdfColorSettings(plotView->plotColorSettings());
+    ScopedPlotColorSettings printColorGuard(plotView, printColors);
+
+    QPainter imagePainter(&plotImage);
+    imagePainter.setRenderHint(QPainter::Antialiasing, true);
+    imagePainter.setRenderHint(QPainter::TextAntialiasing, true);
+    imagePainter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    imagePainter.scale(rasterScale, rasterScale);
+    plotView->render(&imagePainter, QPoint(), QRegion(),
+                     QWidget::DrawWindowBackground | QWidget::DrawChildren);
+
+    return plotImage;
+}
+
+QRectF plotImageTargetRectForPdf(const QImage& plotImage,
+                                  const QRectF& targetRect,
+                                  PdfVerticalAlignment verticalAlignment = PdfVerticalAlignment::Center)
+{
+    if (plotImage.isNull() || !targetRect.isValid() || targetRect.isEmpty()) {
+        return QRectF();
+    }
+
+    const qreal leftInset = targetRect.width() * 0.00;
+    const qreal rightInset = targetRect.width() * 0.08;
+    const QRectF contentRect = targetRect.adjusted(leftInset, 0.0, -rightInset, 0.0);
+    if (!contentRect.isValid() || contentRect.isEmpty()) {
+        return QRectF();
+    }
+
+    return aspectFitRect(contentRect, QSizeF(plotImage.size()), verticalAlignment);
+}
+
+QRectF drawPlotImageForPdf(QPainter& painter,
+                           const QImage& plotImage,
+                           const QRectF& targetRect,
+                           PdfVerticalAlignment verticalAlignment = PdfVerticalAlignment::Center)
+{
+    const QRectF imageRect = plotImageTargetRectForPdf(plotImage, targetRect, verticalAlignment);
+    if (!imageRect.isValid() || imageRect.isEmpty()) {
+        return QRectF();
+    }
+
+    painter.drawImage(imageRect, plotImage, QRectF(plotImage.rect()));
+    return imageRect;
+}
+
+qreal networkPrintScaleForTarget(const QRectF& targetRect, const QSize& sourceSize)
+{
+    if (!targetRect.isValid() || targetRect.isEmpty() ||
+        !sourceSize.isValid() || sourceSize.isEmpty()) {
+        return 0.0;
+    }
+
+    // Mirrors CircuitOut::renderForPrint(): the schematic itself keeps its own
+    // right-side print inset.  The combined layout must not add any additional
+    // horizontal reduction around it.
+    constexpr qreal NetworkPrintRightInset = 0.08;
+    const QRectF contentRect = targetRect.adjusted(0.0, 0.0,
+                                                   -targetRect.width() * NetworkPrintRightInset,
+                                                   0.0);
+    if (!contentRect.isValid() || contentRect.isEmpty()) {
+        return 0.0;
+    }
+
+    const qreal xScale = contentRect.width() / static_cast<qreal>(sourceSize.width());
+    const qreal yScale = contentRect.height() / static_cast<qreal>(sourceSize.height());
+    return std::min(xScale, yScale);
+}
+
 
 void writeColorSetting(QSettings& settings,
                        const QString& key,
@@ -293,9 +486,10 @@ void KFilterQt6App::createActions()
     m_saveAsAction->setShortcut(QKeySequence::SaveAs);
     connect(m_saveAsAction, &QAction::triggered, this, &KFilterQt6App::saveFileAs);
 
-    m_exportNetworkSchematicPdfAction = new QAction(tr("Export Network Schematic as &PDF..."), this);
+    m_exportNetworkSchematicPdfAction = new QAction(tr("Export Project as &PDF..."), this);
     connect(m_exportNetworkSchematicPdfAction, &QAction::triggered,
             this, &KFilterQt6App::exportNetworkSchematicPdf);
+
 
     m_quitAction = new QAction(tr("&Quit"), this);
     m_quitAction->setShortcut(QKeySequence::Quit);
@@ -1169,8 +1363,13 @@ void KFilterQt6App::exportNetworkSchematicPdf()
     }
 
     if (m_circuitPreview == nullptr) {
-        QMessageBox::warning(this, tr("Export Network Schematic"),
+        QMessageBox::warning(this, tr("Export Project as PDF"),
                              tr("The network schematic preview is not available."));
+        return;
+    }
+    if (m_plotView == nullptr) {
+        QMessageBox::warning(this, tr("Export Project as PDF"),
+                             tr("The plot view is not available."));
         return;
     }
 
@@ -1181,14 +1380,14 @@ void KFilterQt6App::exportNetworkSchematicPdf()
     if (!path.isEmpty()) {
         const QFileInfo info(path);
         proposedPath = QDir(dialogStartDirectory()).filePath(
-            QStringLiteral("%1_network.pdf").arg(info.completeBaseName()));
+            QStringLiteral("%1_project.pdf").arg(info.completeBaseName()));
     } else {
-        proposedPath = QDir(dialogStartDirectory()).filePath(QStringLiteral("Untitled_network.pdf"));
+        proposedPath = QDir(dialogStartDirectory()).filePath(QStringLiteral("Untitled_project.pdf"));
     }
 
     QString filePath = QFileDialog::getSaveFileName(
         this,
-        tr("Export Network Schematic as PDF"),
+        tr("Export Project as PDF"),
         proposedPath,
         tr("PDF files (*.pdf);;All files (*)"));
 
@@ -1199,6 +1398,10 @@ void KFilterQt6App::exportNetworkSchematicPdf()
     filePath = ensurePdfSuffix(filePath);
 
     QPdfWriter writer(filePath);
+    // Keep the schematic export on the same 96 dpi device-resolution basis as the
+    // standalone network PDF layout so its physical proportions remain stable.
+    // The plot is still rendered into a high-resolution raster image before it is
+    // placed on the PDF page.
     writer.setResolution(96);
     writer.setPageSize(QPageSize(QPageSize::A4));
     writer.setPageOrientation(QPageLayout::Portrait);
@@ -1206,17 +1409,92 @@ void KFilterQt6App::exportNetworkSchematicPdf()
 
     QPainter painter;
     if (!painter.begin(&writer)) {
-        QMessageBox::warning(this, tr("Export Network Schematic"),
+        QMessageBox::warning(this, tr("Export Project as PDF"),
                              tr("The PDF file could not be created:\n%1").arg(filePath));
         return;
     }
 
+    constexpr qreal PlotRasterScale = 3.0;
+    const QImage plotImage = renderPlotViewImageForPdf(m_plotView, PlotRasterScale);
+    if (plotImage.isNull()) {
+        painter.end();
+        QMessageBox::warning(this, tr("Export Project as PDF"),
+                             tr("The plot view could not be rendered for PDF export."));
+        return;
+    }
+
     const QRectF pageRect = QRectF(writer.pageLayout().paintRectPixels(writer.resolution()));
-    m_circuitPreview->renderForPrint(painter, pageRect);
+    painter.fillRect(pageRect, Qt::white);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+
+    const QSize networkSourceSize = m_circuitPreview->printSourceSizeHint();
+    const qreal patch134NetworkScale = networkPrintScaleForTarget(pageRect, networkSourceSize);
+
+    constexpr qreal PreferredPlotHeightRatio = 0.25;
+    constexpr qreal MinimumPlotHeightRatio = 0.14;
+    constexpr qreal PreserveNetworkScaleTolerance = 0.99;
+    const qreal sectionGap = std::max<qreal>(6.0, pageRect.height() * 0.006);
+
+    auto layoutForPlotHeight = [&](qreal plotHeight) {
+        struct Layout
+        {
+            QRectF plotSlot;
+            QRectF plotImageRect;
+            QRectF networkRect;
+            qreal networkScale = 0.0;
+        };
+
+        Layout layout;
+        layout.plotSlot = QRectF(pageRect.left(), pageRect.top(), pageRect.width(), plotHeight);
+        layout.plotImageRect = plotImageTargetRectForPdf(plotImage,
+                                                         layout.plotSlot,
+                                                         PdfVerticalAlignment::Top);
+        const qreal networkTop = layout.plotImageRect.isValid()
+                                     ? layout.plotImageRect.bottom() + sectionGap
+                                     : layout.plotSlot.bottom() + sectionGap;
+        layout.networkRect = QRectF(pageRect.left(),
+                                    networkTop,
+                                    pageRect.width(),
+                                    std::max<qreal>(0.0, pageRect.bottom() - networkTop));
+        layout.networkScale = networkPrintScaleForTarget(layout.networkRect, networkSourceSize);
+        return layout;
+    };
+
+    const auto preferredLayout = layoutForPlotHeight(pageRect.height() * PreferredPlotHeightRatio);
+    const bool preferredPreservesNetwork =
+        patch134NetworkScale > 0.0 &&
+        preferredLayout.networkScale >= patch134NetworkScale * PreserveNetworkScaleTolerance;
+
+    if (preferredPreservesNetwork) {
+        painter.drawImage(preferredLayout.plotImageRect, plotImage, QRectF(plotImage.rect()));
+        m_circuitPreview->renderForPrint(painter, preferredLayout.networkRect);
+    } else {
+        const auto compactLayout = layoutForPlotHeight(pageRect.height() * MinimumPlotHeightRatio);
+        const bool compactPreservesNetwork =
+            patch134NetworkScale > 0.0 &&
+            compactLayout.networkScale >= patch134NetworkScale * PreserveNetworkScaleTolerance;
+
+        if (compactPreservesNetwork) {
+            painter.drawImage(compactLayout.plotImageRect, plotImage, QRectF(plotImage.rect()));
+            m_circuitPreview->renderForPrint(painter, compactLayout.networkRect);
+        } else {
+            drawPlotImageForPdf(painter, plotImage, pageRect);
+            if (!writer.newPage()) {
+                painter.end();
+                QMessageBox::warning(this, tr("Export Project as PDF"),
+                                     tr("The second PDF page could not be created:\n%1").arg(filePath));
+                return;
+            }
+            painter.fillRect(pageRect, Qt::white);
+            painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            m_circuitPreview->renderForPrint(painter, pageRect);
+        }
+    }
+
     painter.end();
 
     rememberDirectoryForPath(filePath);
-    statusBar()->showMessage(tr("Network schematic exported to %1").arg(filePath), 3000);
+    statusBar()->showMessage(tr("Project PDF exported to %1").arg(filePath), 3000);
 }
 
 bool KFilterQt6App::saveToUrl(const QUrl &url)

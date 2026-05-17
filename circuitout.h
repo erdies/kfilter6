@@ -45,6 +45,7 @@ public:
     QColor backgroundColor() const;
     void setBackgroundColor(const QColor& color);
     void renderForPrint(QPainter& painter, const QRectF& targetRect);
+    QSize printSourceSizeHint() const;
 
     enum class NetworkHitGroup
     {
