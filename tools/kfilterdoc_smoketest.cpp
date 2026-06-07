@@ -33,6 +33,7 @@ void fillDriver(driver& d, int driverIndex)
     d.setVas(45.0 + driverIndex);
     d.setDm(0.16 + driverIndex);
     d.Vb = 18.0 + driverIndex;
+    d.setQl(7.0 + driverIndex);
     d.Fb = 38.0 + driverIndex;
     d.V2 = 10.0 + driverIndex;
     d.GTypProposal = driverIndex + 1;
@@ -61,6 +62,7 @@ bool compareDriver(driver& expected, driver& actual, int driverIndex)
         !fuzzyEqual(expected.getVas(), actual.getVas()) ||
         !fuzzyEqual(expected.getDm(), actual.getDm()) ||
         !fuzzyEqual(expected.Vb, actual.Vb) ||
+        !fuzzyEqual(expected.getQl(), actual.getQl()) ||
         !fuzzyEqual(expected.Fb, actual.Fb) ||
         !fuzzyEqual(expected.V2, actual.V2) ||
         expected.GTypProposal != actual.GTypProposal ||

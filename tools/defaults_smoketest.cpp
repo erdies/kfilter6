@@ -65,7 +65,7 @@ bool checkHistoricalDefaults(driver &drv, const QString &prefix)
     ok = expectDouble(prefix, "Vb", drv.Vb, 0.0) && ok;
     ok = expectDouble(prefix, "Fb", drv.Fb, 0.0) && ok;
     ok = expectDouble(prefix, "V2", drv.V2, 0.0) && ok;
-    ok = expectDouble(prefix, "Ql", drv.Ql, 10.0) && ok;
+    ok = expectDouble(prefix, "Ql", drv.getQl(), 10.0) && ok;
 
     ok = expectInt(prefix, "GTypProposal", drv.GTypProposal, 0) && ok;
     ok = expectInt(prefix, "Phase_flag", drv.Phase_flag, 1) && ok;

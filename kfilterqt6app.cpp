@@ -2000,6 +2000,12 @@ void KFilterQt6App::openDriverParametersDialog(int initialDriverIndex)
         std::clamp(initialDriverIndex, 0, KFilterProjectIo::DriverCount - 1);
 
     DriverParametersDialog dialog(m_doc->m_driverDriver, this, safeInitialDriverIndex);
+    connect(&dialog, &DriverParametersDialog::parametersPreviewed, this, [this]() {
+        m_doc->viewrefresh();
+    });
+    connect(&dialog, &DriverParametersDialog::parametersRestored, this, [this]() {
+        m_doc->viewrefresh();
+    });
     connect(&dialog, &DriverParametersDialog::parametersApplied, this, [this]() {
         m_doc->setModified(true);
         m_doc->viewrefresh();

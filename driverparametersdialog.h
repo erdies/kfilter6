@@ -7,11 +7,14 @@
 #ifndef DRIVERPARAMETERSDIALOG_H
 #define DRIVERPARAMETERSDIALOG_H
 
+#include "driver.h"
 #include "kfilterprojectio.h"
 
 #include <QDialog>
 
 #include <array>
+
+class QTimer;
 
 class QCheckBox;
 class QComboBox;
@@ -19,7 +22,6 @@ class QDoubleSpinBox;
 class QLineEdit;
 class QTabWidget;
 class QWidget;
-class driver;
 
 /**
  * Temporary Qt6 driver parameter dialog used during the KDE3 -> Qt6/KF6 port.
@@ -41,9 +43,12 @@ public:
 
 signals:
     void parametersApplied();
+    void parametersPreviewed();
+    void parametersRestored();
 
 public slots:
     void accept() override;
+    void reject() override;
 
 private slots:
     void applyClicked();
@@ -62,6 +67,7 @@ private:
         QDoubleSpinBox *vas = nullptr;
         QDoubleSpinBox *dm = nullptr;
         QDoubleSpinBox *vb = nullptr;
+        QDoubleSpinBox *ql = nullptr;
         QDoubleSpinBox *fb = nullptr;
         QDoubleSpinBox *tubeDiameter = nullptr;
         QLineEdit *tubeLength = nullptr;
@@ -78,15 +84,35 @@ private:
     };
 
     QWidget *createDriverPage(int index);
+    enum class ApplyMode
+    {
+        Preview,
+        Commit
+    };
+
     void loadFromDrivers();
-    void applyToDrivers();
+    bool applyToDrivers(ApplyMode mode, QString *errorMessage = nullptr);
+    void rememberCommittedDrivers();
+    void restoreCommittedDrivers();
+    void schedulePreview();
+    void emitPreview();
+    void connectPreviewSignals(const DriverPage& page);
+    bool readSpinBoxValue(const QDoubleSpinBox *spinBox,
+                          const QString& label,
+                          int driverIndex,
+                          double& value,
+                          QString *errorMessage = nullptr) const;
     void updateQtsForPage(DriverPage& page);
     void updateTubeLengthForPage(DriverPage& page);
     void calculateHogeForPage(DriverPage& page);
 
     driver (&m_drivers)[KFilterProjectIo::DriverCount];
     std::array<DriverPage, KFilterProjectIo::DriverCount> m_pages;
+    std::array<driver, KFilterProjectIo::DriverCount> m_committedDrivers;
     QTabWidget *m_tabs = nullptr;
+    QTimer *m_previewTimer = nullptr;
+    bool m_loadingFromDrivers = false;
+    bool m_restoringDrivers = false;
 };
 
 #endif // DRIVERPARAMETERSDIALOG_H

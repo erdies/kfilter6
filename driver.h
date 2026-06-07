@@ -49,6 +49,8 @@ public:
   /** No descriptions */
   void setDm(double dm);
   /** No descriptions */
+  void setQl(double ql);
+  /** No descriptions */
   void setVas(double vas);
   /** No descriptions */
   void setQms(double qms);
@@ -60,6 +62,8 @@ public:
   bool getFullCircuit(void);
   /** No descriptions */
   double getDm();
+  /** No descriptions */
+  double getQl();
   /** No descriptions */
   double getVas();
   /** No descriptions */

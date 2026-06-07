@@ -9,6 +9,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QIODevice>
 #include <QString>
 #include <QTextStream>
 
@@ -38,6 +39,7 @@ int main(int argc, char** argv)
         d.setVas(55.0 + driverIndex);
         d.setDm(0.18 + driverIndex);
         d.Vb = 20.0 + driverIndex;
+        d.setQl(6.5 + driverIndex);
         d.Fb = 42.0 + driverIndex;
         d.V2 = 12.0 + driverIndex;
         d.GTypProposal = driverIndex;
@@ -81,6 +83,7 @@ int main(int argc, char** argv)
             !fuzzyEqual(expected.getVas(), actual.getVas()) ||
             !fuzzyEqual(expected.getDm(), actual.getDm()) ||
             !fuzzyEqual(expected.Vb, actual.Vb) ||
+            !fuzzyEqual(expected.getQl(), actual.getQl()) ||
             !fuzzyEqual(expected.Fb, actual.Fb) ||
             !fuzzyEqual(expected.V2, actual.V2) ||
             expected.GTypProposal != actual.GTypProposal ||
@@ -104,6 +107,44 @@ int main(int argc, char** argv)
         }
     }
 
+    QFile savedFile(filePath);
+    if (!savedFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QTextStream(stderr) << "Could not reopen saved project file for legacy compatibility test\n";
+        return 1;
+    }
+    const QString savedContent = QString::fromUtf8(savedFile.readAll());
+    savedFile.close();
+
+    const qsizetype enclosureLossesSection = savedContent.indexOf(QStringLiteral("[Driver enclosure losses]"));
+    if (enclosureLossesSection < 0) {
+        QTextStream(stderr) << "Saved project file does not contain the Driver enclosure losses section\n";
+        return 1;
+    }
+
+    const QString legacyFilePath = QDir::temp().filePath(QStringLiteral("kfilter_projectio_legacy_smoketest.kfp"));
+    QFile legacyFile(legacyFilePath);
+    if (!legacyFile.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
+        QTextStream(stderr) << "Could not create legacy compatibility project file\n";
+        return 1;
+    }
+    legacyFile.write(savedContent.left(enclosureLossesSection).toUtf8());
+    legacyFile.write("\n");
+    legacyFile.close();
+
+    driver legacyLoaded[KFilterProjectIo::DriverCount];
+    if (!KFilterProjectIo::loadFromFile(legacyFilePath, legacyLoaded, &errorMessage)) {
+        QTextStream(stderr) << errorMessage << '\n';
+        return 1;
+    }
+
+    for (int driverIndex = 0; driverIndex < KFilterProjectIo::DriverCount; ++driverIndex) {
+        if (!fuzzyEqual(legacyLoaded[driverIndex].getQl(), 10.0)) {
+            QTextStream(stderr) << "Legacy project Ql default mismatch for driver " << (driverIndex + 1) << '\n';
+            return 1;
+        }
+    }
+
+    QFile::remove(legacyFilePath);
     QFile::remove(filePath);
     QTextStream(stdout) << "KFilterProjectIo round-trip smoke test passed\n";
     return 0;

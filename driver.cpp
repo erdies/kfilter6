@@ -712,6 +712,10 @@ Vas = vas;
 void driver::setDm(double dm){
 Dm = dm;
 }
+/** Sets Ql value */
+void driver::setQl(double ql){
+Ql = ql;
+}
 /** No descriptions */
 double driver::getRdc(){
 return Rdc;
@@ -743,6 +747,10 @@ return Vas;
 /** No descriptions */
 double driver::getDm(){
 return Dm;
+}
+/** Gets Ql value */
+double driver::getQl(){
+return Ql;
 }
 
 /** Sets network units values */

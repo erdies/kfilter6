@@ -203,6 +203,40 @@ bool parseDriverParameters(const QStringList& lines,
     return true;
 }
 
+
+bool parseDriverEnclosureLosses(const QStringList& lines,
+                                qsizetype& index,
+                                driver (&drivers)[KFilterProjectIo::DriverCount],
+                                QString* errorMessage)
+{
+    for (int driverIndex = 0; driverIndex < KFilterProjectIo::DriverCount; ++driverIndex) {
+        driver& currentDriver = drivers[driverIndex];
+        const int driverNumber = driverIndex + 1;
+        QString line;
+        double ql = 0.0;
+
+        if (!readRequiredDataLine(lines, index, line, QStringLiteral("Ql"), driverNumber, errorMessage) ||
+            !parseDoubleValue(line, ql)) {
+            setError(errorMessage,
+                     QStringLiteral("Invalid value for 'Ql' in driver %1: '%2'")
+                         .arg(driverNumber)
+                         .arg(line));
+            return false;
+        }
+
+        if (ql <= 0.0) {
+            setError(errorMessage,
+                     QStringLiteral("Invalid value for 'Ql' in driver %1: Ql must be greater than zero.")
+                         .arg(driverNumber));
+            return false;
+        }
+
+        currentDriver.setQl(ql);
+    }
+
+    return true;
+}
+
 void writeBool(QTextStream& stream, const char* name, bool value)
 {
     stream << '\n' << name << " = " << (value ? 1 : 0);
@@ -238,6 +272,10 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
             }
         } else if (line.contains(QStringLiteral("Driver parameters"), CaseInsensitive)) {
             if (!parseDriverParameters(lines, index, drivers, errorMessage)) {
+                return false;
+            }
+        } else if (line.contains(QStringLiteral("Driver enclosure losses"), CaseInsensitive)) {
+            if (!parseDriverEnclosureLosses(lines, index, drivers, errorMessage)) {
                 return false;
             }
         }
@@ -305,6 +343,13 @@ bool KFilterProjectIo::saveToFile(const QString& filePath,
         writeBool(stream, "ImpedanzSummary", currentDriver.ImpedanzSummaryisActive);
         writeBool(stream, "InvertPhase", currentDriver.InvertPhase);
         stream << "\nTitle = " << currentDriver.GetTitle();
+    }
+
+    stream << "\n[Driver enclosure losses]";
+    for (int driverIndex = 0; driverIndex < DriverCount; ++driverIndex) {
+        driver& currentDriver = drivers[driverIndex];
+        stream << "\n# Driver " << (driverIndex + 1);
+        stream << "\nQl =" << qSetFieldWidth(10) << currentDriver.getQl() << qSetFieldWidth(0);
     }
 
     stream << '\n';

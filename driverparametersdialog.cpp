@@ -25,6 +25,7 @@
 #include <QSettings>
 #include <QString>
 #include <QTabWidget>
+#include <QTimer>
 #include <QVariant>
 #include <QVBoxLayout>
 #include <QValidator>
@@ -214,6 +215,11 @@ DriverParametersDialog::DriverParametersDialog(driver (&drivers)[KFilterProjectI
     setWindowTitle(tr("Driver parameters"));
     resize(740, 520);
 
+    m_previewTimer = new QTimer(this);
+    m_previewTimer->setSingleShot(true);
+    m_previewTimer->setInterval(150);
+    connect(m_previewTimer, &QTimer::timeout, this, &DriverParametersDialog::emitPreview);
+
     auto *mainLayout = new QVBoxLayout(this);
     m_tabs = new QTabWidget(this);
 
@@ -238,6 +244,7 @@ DriverParametersDialog::DriverParametersDialog(driver (&drivers)[KFilterProjectI
     mainLayout->addWidget(buttonBox);
 
     loadFromDrivers();
+    rememberCommittedDrivers();
 }
 
 int DriverParametersDialog::currentDriverIndex() const
@@ -260,6 +267,7 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     page.vas = createSpinBox(0.0, 100000.0, 3, 1.0, tr(" l"));
     page.dm = createSpinBox(0.0, 1000.0, 3, 0.1, tr(" cm"));
     page.vb = createSpinBox(0.0, 100000.0, 3, 1.0, tr(" l"));
+    page.ql = createSpinBox(0.001, 1000.0, 5, 0.1);
     page.fb = createSpinBox(0.0, 100000.0, 3, 1.0, tr(" Hz"));
     page.tubeDiameter = createSpinBox(0.0, 1000.0, 3, 0.1, tr(" cm"));
     page.tubeLength = new QLineEdit(page.page);
@@ -270,6 +278,7 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
 
     const int enclosureEditorWidth = page.gainDb->sizeHint().width();
     page.vb->setFixedWidth(enclosureEditorWidth);
+    page.ql->setFixedWidth(enclosureEditorWidth);
     page.fb->setFixedWidth(enclosureEditorWidth);
     page.tubeDiameter->setFixedWidth(enclosureEditorWidth);
     page.v2->setFixedWidth(enclosureEditorWidth);
@@ -295,6 +304,7 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     page.impedanceSummaryActive->setToolTip(tr("Include this driver's impedance curve in the total parallel impedance seen by the amplifier."));
     page.invertPhase->setToolTip(tr("Invert this driver's polarity by 180 degrees for the SPL calculation."));
     page.fullCircuit->setToolTip(tr("Use the full crossover network for this driver instead of the simplified calculation."));
+    page.ql->setToolTip(tr("Enclosure loss damping factor used by vented and bandpass calculations. Must be greater than zero."));
     page.tubeDiameter->setToolTip(tr("Inner diameter of one round bass reflex tube. The calculated length uses Vb and Fb."));
     page.tubeLength->setToolTip(tr("Calculated physical bass reflex tube length from Vb, Fb, and tube diameter."));
 
@@ -321,12 +331,25 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     auto *vbLayout = new QHBoxLayout(vbLayoutWidget);
     vbLayout->setContentsMargins(0, 0, 0, 0);
     vbLayout->addWidget(page.vb);
-    auto *hogeButton = new QPushButton(tr("Hoge"), vbLayoutWidget);
-    hogeButton->setToolTip(tr("Calculate Vb and Fb from Fs, Qts, and Vas using the legacy Hoge formula."));
-    vbLayout->addWidget(hogeButton);
+    auto *qlLabel = new QLabel(tr("Ql"), vbLayoutWidget);
+    vbLayout->addWidget(qlLabel);
+    vbLayout->addWidget(page.ql);
     vbLayout->addStretch(1);
     addRow(boxForm, tr("Vb"), vbLayoutWidget);
-    addRow(boxForm, tr("Fb"), page.fb);
+
+    auto *fbLayoutWidget = new QWidget(page.page);
+    auto *fbLayout = new QHBoxLayout(fbLayoutWidget);
+    fbLayout->setContentsMargins(0, 0, 0, 0);
+    fbLayout->addWidget(page.fb);
+    auto *qlLabelSpacer = new QWidget(fbLayoutWidget);
+    qlLabelSpacer->setFixedWidth(qlLabel->sizeHint().width());
+    fbLayout->addWidget(qlLabelSpacer);
+    auto *hogeButton = new QPushButton(tr("Hoge"), fbLayoutWidget);
+    hogeButton->setFixedWidth(enclosureEditorWidth);
+    hogeButton->setToolTip(tr("Calculate Vb and Fb from Fs, Qts, and Vas using the legacy Hoge formula."));
+    fbLayout->addWidget(hogeButton);
+    fbLayout->addStretch(1);
+    addRow(boxForm, tr("Fb"), fbLayoutWidget);
     connect(hogeButton, &QPushButton::clicked, this, [this, index]() {
         calculateHogeForPage(m_pages.at(index));
     });
@@ -374,11 +397,93 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     connect(page.tubeDiameter, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
             this, [this, index](double) { updateTubeLengthForPage(m_pages.at(index)); });
 
+    connectPreviewSignals(page);
+
     return page.page;
+}
+
+void DriverParametersDialog::connectPreviewSignals(const DriverPage& page)
+{
+    auto connectSpinBox = [this](QDoubleSpinBox *spinBox) {
+        connect(spinBox, &QDoubleSpinBox::textChanged,
+                this, &DriverParametersDialog::schedulePreview);
+        connect(spinBox,
+                static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
+                this,
+                [this](double) { schedulePreview(); });
+    };
+
+    connect(page.title, &QLineEdit::textEdited,
+            this, &DriverParametersDialog::schedulePreview);
+
+    connectSpinBox(page.rdc);
+    connectSpinBox(page.lspMilliHenry);
+    connectSpinBox(page.f0);
+    connectSpinBox(page.qts);
+    connectSpinBox(page.qes);
+    connectSpinBox(page.qms);
+    connectSpinBox(page.vas);
+    connectSpinBox(page.dm);
+    connectSpinBox(page.vb);
+    connectSpinBox(page.ql);
+    connectSpinBox(page.fb);
+    connectSpinBox(page.tubeDiameter);
+    connectSpinBox(page.v2);
+    connectSpinBox(page.gainDb);
+
+    connect(page.alignmentProposal,
+            static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+            this,
+            [this](int) { schedulePreview(); });
+
+    connect(page.pressureActive, &QCheckBox::toggled,
+            this, &DriverParametersDialog::schedulePreview);
+    connect(page.impedanceActive, &QCheckBox::toggled,
+            this, &DriverParametersDialog::schedulePreview);
+    connect(page.summaryActive, &QCheckBox::toggled,
+            this, &DriverParametersDialog::schedulePreview);
+    connect(page.scalarSummaryActive, &QCheckBox::toggled,
+            this, &DriverParametersDialog::schedulePreview);
+    connect(page.impedanceSummaryActive, &QCheckBox::toggled,
+            this, &DriverParametersDialog::schedulePreview);
+    connect(page.invertPhase, &QCheckBox::toggled,
+            this, &DriverParametersDialog::schedulePreview);
+    connect(page.fullCircuit, &QCheckBox::toggled,
+            this, &DriverParametersDialog::schedulePreview);
+}
+
+bool DriverParametersDialog::readSpinBoxValue(const QDoubleSpinBox *spinBox,
+                                              const QString& label,
+                                              int driverIndex,
+                                              double& value,
+                                              QString *errorMessage) const
+{
+    double parsedValue = 0.0;
+    const bool ok = spinBox != nullptr &&
+                    parseSpinBoxText(spinBox,
+                                     spinBox->text(),
+                                     parsedValue,
+                                     spinBox->minimum(),
+                                     spinBox->maximum()) &&
+                    std::isfinite(parsedValue);
+
+    if (!ok) {
+        if (errorMessage != nullptr && errorMessage->isEmpty()) {
+            *errorMessage = tr("Driver %1: invalid value for %2.")
+                                .arg(driverIndex + 1)
+                                .arg(label);
+        }
+        return false;
+    }
+
+    value = parsedValue;
+    return true;
 }
 
 void DriverParametersDialog::loadFromDrivers()
 {
+    m_loadingFromDrivers = true;
+
     QSettings settings;
 
     for (int index = 0; index < KFilterProjectIo::DriverCount; ++index) {
@@ -395,6 +500,7 @@ void DriverParametersDialog::loadFromDrivers()
         page.vas->setValue(drv.getVas());
         page.dm->setValue(drv.getDm());
         page.vb->setValue(drv.Vb);
+        page.ql->setValue(drv.getQl());
         page.fb->setValue(drv.Fb);
         page.tubeDiameter->setValue(settings.value(tubeDiameterSettingsKey(index), 0.0).toDouble());
         page.v2->setValue(drv.V2);
@@ -412,60 +518,201 @@ void DriverParametersDialog::loadFromDrivers()
         page.fullCircuit->setChecked(drv.getFullCircuit());
         updateTubeLengthForPage(page);
     }
+
+    m_loadingFromDrivers = false;
 }
 
-void DriverParametersDialog::applyToDrivers()
+bool DriverParametersDialog::applyToDrivers(ApplyMode mode, QString *errorMessage)
 {
+    struct ParsedPage
+    {
+        QString title;
+        double rdc = 0.0;
+        double lspMilliHenry = 0.0;
+        double f0 = 0.0;
+        double qts = 0.0;
+        double qes = 0.0;
+        double qms = 0.0;
+        double vas = 0.0;
+        double dm = 0.0;
+        double vb = 0.0;
+        double ql = 0.0;
+        double fb = 0.0;
+        double tubeDiameterCm = 0.0;
+        double v2 = 0.0;
+        int alignmentProposal = 0;
+        double gainDb = 0.0;
+        bool pressureActive = false;
+        bool impedanceActive = false;
+        bool summaryActive = false;
+        bool scalarSummaryActive = false;
+        bool impedanceSummaryActive = false;
+        bool invertPhase = false;
+        bool fullCircuit = false;
+    };
+
+    if (errorMessage != nullptr) {
+        errorMessage->clear();
+    }
+
+    std::array<ParsedPage, KFilterProjectIo::DriverCount> parsedPages;
+
+    for (int index = 0; index < KFilterProjectIo::DriverCount; ++index) {
+        const DriverPage& page = m_pages.at(index);
+        ParsedPage& parsed = parsedPages.at(index);
+
+        if (!readSpinBoxValue(page.rdc, tr("Rdc"), index, parsed.rdc, errorMessage) ||
+            !readSpinBoxValue(page.lspMilliHenry, tr("Lsp"), index, parsed.lspMilliHenry, errorMessage) ||
+            !readSpinBoxValue(page.f0, tr("Fs"), index, parsed.f0, errorMessage) ||
+            !readSpinBoxValue(page.qts, tr("Qts"), index, parsed.qts, errorMessage) ||
+            !readSpinBoxValue(page.qes, tr("Qes"), index, parsed.qes, errorMessage) ||
+            !readSpinBoxValue(page.qms, tr("Qms"), index, parsed.qms, errorMessage) ||
+            !readSpinBoxValue(page.vas, tr("Vas"), index, parsed.vas, errorMessage) ||
+            !readSpinBoxValue(page.dm, tr("Diameter"), index, parsed.dm, errorMessage) ||
+            !readSpinBoxValue(page.vb, tr("Vb"), index, parsed.vb, errorMessage) ||
+            !readSpinBoxValue(page.ql, tr("Ql"), index, parsed.ql, errorMessage) ||
+            !readSpinBoxValue(page.fb, tr("Fb"), index, parsed.fb, errorMessage) ||
+            !readSpinBoxValue(page.tubeDiameter, tr("Tube diameter"), index, parsed.tubeDiameterCm, errorMessage) ||
+            !readSpinBoxValue(page.v2, tr("V2"), index, parsed.v2, errorMessage) ||
+            !readSpinBoxValue(page.gainDb, tr("Gain"), index, parsed.gainDb, errorMessage)) {
+            return false;
+        }
+
+        parsed.title = page.title->text();
+        parsed.alignmentProposal = page.alignmentProposal->currentData().toInt();
+        parsed.pressureActive = page.pressureActive->isChecked();
+        parsed.impedanceActive = page.impedanceActive->isChecked();
+        parsed.summaryActive = page.summaryActive->isChecked();
+        parsed.scalarSummaryActive = page.scalarSummaryActive->isChecked();
+        parsed.impedanceSummaryActive = page.impedanceSummaryActive->isChecked();
+        parsed.invertPhase = page.invertPhase->isChecked();
+        parsed.fullCircuit = page.fullCircuit->isChecked();
+    }
+
     QSettings settings;
 
     for (int index = 0; index < KFilterProjectIo::DriverCount; ++index) {
-        DriverPage& page = m_pages.at(index);
+        const ParsedPage& parsed = parsedPages.at(index);
         driver& drv = m_drivers[index];
 
-        drv.SetTitle(page.title->text());
-        drv.setRdc(page.rdc->value());
-        drv.setLsp(page.lspMilliHenry->value() / 1000.0);
-        drv.setF0(page.f0->value());
-        drv.setQtc(page.qts->value());
-        drv.setQes(page.qes->value());
-        drv.setQms(page.qms->value());
-        drv.setVas(page.vas->value());
-        drv.setDm(page.dm->value());
-        drv.Vb = page.vb->value();
-        drv.Fb = page.fb->value();
-        const double tubeDiameterCm = page.tubeDiameter->value();
-        if (tubeDiameterCm > 0.0) {
-            settings.setValue(tubeDiameterSettingsKey(index), tubeDiameterCm);
-        } else {
-            settings.remove(tubeDiameterSettingsKey(index));
-        }
-        drv.V2 = page.v2->value();
-        drv.GTypProposal = page.alignmentProposal->currentData().toInt();
-        drv.gain = dbToLinearGain(page.gainDb->value());
+        drv.SetTitle(parsed.title);
+        drv.setRdc(parsed.rdc);
+        drv.setLsp(parsed.lspMilliHenry / 1000.0);
+        drv.setF0(parsed.f0);
+        drv.setQtc(parsed.qts);
+        drv.setQes(parsed.qes);
+        drv.setQms(parsed.qms);
+        drv.setVas(parsed.vas);
+        drv.setDm(parsed.dm);
+        drv.Vb = parsed.vb;
+        drv.setQl(parsed.ql);
+        drv.Fb = parsed.fb;
+        drv.V2 = parsed.v2;
+        drv.GTypProposal = parsed.alignmentProposal;
+        drv.gain = dbToLinearGain(parsed.gainDb);
 
-        drv.PressureisActive = page.pressureActive->isChecked();
-        drv.ImpedanzisActive = page.impedanceActive->isChecked();
-        drv.SummaryisActive = page.summaryActive->isChecked();
-        drv.ScalarSummaryisActive = page.scalarSummaryActive->isChecked();
-        drv.ImpedanzSummaryisActive = page.impedanceSummaryActive->isChecked();
-        drv.InvertPhase = page.invertPhase->isChecked();
-        drv.setFullCircuit(page.fullCircuit->isChecked());
+        if (mode == ApplyMode::Commit) {
+            if (parsed.tubeDiameterCm > 0.0) {
+                settings.setValue(tubeDiameterSettingsKey(index), parsed.tubeDiameterCm);
+            } else {
+                settings.remove(tubeDiameterSettingsKey(index));
+            }
+        }
+
+        drv.PressureisActive = parsed.pressureActive;
+        drv.ImpedanzisActive = parsed.impedanceActive;
+        drv.SummaryisActive = parsed.summaryActive;
+        drv.ScalarSummaryisActive = parsed.scalarSummaryActive;
+        drv.ImpedanzSummaryisActive = parsed.impedanceSummaryActive;
+        drv.InvertPhase = parsed.invertPhase;
+        drv.setFullCircuit(parsed.fullCircuit);
 
         drv.Berechneparameter();
         drv.setmodified();
+    }
+
+    return true;
+}
+
+void DriverParametersDialog::rememberCommittedDrivers()
+{
+    for (int index = 0; index < KFilterProjectIo::DriverCount; ++index) {
+        m_committedDrivers[index] = m_drivers[index];
+    }
+}
+
+void DriverParametersDialog::restoreCommittedDrivers()
+{
+    m_restoringDrivers = true;
+    for (int index = 0; index < KFilterProjectIo::DriverCount; ++index) {
+        m_drivers[index] = m_committedDrivers[index];
+        m_drivers[index].setmodified();
+    }
+    m_restoringDrivers = false;
+}
+
+void DriverParametersDialog::schedulePreview()
+{
+    if (m_previewTimer == nullptr || m_loadingFromDrivers || m_restoringDrivers) {
+        return;
+    }
+
+    m_previewTimer->start(150);
+}
+
+void DriverParametersDialog::emitPreview()
+{
+    if (m_loadingFromDrivers || m_restoringDrivers) {
+        return;
+    }
+
+    if (applyToDrivers(ApplyMode::Preview)) {
+        emit parametersPreviewed();
     }
 }
 
 void DriverParametersDialog::applyClicked()
 {
-    applyToDrivers();
+    if (m_previewTimer != nullptr) {
+        m_previewTimer->stop();
+    }
+
+    QString errorMessage;
+    if (!applyToDrivers(ApplyMode::Commit, &errorMessage)) {
+        QMessageBox::warning(this, tr("Driver parameters"), errorMessage);
+        return;
+    }
+
+    rememberCommittedDrivers();
     emit parametersApplied();
 }
 
 void DriverParametersDialog::accept()
 {
-    applyClicked();
+    if (m_previewTimer != nullptr) {
+        m_previewTimer->stop();
+    }
+
+    QString errorMessage;
+    if (!applyToDrivers(ApplyMode::Commit, &errorMessage)) {
+        QMessageBox::warning(this, tr("Driver parameters"), errorMessage);
+        return;
+    }
+
+    rememberCommittedDrivers();
+    emit parametersApplied();
     QDialog::accept();
+}
+
+void DriverParametersDialog::reject()
+{
+    if (m_previewTimer != nullptr) {
+        m_previewTimer->stop();
+    }
+
+    restoreCommittedDrivers();
+    emit parametersRestored();
+    QDialog::reject();
 }
 
 void DriverParametersDialog::updateQtsForPage(DriverPage& page)

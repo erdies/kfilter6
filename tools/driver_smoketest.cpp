@@ -14,6 +14,7 @@ int main()
     d.SetTitle(QStringLiteral("Qt6 driver smoke test"));
     d.setRdc(5.6);
     d.setF0(300.0);
+    d.setQl(7.5);
     d.Berechneparameter();
     d.Schall();
     d.Impedanz();
@@ -21,6 +22,7 @@ int main()
     QTextStream out(stdout);
     out << d.GetTitle() << '\n';
     out << "Rdc=" << d.getRdc() << '\n';
+    out << "Ql=" << d.getQl() << '\n';
     out << "Sound active=" << d.PressureisActive << '\n';
     out << "Impedance[0]=" << d.ResultImpedanz[0] << '\n';
     return 0;
