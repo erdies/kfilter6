@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(kfilter VERSION 0.1.0 LANGUAGES CXX)
 
-set(KFILTER_PATCH_LEVEL "150")
+set(KFILTER_PATCH_LEVEL "151")
 set(KFILTER_LICENSE_STRING "GPL-3.0-or-later")
 
 set(CMAKE_CXX_STANDARD 17)
@@ -29,6 +29,8 @@ add_library(kfilter_core STATIC
     driver.h
     kfilterprojectio.cpp
     kfilterprojectio.h
+    kfilterdriverio.cpp
+    kfilterdriverio.h
     kfilterdoc.cpp
     kfilterdoc.h
 )

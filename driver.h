@@ -36,7 +36,7 @@ public:
 	void invertImpedanz(void);
 	void cleanupNetwork(void);
 
-	QString	GetTitle();
+	QString	GetTitle() const;
 	void	SetTitle( const QString& a_qstringTitle );
   /** Sets Rdc value */
   void setRdc(double rdc);
@@ -59,29 +59,29 @@ public:
   /** Sets the full circuit flag */
   void setFullCircuit(bool toggle);
   /** Gets the full circuit flag */
-  bool getFullCircuit(void);
+  bool getFullCircuit(void) const;
   /** No descriptions */
-  double getDm();
+  double getDm() const;
   /** No descriptions */
-  double getQl();
+  double getQl() const;
   /** No descriptions */
-  double getVas();
+  double getVas() const;
   /** No descriptions */
-  double getQms();
+  double getQms() const;
   /** No descriptions */
-  double getQes();
+  double getQes() const;
   /** No descriptions */
-  double getQtc();
+  double getQtc() const;
   /** No descriptions */
-  double getF0();
+  double getF0() const;
   /** No descriptions */
-  double getLsp();
+  double getLsp() const;
   /** No descriptions */
-  double getRdc();
+  double getRdc() const;
   /** Sets network unit values */
   void setUnit(int unit, double val);
   /** No descriptions */
-  double getUnit(int unit);
+  double getUnit(int unit) const;
 private:
 
 	void ESBberechnen(void);

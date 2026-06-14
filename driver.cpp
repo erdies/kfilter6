@@ -660,7 +660,7 @@ void driver::invertImpedanz(void)
 	}
 }
 
-QString driver::GetTitle()
+QString driver::GetTitle() const
 {
 	return m_qstringTitle;
 }
@@ -697,7 +697,7 @@ if (toggle)
       Realschall_flag = 0;
 }
 /** Gives the full circuit flag */
-bool driver::getFullCircuit(){
+bool driver::getFullCircuit() const{
 return (Realschall_flag == 1);
 }
 /** Sets Qms value */
@@ -717,39 +717,39 @@ void driver::setQl(double ql){
 Ql = ql;
 }
 /** No descriptions */
-double driver::getRdc(){
+double driver::getRdc() const{
 return Rdc;
 }
 /** No descriptions */
-double driver::getLsp(){
+double driver::getLsp() const{
 return Lsp;
 }
 /** No descriptions */
-double driver::getF0(){
+double driver::getF0() const{
 return F0;
 }
 /** No descriptions */
-double driver::getQtc(){
+double driver::getQtc() const{
 return Qtc;
 }
 /** No descriptions */
-double driver::getQes(){
+double driver::getQes() const{
 return Qe;
 }
 /** No descriptions */
-double driver::getQms(){
+double driver::getQms() const{
 return Qms;
 }
 /** No descriptions */
-double driver::getVas(){
+double driver::getVas() const{
 return Vas;
 }
 /** No descriptions */
-double driver::getDm(){
+double driver::getDm() const{
 return Dm;
 }
 /** Gets Ql value */
-double driver::getQl(){
+double driver::getQl() const{
 return Ql;
 }
 
@@ -763,7 +763,7 @@ if ((unit>-1)&&(unit<49))
 }
 
 /** No descriptions */
-double driver::getUnit(int unit){
+double driver::getUnit(int unit) const{
 	if ((unit>-1)&&(unit<49))
 	return Unit[unit]; else
 	return -1;

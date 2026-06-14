@@ -7,13 +7,17 @@
 #include "driverparametersdialog.h"
 
 #include "driver.h"
+#include "kfilterdriverio.h"
 #include "networkvalueutils.h"
 
 #include <QAbstractSpinBox>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QDoubleSpinBox>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QGroupBox>
@@ -204,6 +208,48 @@ QString tubeDiameterSettingsKey(int driverIndex)
 {
     return QStringLiteral("DriverParameters/tubeDiameter%1").arg(driverIndex + 1);
 }
+
+QString driverSlotFileFilter(const QObject *context)
+{
+    return context->tr("KFilter Driver Files (*.kfd);;JSON Files (*.json);;All Files (*)");
+}
+
+QString sanitizedFileNamePart(QString text)
+{
+    text = text.trimmed();
+    if (text.isEmpty()) {
+        return QStringLiteral("driver");
+    }
+
+    QString result;
+    result.reserve(text.size());
+    for (const QChar character : text) {
+        if (character.isLetterOrNumber() || character == QLatin1Char('-') || character == QLatin1Char('_')) {
+            result.append(character);
+        } else if (!result.endsWith(QLatin1Char('_'))) {
+            result.append(QLatin1Char('_'));
+        }
+    }
+
+    result = result.trimmed();
+    while (result.endsWith(QLatin1Char('_'))) {
+        result.chop(1);
+    }
+
+    if (result.isEmpty()) {
+        return QStringLiteral("driver");
+    }
+
+    return result;
+}
+
+QString suggestedDriverSlotPath(const driver& drv, int driverIndex)
+{
+    const QString titlePart = sanitizedFileNamePart(drv.GetTitle());
+    return QDir::home().filePath(QStringLiteral("kfilter_driver_%1_%2.kfd")
+                                     .arg(driverIndex + 1)
+                                     .arg(titlePart));
+}
 }
 
 DriverParametersDialog::DriverParametersDialog(driver (&drivers)[KFilterProjectIo::DriverCount],
@@ -324,6 +370,23 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
         updateQtsForPage(m_pages.at(index));
     });
     leftForm->addRow(QString(), qtsButton);
+
+    auto *driverIoWidget = new QWidget(page.page);
+    auto *driverIoLayout = new QHBoxLayout(driverIoWidget);
+    driverIoLayout->setContentsMargins(0, 0, 0, 0);
+    auto *importButton = new QPushButton(tr("Import Driver..."), driverIoWidget);
+    auto *exportButton = new QPushButton(tr("Export Driver..."), driverIoWidget);
+    importButton->setToolTip(tr("Import a complete driver slot including network values into this driver."));
+    exportButton->setToolTip(tr("Export this complete driver slot including network values."));
+    driverIoLayout->addWidget(importButton);
+    driverIoLayout->addWidget(exportButton);
+    leftForm->addRow(QString(), driverIoWidget);
+    connect(importButton, &QPushButton::clicked, this, [this, index]() {
+        importDriver(index);
+    });
+    connect(exportButton, &QPushButton::clicked, this, [this, index]() {
+        exportDriver(index);
+    });
 
     auto *boxForm = new QFormLayout;
 
@@ -480,46 +543,64 @@ bool DriverParametersDialog::readSpinBoxValue(const QDoubleSpinBox *spinBox,
     return true;
 }
 
-void DriverParametersDialog::loadFromDrivers()
+void DriverParametersDialog::loadPageFromDriver(int index,
+                                                bool useTubeDiameterOverride,
+                                                double tubeDiameterCm)
 {
+    if (index < 0 || index >= KFilterProjectIo::DriverCount) {
+        return;
+    }
+
+    const bool wasLoading = m_loadingFromDrivers;
     m_loadingFromDrivers = true;
 
     QSettings settings;
+    DriverPage& page = m_pages.at(index);
+    driver& drv = m_drivers[index];
+
+    page.title->setText(drv.GetTitle());
+    page.rdc->setValue(drv.getRdc());
+    page.lspMilliHenry->setValue(drv.getLsp() * 1000.0);
+    page.f0->setValue(drv.getF0());
+    page.qts->setValue(drv.getQtc());
+    page.qes->setValue(drv.getQes());
+    page.qms->setValue(drv.getQms());
+    page.vas->setValue(drv.getVas());
+    page.dm->setValue(drv.getDm());
+    page.vb->setValue(drv.Vb);
+    page.ql->setValue(drv.getQl());
+    page.fb->setValue(drv.Fb);
+    page.tubeDiameter->setValue(useTubeDiameterOverride
+                                    ? tubeDiameterCm
+                                    : settings.value(tubeDiameterSettingsKey(index), 0.0).toDouble());
+    page.v2->setValue(drv.V2);
+    page.gainDb->setValue(linearGainToDb(drv.gain));
+
+    const int alignmentIndex = page.alignmentProposal->findData(drv.GTypProposal);
+    page.alignmentProposal->setCurrentIndex(alignmentIndex >= 0 ? alignmentIndex : 0);
+
+    page.pressureActive->setChecked(drv.PressureisActive);
+    page.impedanceActive->setChecked(drv.ImpedanzisActive);
+    page.summaryActive->setChecked(drv.SummaryisActive);
+    page.scalarSummaryActive->setChecked(drv.ScalarSummaryisActive);
+    page.impedanceSummaryActive->setChecked(drv.ImpedanzSummaryisActive);
+    page.invertPhase->setChecked(drv.InvertPhase);
+    page.fullCircuit->setChecked(drv.getFullCircuit());
+    updateTubeLengthForPage(page);
+
+    m_loadingFromDrivers = wasLoading;
+}
+
+void DriverParametersDialog::loadFromDrivers()
+{
+    const bool wasLoading = m_loadingFromDrivers;
+    m_loadingFromDrivers = true;
 
     for (int index = 0; index < KFilterProjectIo::DriverCount; ++index) {
-        DriverPage& page = m_pages.at(index);
-        driver& drv = m_drivers[index];
-
-        page.title->setText(drv.GetTitle());
-        page.rdc->setValue(drv.getRdc());
-        page.lspMilliHenry->setValue(drv.getLsp() * 1000.0);
-        page.f0->setValue(drv.getF0());
-        page.qts->setValue(drv.getQtc());
-        page.qes->setValue(drv.getQes());
-        page.qms->setValue(drv.getQms());
-        page.vas->setValue(drv.getVas());
-        page.dm->setValue(drv.getDm());
-        page.vb->setValue(drv.Vb);
-        page.ql->setValue(drv.getQl());
-        page.fb->setValue(drv.Fb);
-        page.tubeDiameter->setValue(settings.value(tubeDiameterSettingsKey(index), 0.0).toDouble());
-        page.v2->setValue(drv.V2);
-        page.gainDb->setValue(linearGainToDb(drv.gain));
-
-        const int alignmentIndex = page.alignmentProposal->findData(drv.GTypProposal);
-        page.alignmentProposal->setCurrentIndex(alignmentIndex >= 0 ? alignmentIndex : 0);
-
-        page.pressureActive->setChecked(drv.PressureisActive);
-        page.impedanceActive->setChecked(drv.ImpedanzisActive);
-        page.summaryActive->setChecked(drv.SummaryisActive);
-        page.scalarSummaryActive->setChecked(drv.ScalarSummaryisActive);
-        page.impedanceSummaryActive->setChecked(drv.ImpedanzSummaryisActive);
-        page.invertPhase->setChecked(drv.InvertPhase);
-        page.fullCircuit->setChecked(drv.getFullCircuit());
-        updateTubeLengthForPage(page);
+        loadPageFromDriver(index);
     }
 
-    m_loadingFromDrivers = false;
+    m_loadingFromDrivers = wasLoading;
 }
 
 bool DriverParametersDialog::applyToDrivers(ApplyMode mode, QString *errorMessage)
@@ -713,6 +794,92 @@ void DriverParametersDialog::reject()
     restoreCommittedDrivers();
     emit parametersRestored();
     QDialog::reject();
+}
+
+void DriverParametersDialog::exportDriver(int index)
+{
+    if (index < 0 || index >= KFilterProjectIo::DriverCount) {
+        return;
+    }
+
+    if (m_previewTimer != nullptr) {
+        m_previewTimer->stop();
+    }
+
+    QString errorMessage;
+    if (!applyToDrivers(ApplyMode::Preview, &errorMessage)) {
+        QMessageBox::warning(this, tr("Export driver"), errorMessage);
+        return;
+    }
+    emit parametersPreviewed();
+
+    KFilterDriverIo::DriverSlot slot;
+    slot.driverData = m_drivers[index];
+    slot.hasTubeDiameterCm = true;
+    slot.tubeDiameterCm = m_pages.at(index).tubeDiameter->value();
+
+    QString filePath = QFileDialog::getSaveFileName(this,
+                                                    tr("Export driver"),
+                                                    suggestedDriverSlotPath(slot.driverData, index),
+                                                    driverSlotFileFilter(this));
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    QFileInfo fileInfo(filePath);
+    if (fileInfo.suffix().isEmpty()) {
+        filePath += QStringLiteral(".kfd");
+    }
+
+    if (!KFilterDriverIo::saveDriverSlotToFile(filePath, slot, &errorMessage)) {
+        QMessageBox::warning(this, tr("Export driver"), errorMessage);
+        return;
+    }
+}
+
+void DriverParametersDialog::importDriver(int index)
+{
+    if (index < 0 || index >= KFilterProjectIo::DriverCount) {
+        return;
+    }
+
+    if (m_previewTimer != nullptr) {
+        m_previewTimer->stop();
+    }
+
+    const QString filePath = QFileDialog::getOpenFileName(this,
+                                                          tr("Import driver"),
+                                                          QDir::homePath(),
+                                                          driverSlotFileFilter(this));
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    QString errorMessage;
+    KFilterDriverIo::DriverSlot slot;
+    if (!KFilterDriverIo::loadDriverSlotFromFile(filePath, slot, &errorMessage)) {
+        QMessageBox::warning(this, tr("Import driver"), errorMessage);
+        return;
+    }
+
+    const QMessageBox::StandardButton answer = QMessageBox::question(
+        this,
+        tr("Import driver"),
+        tr("Importing this file will replace Driver %1 including all network values.\n\nContinue?")
+            .arg(index + 1),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No);
+
+    if (answer != QMessageBox::Yes) {
+        return;
+    }
+
+    m_drivers[index] = slot.driverData;
+    m_drivers[index].Berechneparameter();
+    m_drivers[index].setmodified();
+    loadPageFromDriver(index, slot.hasTubeDiameterCm, slot.tubeDiameterCm);
+    m_tabs->setCurrentIndex(index);
+    emit parametersPreviewed();
 }
 
 void DriverParametersDialog::updateQtsForPage(DriverPage& page)

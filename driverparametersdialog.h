@@ -91,6 +91,7 @@ private:
     };
 
     void loadFromDrivers();
+    void loadPageFromDriver(int index, bool useTubeDiameterOverride = false, double tubeDiameterCm = 0.0);
     bool applyToDrivers(ApplyMode mode, QString *errorMessage = nullptr);
     void rememberCommittedDrivers();
     void restoreCommittedDrivers();
@@ -102,6 +103,8 @@ private:
                           int driverIndex,
                           double& value,
                           QString *errorMessage = nullptr) const;
+    void importDriver(int index);
+    void exportDriver(int index);
     void updateQtsForPage(DriverPage& page);
     void updateTubeLengthForPage(DriverPage& page);
     void calculateHogeForPage(DriverPage& page);
