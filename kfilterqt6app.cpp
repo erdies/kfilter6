@@ -14,6 +14,8 @@
 #include "plotcolorsdialog.h"
 #include "kfilterdoc.h"
 #include "kfilterprojectio.h"
+#include "measurementcurveparser.h"
+#include "measurementimportdialog.h"
 #include "kfilterview.h"
 
 #include <QAction>
@@ -242,6 +244,33 @@ private:
     KFilterView::PlotColorSettings m_originalSettings;
 };
 
+class ScopedPrintRendering
+{
+public:
+    explicit ScopedPrintRendering(KFilterView* view)
+        : m_view(view)
+        , m_originalValue(view != nullptr ? view->printRendering() : false)
+    {
+        if (m_view != nullptr) {
+            m_view->setPrintRendering(true);
+        }
+    }
+
+    ScopedPrintRendering(const ScopedPrintRendering&) = delete;
+    ScopedPrintRendering& operator=(const ScopedPrintRendering&) = delete;
+
+    ~ScopedPrintRendering()
+    {
+        if (m_view != nullptr) {
+            m_view->setPrintRendering(m_originalValue);
+        }
+    }
+
+private:
+    KFilterView* m_view = nullptr;
+    bool m_originalValue = false;
+};
+
 QImage renderPlotViewImageForPdf(KFilterView* plotView, qreal rasterScale)
 {
     if (plotView == nullptr || rasterScale <= 0.0) {
@@ -263,6 +292,9 @@ QImage renderPlotViewImageForPdf(KFilterView* plotView, qreal rasterScale)
     plotImage.fill(Qt::white);
 
     const KFilterView::PlotColorSettings printColors = makePlotPdfColorSettings(plotView->plotColorSettings());
+    // Preserve the current measurement/merge project state for PDF output.
+    // Print rendering changes presentation only, never the SPL calculation.
+    ScopedPrintRendering printRenderingGuard(plotView);
     ScopedPlotColorSettings printColorGuard(plotView, printColors);
 
     QPainter imagePainter(&plotImage);
@@ -495,6 +527,16 @@ KFilterQt6App::KFilterQt6App(QWidget *parent)
     createActions();
     createMenusAndToolBar();
 
+    connect(m_plotView, &KFilterView::measurementStatusMessage,
+            this, [this](const QString& message) { statusBar()->showMessage(message); });
+    connect(m_plotView, &KFilterView::measurementDrawingStateChanged,
+            this, [this](bool, int) { updateActionState(); });
+    connect(m_plotView, &KFilterView::measurementProjectStateChanged,
+            this, [this]() {
+                m_doc->setModified(true);
+                refreshOverview();
+            });
+
     connect(m_doc, &KFilterDoc::forceviewrefresh, this, &KFilterQt6App::refreshOverview);
     connect(m_doc, &KFilterDoc::forceviewrefresh, m_plotView, [this]() {
         m_plotView->update();
@@ -566,6 +608,50 @@ void KFilterQt6App::createActions()
     m_resetPlotColorsAction = new QAction(tr("&Reset Grid and Plot Colors"), this);
     connect(m_resetPlotColorsAction, &QAction::triggered, this, &KFilterQt6App::resetPlotColors);
 
+    for (int index = 0; index < KFilterProjectIo::DriverCount; ++index) {
+        m_importMeasurementDriverActions[index] = new QAction(measurementDriverMenuText(index), this);
+        connect(m_importMeasurementDriverActions[index], &QAction::triggered, this, [this, index]() {
+            importMeasurementForDriver(index);
+        });
+
+        m_drawMeasurementDriverActions[index] = new QAction(measurementDriverMenuText(index), this);
+        connect(m_drawMeasurementDriverActions[index], &QAction::triggered, this, [this, index]() {
+            startMeasurementDrawingForDriver(index);
+        });
+
+        m_clearMeasurementDriverActions[index] = new QAction(measurementDriverMenuText(index), this);
+        connect(m_clearMeasurementDriverActions[index], &QAction::triggered, this, [this, index]() {
+            clearMeasurementForDriver(index);
+        });
+    }
+
+    m_finishMeasurementDrawingAction = new QAction(tr("&Finish Drawing"), this);
+    m_finishMeasurementDrawingAction->setShortcuts(
+        QList<QKeySequence>{QKeySequence(Qt::Key_Return), QKeySequence(Qt::Key_Enter)});
+    connect(m_finishMeasurementDrawingAction, &QAction::triggered,
+            this, &KFilterQt6App::finishMeasurementDrawing);
+
+    m_undoMeasurementWaypointAction = new QAction(tr("&Undo Last Waypoint"), this);
+    m_undoMeasurementWaypointAction->setShortcuts(
+        QList<QKeySequence>{QKeySequence(QKeySequence::Undo), QKeySequence(Qt::Key_Backspace)});
+    connect(m_undoMeasurementWaypointAction, &QAction::triggered,
+            this, &KFilterQt6App::undoMeasurementWaypoint);
+
+    m_cancelMeasurementDrawingAction = new QAction(tr("&Cancel Drawing"), this);
+    m_cancelMeasurementDrawingAction->setShortcut(QKeySequence(Qt::Key_Escape));
+    connect(m_cancelMeasurementDrawingAction, &QAction::triggered,
+            this, &KFilterQt6App::cancelMeasurementDrawing);
+
+    m_clearAllMeasurementsAction = new QAction(tr("Clear &All Measurements..."), this);
+    connect(m_clearAllMeasurementsAction, &QAction::triggered,
+            this, &KFilterQt6App::clearAllMeasurements);
+
+    m_mergeMeasurementAction = new QAction(tr("&Merge Measurement"), this);
+    m_mergeMeasurementAction->setCheckable(true);
+    m_mergeMeasurementAction->setChecked(false);
+    connect(m_mergeMeasurementAction, &QAction::toggled,
+            this, &KFilterQt6App::setMergeMeasurementEnabled);
+
     m_circuitPreviewDriverActionGroup = new QActionGroup(this);
     m_circuitPreviewDriverActionGroup->setExclusive(true);
 
@@ -599,6 +685,7 @@ void KFilterQt6App::createActions()
     connect(m_aboutAction, &QAction::triggered, this, &KFilterQt6App::showAboutDialog);
 
     updateCircuitPreviewDriverActions();
+    updateMeasurementActions();
 }
 
 void KFilterQt6App::createMenusAndToolBar()
@@ -617,6 +704,37 @@ void KFilterQt6App::createMenusAndToolBar()
     QMenu *editMenu = menuBar()->addMenu(tr("&Edit"));
     editMenu->addAction(m_driverParametersAction);
     editMenu->addAction(m_networkParametersAction);
+
+    QMenu *measurementMenu = menuBar()->addMenu(tr("&Measurements"));
+    QMenu *importMeasurementMenu = measurementMenu->addMenu(tr("&Import Measurement for Driver"));
+    for (QAction *driverAction : m_importMeasurementDriverActions) {
+        if (driverAction != nullptr) {
+            importMeasurementMenu->addAction(driverAction);
+        }
+    }
+
+    QMenu *drawMeasurementMenu = measurementMenu->addMenu(tr("&Draw SPL Curve for Driver"));
+    for (QAction *driverAction : m_drawMeasurementDriverActions) {
+        if (driverAction != nullptr) {
+            drawMeasurementMenu->addAction(driverAction);
+        }
+    }
+
+    QMenu *clearMeasurementMenu = measurementMenu->addMenu(tr("&Clear Measurement for Driver"));
+    for (QAction *driverAction : m_clearMeasurementDriverActions) {
+        if (driverAction != nullptr) {
+            clearMeasurementMenu->addAction(driverAction);
+        }
+    }
+    clearMeasurementMenu->addSeparator();
+    clearMeasurementMenu->addAction(m_clearAllMeasurementsAction);
+
+    measurementMenu->addSeparator();
+    measurementMenu->addAction(m_finishMeasurementDrawingAction);
+    measurementMenu->addAction(m_undoMeasurementWaypointAction);
+    measurementMenu->addAction(m_cancelMeasurementDrawingAction);
+    measurementMenu->addSeparator();
+    measurementMenu->addAction(m_mergeMeasurementAction);
 
     QMenu *viewMenu = menuBar()->addMenu(tr("&View"));
     viewMenu->addAction(m_showFileToolBarAction);
@@ -757,6 +875,254 @@ void KFilterQt6App::resetPlotColors()
     writePlotColorSettings(settings, m_plotView->plotColorSettings());
 
     statusBar()->showMessage(tr("Plot colors reset."), 3000);
+}
+
+void KFilterQt6App::importMeasurementForDriver(int driverIndex)
+{
+    if (raiseActiveNetworkSectionEditor() || m_plotView == nullptr || m_doc == nullptr ||
+        driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount ||
+        m_plotView->measurementDrawingActive()) {
+        return;
+    }
+
+    if (!m_doc->splCorrectionCurve(driverIndex).isEmpty()) {
+        const QMessageBox::StandardButton answer = QMessageBox::question(
+            this,
+            tr("Replace SPL Correction Curve"),
+            tr("%1 already has an SPL correction curve. Replace it with an imported measurement?\n\n"
+               "The existing curve will remain unchanged if the import is cancelled.")
+                .arg(measurementDriverMenuText(driverIndex)),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);
+        if (answer != QMessageBox::Yes) {
+            return;
+        }
+    }
+
+    const QString filePath = QFileDialog::getOpenFileName(
+        this,
+        tr("Select Measurement File"),
+        dialogStartDirectory(),
+        tr("Measurement files (*.frd *.txt *.csv *.dat);;All files (*)"));
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    const KFilterMeasurementParseResult parseResult = parseKFilterMeasurementFile(filePath);
+    if (!parseResult.isValid()) {
+        QMessageBox::critical(
+            this,
+            tr("Measurement Import Failed"),
+            parseResult.errorMessage.isEmpty()
+                ? tr("The selected file does not contain a usable measurement curve.")
+                : parseResult.errorMessage);
+        return;
+    }
+
+    rememberDirectoryForPath(filePath);
+    MeasurementImportDialog dialog(filePath,
+                                   measurementDriverMenuText(driverIndex),
+                                   parseResult,
+                                   this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    const KFilterCorrectionImportResult importResult = dialog.importResult();
+    if (!importResult.isValid()) {
+        QMessageBox::critical(this,
+                              tr("Measurement Import Failed"),
+                              importResult.errorMessage);
+        return;
+    }
+
+    m_doc->splCorrectionCurve(driverIndex) = importResult.correctionCurve;
+    m_doc->setModified(true);
+    m_doc->viewrefresh();
+
+    statusBar()->showMessage(
+        tr("Imported %1 correction points for %2 with an effective offset of %3 dB.")
+            .arg(static_cast<qlonglong>(importResult.correctionCurve.size()))
+            .arg(measurementDriverMenuText(driverIndex))
+            .arg(importResult.effectiveOffsetDb, 0, 'f', 3),
+        5000);
+}
+
+void KFilterQt6App::startMeasurementDrawingForDriver(int driverIndex)
+{
+    if (raiseActiveNetworkSectionEditor() || m_plotView == nullptr) {
+        return;
+    }
+
+    if (!m_plotView->beginSplCorrectionDrawing(driverIndex)) {
+        statusBar()->showMessage(tr("The selected driver cannot be used for measurement drawing."), 3000);
+        return;
+    }
+
+    updateActionState();
+}
+
+void KFilterQt6App::finishMeasurementDrawing()
+{
+    if (m_plotView == nullptr) {
+        return;
+    }
+
+    m_plotView->finishSplCorrectionDrawing();
+    updateActionState();
+}
+
+void KFilterQt6App::undoMeasurementWaypoint()
+{
+    if (m_plotView == nullptr) {
+        return;
+    }
+
+    m_plotView->undoSplCorrectionWaypoint();
+}
+
+void KFilterQt6App::cancelMeasurementDrawing()
+{
+    if (m_plotView == nullptr) {
+        return;
+    }
+
+    m_plotView->cancelSplCorrectionDrawing();
+    updateActionState();
+}
+
+void KFilterQt6App::clearMeasurementForDriver(int driverIndex)
+{
+    if (raiseActiveNetworkSectionEditor() || m_plotView == nullptr || m_doc == nullptr ||
+        driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount ||
+        m_doc->splCorrectionCurve(driverIndex).isEmpty()) {
+        return;
+    }
+
+    const QString driverText = measurementDriverMenuText(driverIndex);
+    const QMessageBox::StandardButton answer = QMessageBox::question(
+        this,
+        tr("Clear Measurement"),
+        tr("Clear the SPL correction curve for %1?\n\n"
+           "This operation cannot be undone.")
+            .arg(driverText),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No);
+    if (answer != QMessageBox::Yes) {
+        return;
+    }
+
+    if (m_plotView->clearMeasurementCurve(driverIndex)) {
+        statusBar()->showMessage(
+            tr("SPL correction curve for %1 cleared.").arg(driverText), 3000);
+    }
+    updateActionState();
+}
+
+void KFilterQt6App::clearAllMeasurements()
+{
+    if (raiseActiveNetworkSectionEditor() || m_plotView == nullptr ||
+        !m_plotView->hasMeasurementCurves()) {
+        return;
+    }
+
+    const QMessageBox::StandardButton answer = QMessageBox::question(
+        this,
+        tr("Clear All Measurements"),
+        tr("Clear all SPL correction curves from this project?\n\n"
+           "This operation cannot be undone."),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No);
+    if (answer != QMessageBox::Yes) {
+        return;
+    }
+
+    m_plotView->clearMeasurementCurves();
+    statusBar()->showMessage(tr("All measurements cleared from the project."), 3000);
+    updateActionState();
+}
+
+void KFilterQt6App::setMergeMeasurementEnabled(bool enabled)
+{
+    if (m_plotView == nullptr) {
+        return;
+    }
+
+    m_plotView->setMergeMeasurementsEnabled(enabled);
+    const bool effectiveEnabled = m_plotView->mergeMeasurementsEnabled();
+    if (m_mergeMeasurementAction != nullptr &&
+        m_mergeMeasurementAction->isChecked() != effectiveEnabled) {
+        const QSignalBlocker blocker(m_mergeMeasurementAction);
+        m_mergeMeasurementAction->setChecked(effectiveEnabled);
+    }
+
+    statusBar()->showMessage(
+        effectiveEnabled
+            ? tr("Measurement correction merged into simulated SPL curves and sums; correction curves hidden.")
+            : tr("Measurement correction merge disabled; correction curves visible."),
+        3000);
+}
+
+void KFilterQt6App::updateMeasurementActions()
+{
+    const bool networkEditorOpen = networkSectionEditInProgress();
+    const bool drawingActive = m_plotView != nullptr && m_plotView->measurementDrawingActive();
+    const bool haveCurves = m_plotView != nullptr && m_plotView->hasMeasurementCurves();
+    const bool haveMergeableCurves =
+        m_plotView != nullptr && m_plotView->hasMergeableMeasurementCurves();
+
+    if (m_plotView != nullptr && !drawingActive && !haveMergeableCurves &&
+        m_plotView->mergeMeasurementsEnabled()) {
+        m_plotView->setMergeMeasurementsEnabled(false);
+    }
+
+    for (int index = 0; index < KFilterProjectIo::DriverCount; ++index) {
+        QAction *importAction = m_importMeasurementDriverActions[index];
+        if (importAction != nullptr) {
+            importAction->setText(measurementDriverMenuText(index));
+            importAction->setEnabled(!networkEditorOpen && !drawingActive);
+        }
+
+        QAction *drawAction = m_drawMeasurementDriverActions[index];
+        if (drawAction != nullptr) {
+            drawAction->setText(measurementDriverMenuText(index));
+            drawAction->setEnabled(!networkEditorOpen && !drawingActive);
+        }
+
+        QAction *clearAction = m_clearMeasurementDriverActions[index];
+        if (clearAction != nullptr) {
+            clearAction->setText(measurementDriverMenuText(index));
+            const bool driverHasCurve =
+                m_doc != nullptr && !m_doc->splCorrectionCurve(index).isEmpty();
+            clearAction->setEnabled(
+                !networkEditorOpen && !drawingActive && driverHasCurve);
+        }
+    }
+
+    if (m_finishMeasurementDrawingAction != nullptr) {
+        m_finishMeasurementDrawingAction->setEnabled(!networkEditorOpen && drawingActive);
+    }
+    if (m_undoMeasurementWaypointAction != nullptr) {
+        m_undoMeasurementWaypointAction->setEnabled(!networkEditorOpen && drawingActive);
+    }
+    if (m_cancelMeasurementDrawingAction != nullptr) {
+        m_cancelMeasurementDrawingAction->setEnabled(!networkEditorOpen && drawingActive);
+    }
+    if (m_clearAllMeasurementsAction != nullptr) {
+        m_clearAllMeasurementsAction->setEnabled(
+            !networkEditorOpen && !drawingActive && haveCurves);
+    }
+    if (m_mergeMeasurementAction != nullptr) {
+        const QSignalBlocker blocker(m_mergeMeasurementAction);
+        m_mergeMeasurementAction->setEnabled(!networkEditorOpen && !drawingActive && haveMergeableCurves);
+        m_mergeMeasurementAction->setChecked(
+            m_plotView != nullptr && m_plotView->mergeMeasurementsEnabled());
+    }
+}
+
+QString KFilterQt6App::measurementDriverMenuText(int driverIndex) const
+{
+    return circuitPreviewDriverMenuText(driverIndex);
 }
 
 void KFilterQt6App::chooseCircuitPreviewBackgroundColor()
@@ -1339,6 +1705,11 @@ bool KFilterQt6App::openDocumentFile(const QUrl &url)
         return false;
     }
 
+    if (m_plotView != nullptr && m_plotView->measurementDrawingActive()) {
+        statusBar()->showMessage(tr("Finish or cancel the active measurement drawing first."), 3000);
+        return false;
+    }
+
     if (!url.isLocalFile()) {
         QMessageBox::warning(this, tr("Open KFilter6 Project"),
                              tr("Only local project files are currently supported."));
@@ -1568,6 +1939,11 @@ bool KFilterQt6App::acceptProjectDragEvent(QDropEvent *event) const
         return false;
     }
 
+    if (m_plotView != nullptr && m_plotView->measurementDrawingActive()) {
+        event->ignore();
+        return false;
+    }
+
     QUrl url;
     if (!projectUrlFromDropMimeData(event->mimeData(), url)) {
         event->ignore();
@@ -1592,6 +1968,12 @@ bool KFilterQt6App::openProjectFromDropEvent(QDropEvent *event)
 
     if (raiseActiveNetworkSectionEditor()) {
         event->ignore();
+        return true;
+    }
+
+    if (m_plotView != nullptr && m_plotView->measurementDrawingActive()) {
+        event->ignore();
+        statusBar()->showMessage(tr("Finish or cancel the active measurement drawing first."), 3000);
         return true;
     }
 
@@ -1738,7 +2120,8 @@ void KFilterQt6App::setCircuitPreviewDriverIndex(int driverIndex, bool showStatu
 
 void KFilterQt6App::updateCircuitPreviewDriverActions()
 {
-    const bool locked = networkSectionEditInProgress();
+    const bool locked = networkSectionEditInProgress() ||
+                        (m_plotView != nullptr && m_plotView->measurementDrawingActive());
 
     if (m_circuitPreviewAllDriversAction != nullptr) {
         m_circuitPreviewAllDriversAction->setEnabled(!locked);
@@ -1793,7 +2176,8 @@ void KFilterQt6App::updateWindowTitle()
 
 void KFilterQt6App::updateActionState()
 {
-    const bool locked = networkSectionEditInProgress();
+    const bool locked = networkSectionEditInProgress() ||
+                        (m_plotView != nullptr && m_plotView->measurementDrawingActive());
 
     if (m_newAction != nullptr) {
         m_newAction->setEnabled(!locked);
@@ -1846,6 +2230,7 @@ void KFilterQt6App::updateActionState()
     }
 
     updateCircuitPreviewDriverActions();
+    updateMeasurementActions();
 }
 
 bool KFilterQt6App::networkSectionEditInProgress() const
@@ -1905,7 +2290,8 @@ void KFilterQt6App::showAboutDialog()
            "KFilter6 is a Qt6-based loudspeaker design and crossover modelling tool.<br><br>"
            "It visualizes driver response, impedance, enclosure behaviour, "
            "crossover networks, vector SPL summation, energetic SPL summation, "
-           "and total impedance while preserving the legacy KFilter project model.")
+           "and total impedance. Projects are saved as versioned JSON while legacy "
+           "KFilter project files remain readable.")
             .arg(QStringLiteral(KFILTER_VERSION_STRING))
             .arg(QStringLiteral(KFILTER_PATCH_LEVEL_STRING))
             .arg(QStringLiteral(KFILTER_LICENSE_STRING)));

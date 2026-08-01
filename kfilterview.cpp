@@ -8,19 +8,26 @@
 
 #include "kfilterdoc.h"
 
+#include <QEvent>
 #include <QFont>
 #include <QFontMetrics>
+#include <QKeyEvent>
+#include <QKeySequence>
 #include <QLineF>
+#include <QMouseEvent>
 #include <QPaintEvent>
 #include <QPainter>
 #include <QPalette>
 #include <QPen>
 #include <QPoint>
 #include <QRectF>
+#include <QResizeEvent>
+#include <QStringList>
 #include <Qt>
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 KFilterView::KFilterView(KFilterDoc *document, QWidget *parent)
     : QWidget(parent),
@@ -30,6 +37,8 @@ KFilterView::KFilterView(KFilterDoc *document, QWidget *parent)
     setPlotColorSettings(defaultPlotColorSettings());
 
     setMinimumSize(640, 360);
+    setFocusPolicy(Qt::StrongFocus);
+    setMouseTracking(true);
     Start = 125.6637061;
     Faktor = 1.047128548;
     initXvalue();
@@ -40,6 +49,278 @@ KFilterView::~KFilterView() = default;
 KFilterDoc *KFilterView::getDocument() const
 {
     return m_document;
+}
+
+bool KFilterView::beginSplCorrectionDrawing(int driverIndex)
+{
+    if (m_document == nullptr || driverIndex < 0 || driverIndex >= 4) {
+        return false;
+    }
+
+    if (m_measurementDrawingActive) {
+        cancelSplCorrectionDrawing();
+    }
+
+    m_activeMeasurementDriverIndex = driverIndex;
+    KFilterMeasurementCurve& curve = m_document->splCorrectionCurve(driverIndex);
+    m_measurementCurveSnapshot = curve;
+    curve.clear();
+    m_measurementDrawingActive = true;
+    m_measurementCursorValid = false;
+
+    setCursor(Qt::CrossCursor);
+    setFocus(Qt::OtherFocusReason);
+    update();
+
+    emit measurementDrawingStateChanged(true, driverIndex);
+    emit measurementStatusMessage(
+        tr("Drawing SPL correction for %1: left-click waypoints from left to right; Enter finishes, Escape cancels.")
+            .arg(measurementDriverLabel(driverIndex)));
+    return true;
+}
+
+bool KFilterView::finishSplCorrectionDrawing()
+{
+    if (!m_measurementDrawingActive) {
+        return false;
+    }
+
+    const int driverIndex = m_activeMeasurementDriverIndex;
+    const qsizetype pointCount = m_document->splCorrectionCurve(driverIndex).size();
+    if (pointCount == 0) {
+        m_document->splCorrectionCurve(driverIndex) = m_measurementCurveSnapshot;
+        endMeasurementDrawing();
+        emit measurementStatusMessage(
+            tr("No waypoint was set for %1; the previous correction curve was restored.")
+                .arg(measurementDriverLabel(driverIndex)));
+        return true;
+    }
+
+    m_measurementCurveSnapshot.clear();
+    endMeasurementDrawing();
+    emit measurementStatusMessage(
+        tr("SPL correction curve for %1 finished with %2 waypoint(s).")
+            .arg(measurementDriverLabel(driverIndex))
+            .arg(static_cast<qlonglong>(pointCount)));
+    emit measurementProjectStateChanged();
+    return true;
+}
+
+bool KFilterView::cancelSplCorrectionDrawing()
+{
+    if (!m_measurementDrawingActive) {
+        return false;
+    }
+
+    const int driverIndex = m_activeMeasurementDriverIndex;
+    m_document->splCorrectionCurve(driverIndex) = m_measurementCurveSnapshot;
+    m_measurementCurveSnapshot.clear();
+    endMeasurementDrawing();
+    emit measurementStatusMessage(
+        tr("SPL correction drawing for %1 cancelled; the previous correction curve was restored.")
+            .arg(measurementDriverLabel(driverIndex)));
+    return true;
+}
+
+bool KFilterView::undoSplCorrectionWaypoint()
+{
+    if (!m_measurementDrawingActive) {
+        return false;
+    }
+
+    KFilterMeasurementCurve& curve = m_document->splCorrectionCurve(m_activeMeasurementDriverIndex);
+    if (!curve.removeLastPoint()) {
+        emit measurementStatusMessage(tr("There is no measurement waypoint to undo."));
+        return false;
+    }
+
+    update();
+    emit measurementStatusMessage(
+        tr("Last correction waypoint removed from %1; %2 waypoint(s) remain.")
+            .arg(measurementDriverLabel(m_activeMeasurementDriverIndex))
+            .arg(static_cast<qlonglong>(curve.size())));
+    return true;
+}
+
+bool KFilterView::clearMeasurementCurve(int driverIndex)
+{
+    if (m_measurementDrawingActive) {
+        cancelSplCorrectionDrawing();
+    }
+
+    if (m_document == nullptr || !m_document->clearMeasurementCurve(driverIndex)) {
+        return false;
+    }
+
+    emit measurementProjectStateChanged();
+    update();
+    return true;
+}
+
+void KFilterView::clearMeasurementCurves()
+{
+    if (m_measurementDrawingActive) {
+        cancelSplCorrectionDrawing();
+    }
+
+    if (m_document != nullptr && m_document->clearMeasurementCurves()) {
+        emit measurementProjectStateChanged();
+    }
+    update();
+}
+
+bool KFilterView::hasMeasurementCurves() const
+{
+    return m_document != nullptr && m_document->hasMeasurementCurves();
+}
+
+bool KFilterView::hasMergeableMeasurementCurves() const
+{
+    return m_document != nullptr && m_document->hasMergeableMeasurementCurves();
+}
+
+bool KFilterView::measurementDrawingActive() const
+{
+    return m_measurementDrawingActive;
+}
+
+int KFilterView::activeMeasurementDriverIndex() const
+{
+    return m_activeMeasurementDriverIndex;
+}
+
+bool KFilterView::mergeMeasurementsEnabled() const
+{
+    return m_document != nullptr && m_document->measurementMergeEnabled();
+}
+
+void KFilterView::setMergeMeasurementsEnabled(bool enabled)
+{
+    if (m_document == nullptr || !m_document->setMeasurementMergeEnabled(enabled)) {
+        return;
+    }
+
+    update();
+    emit measurementProjectStateChanged();
+}
+
+double KFilterView::xToFrequencyHz(double x) const
+{
+    if (!std::isfinite(x) || width() <= 0) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    constexpr double MinimumFrequencyHz = 20.0;
+    constexpr double FrequencyRatio = 1000.0;
+    return MinimumFrequencyHz * std::exp((x / static_cast<double>(width())) * std::log(FrequencyRatio));
+}
+
+double KFilterView::frequencyHzToX(double frequencyHz) const
+{
+    if (!std::isfinite(frequencyHz) || frequencyHz <= 0.0 || width() <= 0) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    constexpr double MinimumFrequencyHz = 20.0;
+    constexpr double FrequencyRatio = 1000.0;
+    return static_cast<double>(width()) *
+           std::log(frequencyHz / MinimumFrequencyHz) / std::log(FrequencyRatio);
+}
+
+double KFilterView::yToPressureDb(double y) const
+{
+    if (!std::isfinite(y) || height() <= 0) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    return 10.0 - (60.0 * y / static_cast<double>(height()));
+}
+
+double KFilterView::pressureDbToY(double valueDb) const
+{
+    if (!std::isfinite(valueDb) || height() <= 0) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    return static_cast<double>(height()) / 6.0 -
+           valueDb * static_cast<double>(height()) / 60.0;
+}
+
+bool KFilterView::printRendering() const
+{
+    return m_printRendering;
+}
+
+void KFilterView::setPrintRendering(bool enabled)
+{
+    m_printRendering = enabled;
+}
+
+void KFilterView::endMeasurementDrawing()
+{
+    m_measurementDrawingActive = false;
+    m_measurementCursorValid = false;
+    m_measurementCurveSnapshot.clear();
+    m_activeMeasurementDriverIndex = -1;
+    unsetCursor();
+    update();
+    emit measurementDrawingStateChanged(false, -1);
+}
+
+QString KFilterView::measurementDriverLabel(int driverIndex) const
+{
+    const QString fallback = tr("Driver %1").arg(driverIndex + 1);
+    if (m_document == nullptr || driverIndex < 0 || driverIndex >= 4) {
+        return fallback;
+    }
+
+    const QString title = m_document->m_driverDriver[driverIndex].GetTitle().trimmed();
+    if (title.isEmpty() || title == QStringLiteral("This is a default driver")) {
+        return fallback;
+    }
+
+    return tr("Driver %1 (%2)").arg(driverIndex + 1).arg(title);
+}
+
+QString KFilterView::measurementPointerText(const QPointF& position) const
+{
+    const double frequencyHz = xToFrequencyHz(position.x());
+    const double pressureDb = yToPressureDb(position.y());
+    if (!std::isfinite(frequencyHz) || !std::isfinite(pressureDb)) {
+        return QString();
+    }
+
+    const QString frequencyText = frequencyHz >= 1000.0
+                                      ? tr("%1 kHz").arg(frequencyHz / 1000.0, 0, 'f', 2)
+                                      : tr("%1 Hz").arg(frequencyHz, 0, 'f', 1);
+    return tr("%1: %2, %3 dB — left-click to set a waypoint.")
+        .arg(measurementDriverLabel(m_activeMeasurementDriverIndex),
+             frequencyText,
+             QString::number(pressureDb, 'f', 1));
+}
+
+bool KFilterView::measurementMergeAppliedForDriver(int driverIndex) const
+{
+    return m_document != nullptr && m_document->measurementMergeEnabled() &&
+           driverIndex >= 0 && driverIndex < 4 &&
+           m_document->splCorrectionCurve(driverIndex).size() >= 2;
+}
+
+double KFilterView::effectivePressureDb(int driverIndex, int sampleIndex, double simulatedDb) const
+{
+    if (!measurementMergeAppliedForDriver(driverIndex) ||
+        sampleIndex < 0 || sampleIndex >= 150 || !std::isfinite(simulatedDb)) {
+        return simulatedDb;
+    }
+
+    constexpr double MinimumFrequencyHz = 20.0;
+    const double frequencyHz = MinimumFrequencyHz * Xvalue[sampleIndex] / Xvalue[0];
+    double correctionDb = 0.0;
+    if (!m_document->splCorrectionCurve(driverIndex).interpolatedValueAt(frequencyHz, correctionDb)) {
+        return simulatedDb;
+    }
+
+    return simulatedDb + correctionDb;
 }
 
 void KFilterView::initXvalue()
@@ -78,7 +359,7 @@ int KFilterView::YScale(double value, int flag) const
     return static_cast<int>(h / 6.0 - value * h / 60.0);
 }
 
-KFilterView::CurveLabelAnchor KFilterView::findLastVisibleCurvePoint(const double values[200], int type) const
+KFilterView::CurveLabelAnchor KFilterView::findLastVisibleCurvePoint(const double values[200], int type, int driverIndex) const
 {
     const QRectF visibleRect = QRectF(rect()).adjusted(1.0, 1.0, -1.0, -1.0);
     if (!visibleRect.isValid()) {
@@ -91,7 +372,11 @@ KFilterView::CurveLabelAnchor KFilterView::findLastVisibleCurvePoint(const doubl
         if (!std::isfinite(values[i])) {
             continue;
         }
-        points[i] = QPointF(XK(Xvalue[i]), YScale(values[i], type));
+        double value = values[i];
+        if (type == 0 && driverIndex >= 0) {
+            value = effectivePressureDb(driverIndex, i, value);
+        }
+        points[i] = QPointF(XK(Xvalue[i]), YScale(value, type));
         valid[i] = true;
     }
 
@@ -155,6 +440,17 @@ void KFilterView::drawCurve(QPainter& painter, const double values[200], int typ
     }
 }
 
+void KFilterView::drawDriverPressureCurve(QPainter& painter, const double values[200], int driverIndex)
+{
+    QPoint lastPoint(XK(Xvalue[0]), YScale(effectivePressureDb(driverIndex, 0, values[0]), 0));
+    for (int i = 1; i < 150; i++) {
+        const QPoint nextPoint(XK(Xvalue[i]),
+                               YScale(effectivePressureDb(driverIndex, i, values[i]), 0));
+        painter.drawLine(lastPoint, nextPoint);
+        lastPoint = nextPoint;
+    }
+}
+
 void KFilterView::drawCurveLabel(QPainter& painter, const QPointF& point, const QString& label) const
 {
     const QString trimmedLabel = label.trimmed();
@@ -198,7 +494,7 @@ void KFilterView::drawDriverCurveLabels(QPainter& painter)
             continue;
         }
 
-        CurveLabelAnchor anchor = findLastVisibleCurvePoint(mydoc->m_doubleXContainer[count], 0);
+        CurveLabelAnchor anchor = findLastVisibleCurvePoint(mydoc->m_doubleXContainer[count], 0, count);
         if (!anchor.valid) {
             continue;
         }
@@ -237,6 +533,72 @@ QColor KFilterView::shadowTextColor() const
     return m_backgroundColor.lightness() < 128 ? QColor(Qt::black) : QColor(Qt::white);
 }
 
+void KFilterView::drawMeasurementCurves(QPainter& painter)
+{
+    if (mergeMeasurementsEnabled() && !m_measurementDrawingActive) {
+        return;
+    }
+
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    const bool showOnlyActiveCurve = mergeMeasurementsEnabled() && m_measurementDrawingActive;
+    for (int driverIndex = 0; driverIndex < 4; ++driverIndex) {
+        if (showOnlyActiveCurve && driverIndex != m_activeMeasurementDriverIndex) {
+            continue;
+        }
+
+        const KFilterMeasurementCurve& curve = m_document->splCorrectionCurve(driverIndex);
+        if (curve.isEmpty()) {
+            continue;
+        }
+
+        QPen curvePen(pressureCurveColor(driverIndex));
+        curvePen.setStyle(Qt::DashLine);
+        curvePen.setWidth(2);
+        painter.setPen(curvePen);
+        painter.setBrush(Qt::NoBrush);
+
+        QPointF previousPoint;
+        bool havePreviousPoint = false;
+        for (const KFilterMeasurementPoint& point : curve.points) {
+            const QPointF plotPoint(frequencyHzToX(point.frequencyHz), pressureDbToY(point.value));
+            if (!std::isfinite(plotPoint.x()) || !std::isfinite(plotPoint.y())) {
+                continue;
+            }
+
+            if (havePreviousPoint) {
+                painter.drawLine(previousPoint, plotPoint);
+            }
+            painter.drawEllipse(plotPoint, 3.5, 3.5);
+            previousPoint = plotPoint;
+            havePreviousPoint = true;
+        }
+    }
+
+    if (m_measurementDrawingActive && m_measurementCursorValid &&
+        m_activeMeasurementDriverIndex >= 0 && m_activeMeasurementDriverIndex < 4) {
+        const KFilterMeasurementCurve& activeCurve = m_document->splCorrectionCurve(m_activeMeasurementDriverIndex);
+        const double cursorFrequencyHz = xToFrequencyHz(m_measurementCursorPosition.x());
+
+        QPen previewPen(pressureCurveColor(m_activeMeasurementDriverIndex));
+        previewPen.setStyle(Qt::DashLine);
+        previewPen.setWidth(1);
+        painter.setPen(previewPen);
+        painter.setBrush(Qt::NoBrush);
+
+        if (!activeCurve.isEmpty() && std::isfinite(cursorFrequencyHz) &&
+            cursorFrequencyHz > activeCurve.points.constLast().frequencyHz) {
+            const KFilterMeasurementPoint& last = activeCurve.points.constLast();
+            painter.drawLine(QPointF(frequencyHzToX(last.frequencyHz), pressureDbToY(last.value)),
+                             m_measurementCursorPosition);
+        }
+        painter.drawEllipse(m_measurementCursorPosition, 4.0, 4.0);
+    }
+
+    painter.restore();
+}
+
 void KFilterView::drawLegend(QPainter& painter)
 {
     KFilterDoc* mydoc = getDocument();
@@ -265,10 +627,13 @@ void KFilterView::drawLegend(QPainter& painter)
 
     for (int driverIndex = 0; driverIndex < 4; ++driverIndex) {
         if (mydoc->m_driverDriver[driverIndex].PressureisActive) {
+            const QString pressureLabel = measurementMergeAppliedForDriver(driverIndex)
+                                              ? tr("Driver %1 SPL (merged)").arg(driverIndex + 1)
+                                              : tr("Driver %1 SPL").arg(driverIndex + 1);
             drawEntry(pressureCurveColor(driverIndex),
                       Qt::SolidLine,
                       1,
-                      tr("Driver %1 SPL").arg(driverIndex + 1));
+                      pressureLabel);
         }
 
         if (mydoc->m_driverDriver[driverIndex].ImpedanzisActive) {
@@ -276,6 +641,18 @@ void KFilterView::drawLegend(QPainter& painter)
                       Qt::DotLine,
                       1,
                       tr("Driver %1 impedance").arg(driverIndex + 1));
+        }
+    }
+
+    for (int driverIndex = 0; driverIndex < 4; ++driverIndex) {
+        const bool curveVisible = !mergeMeasurementsEnabled() ||
+                                  (m_measurementDrawingActive &&
+                                   driverIndex == m_activeMeasurementDriverIndex);
+        if (curveVisible && !m_document->splCorrectionCurve(driverIndex).isEmpty()) {
+            drawEntry(pressureCurveColor(driverIndex),
+                      Qt::DashLine,
+                      2,
+                      tr("Driver %1 SPL correction").arg(driverIndex + 1));
         }
     }
 
@@ -299,6 +676,60 @@ void KFilterView::drawLegend(QPainter& painter)
         mydoc->m_driverDriver[3].ImpedanzSummaryisActive) {
         drawEntry(cimpedanceS, Qt::DotLine, 2, tr("Total impedance"));
     }
+}
+
+void KFilterView::drawPrintMeasurementStatus(QPainter& painter)
+{
+    if (!m_printRendering || m_document == nullptr || !m_document->hasMeasurementCurves()) {
+        return;
+    }
+
+    const bool mergeEnabled = m_document->measurementMergeEnabled();
+    QStringList driverNumbers;
+    for (int driverIndex = 0; driverIndex < 4; ++driverIndex) {
+        const KFilterMeasurementCurve& curve = m_document->splCorrectionCurve(driverIndex);
+        if (curve.isEmpty() || (mergeEnabled && curve.size() < 2)) {
+            continue;
+        }
+        driverNumbers.append(QString::number(driverIndex + 1));
+    }
+
+    QString statusText;
+    if (mergeEnabled) {
+        statusText = tr("Measurements: merge enabled for driver(s) %1")
+                         .arg(driverNumbers.join(QStringLiteral(", ")));
+    } else {
+        statusText = tr("Measurements: merge disabled; corrections shown for driver(s) %1")
+                         .arg(driverNumbers.join(QStringLiteral(", ")));
+    }
+
+    painter.save();
+    const QFont statusFont(QStringLiteral("Sans Serif"), 8);
+    painter.setFont(statusFont);
+    const QFontMetrics metrics(statusFont);
+    const int horizontalMargin = 8;
+    const int verticalMargin = 5;
+    const int maximumTextWidth = std::max(80, width() - 36);
+    statusText = metrics.elidedText(statusText, Qt::ElideRight, maximumTextWidth);
+
+    QRect statusRect = metrics.boundingRect(statusText);
+    statusRect.adjust(-horizontalMargin, -verticalMargin,
+                      horizontalMargin, verticalMargin);
+    statusRect.moveTop(8);
+    statusRect.moveRight(width() - 8);
+
+    painter.fillRect(statusRect, m_backgroundColor);
+    QPen borderPen(cthresholdGrid);
+    borderPen.setWidth(1);
+    painter.setPen(borderPen);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRect(statusRect);
+
+    painter.setPen(foregroundTextColor());
+    painter.drawText(statusRect.adjusted(horizontalMargin, verticalMargin,
+                                         -horizontalMargin, -verticalMargin),
+                     Qt::AlignLeft | Qt::AlignVCenter, statusText);
+    painter.restore();
 }
 
 void KFilterView::paintEvent(QPaintEvent *event)
@@ -356,7 +787,7 @@ void KFilterView::paintEvent(QPaintEvent *event)
                 pen.setStyle(Qt::SolidLine);
                 pen.setWidth(1);
                 mypainter.setPen(pen);
-                drawCurve(mypainter, mydoc->m_doubleXContainer[count], 0);
+                drawDriverPressureCurve(mypainter, mydoc->m_doubleXContainer[count], count);
             }
             if (mydoc->Impedance(count)) {
                 pen.setColor(impedanceCurveColor(count));
@@ -392,6 +823,8 @@ void KFilterView::paintEvent(QPaintEvent *event)
         }
     }
 
+    drawMeasurementCurves(mypainter);
+
     pen.setColor(foregroundTextColor());
     pen.setStyle(Qt::SolidLine);
     pen.setWidth(1);
@@ -413,8 +846,106 @@ void KFilterView::paintEvent(QPaintEvent *event)
     if (width() >= 760 && height() >= 420) {
         drawLegend(mypainter);
     }
+    drawPrintMeasurementStatus(mypainter);
 }
 
+
+void KFilterView::mousePressEvent(QMouseEvent *event)
+{
+    if (!m_measurementDrawingActive || event->button() != Qt::LeftButton) {
+        QWidget::mousePressEvent(event);
+        return;
+    }
+
+    const QPointF position = event->position();
+    const double frequencyHz = xToFrequencyHz(position.x());
+    const double pressureDb = yToPressureDb(position.y());
+    KFilterMeasurementCurve& curve = m_document->splCorrectionCurve(m_activeMeasurementDriverIndex);
+
+    if (!curve.appendPoint(frequencyHz, pressureDb)) {
+        emit measurementStatusMessage(
+            tr("Waypoint ignored: measurement frequencies must be finite, positive and strictly increase from left to right."));
+        event->accept();
+        return;
+    }
+
+    m_measurementCursorPosition = position;
+    m_measurementCursorValid = true;
+    update();
+    emit measurementStatusMessage(
+        tr("Waypoint %1 set for %2 at %3 Hz, %4 dB.")
+            .arg(static_cast<qlonglong>(curve.size()))
+            .arg(measurementDriverLabel(m_activeMeasurementDriverIndex))
+            .arg(frequencyHz, 0, 'f', 1)
+            .arg(pressureDb, 0, 'f', 1));
+    event->accept();
+}
+
+void KFilterView::mouseMoveEvent(QMouseEvent *event)
+{
+    if (!m_measurementDrawingActive) {
+        QWidget::mouseMoveEvent(event);
+        return;
+    }
+
+    m_measurementCursorPosition = event->position();
+    m_measurementCursorValid = rect().contains(m_measurementCursorPosition.toPoint());
+    update();
+
+    const QString statusText = measurementPointerText(m_measurementCursorPosition);
+    if (!statusText.isEmpty()) {
+        emit measurementStatusMessage(statusText);
+    }
+    event->accept();
+}
+
+void KFilterView::leaveEvent(QEvent *event)
+{
+    if (m_measurementDrawingActive) {
+        m_measurementCursorValid = false;
+        update();
+        emit measurementStatusMessage(
+            tr("Drawing SPL correction for %1: move into the plot and left-click waypoints from left to right.")
+                .arg(measurementDriverLabel(m_activeMeasurementDriverIndex)));
+    }
+    QWidget::leaveEvent(event);
+}
+
+void KFilterView::keyPressEvent(QKeyEvent *event)
+{
+    if (!m_measurementDrawingActive) {
+        QWidget::keyPressEvent(event);
+        return;
+    }
+
+    if (event->matches(QKeySequence::Undo) || event->key() == Qt::Key_Backspace) {
+        undoSplCorrectionWaypoint();
+        event->accept();
+        return;
+    }
+
+    if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+        finishSplCorrectionDrawing();
+        event->accept();
+        return;
+    }
+
+    if (event->key() == Qt::Key_Escape) {
+        cancelSplCorrectionDrawing();
+        event->accept();
+        return;
+    }
+
+    QWidget::keyPressEvent(event);
+}
+
+void KFilterView::resizeEvent(QResizeEvent *event)
+{
+    if (m_measurementDrawingActive) {
+        m_measurementCursorValid = false;
+    }
+    QWidget::resizeEvent(event);
+}
 
 KFilterView::PlotColorSettings KFilterView::defaultPlotColorSettings()
 {

@@ -18,7 +18,7 @@ The program is especially useful for answering questions such as:
 - How do enclosure parameters such as `Vb` and `Fb` affect the design?
 - What approximate bass-reflex tube length follows from a selected tube diameter?
 
-KFilter6 currently remains compatible with the legacy KFilter project-file model. The internal naming still contains some historical terms where changing them would risk compatibility; the visible UI has been modernized where appropriate.
+KFilter6 writes new `.kfp` project files as versioned JSON. Legacy text-based KFilter project files remain readable and are migrated to JSON the next time they are saved. The internal naming still contains some historical terms where changing them would risk compatibility; the visible UI has been modernized where appropriate.
 
 ## Status
 
@@ -60,7 +60,12 @@ Current major functionality includes:
 - Configurable network-preview background color.
 - Automatic light/dark contrast handling in the network preview.
 - Bass-reflex tube helper using `Vb`, `Fb`, and tube diameter.
-- Legacy `.kfp` project loading and saving.
+- Versioned JSON `.kfp` project saving with legacy `.kfp` loading compatibility.
+- Per-driver SPL correction curves drawn from logarithmic-frequency waypoints.
+- Import of absolute SPL measurement files with 0 dB calibration, a dedicated
+  correction window, and optional logarithmic fades.
+- Optional merging of correction curves into individual, vector-sum, and energetic-sum SPL curves.
+- Persistent correction curves and merge state in JSON project format version 2.
 
 ## Conceptual notes
 
@@ -75,6 +80,18 @@ Use it when checking the concrete acoustic summation of drivers around crossover
 The energetic SPL sum is the visible UI name for the historical scalar SPL summation. It sums SPL contributions energetically and ignores phase cancellation and phase addition.
 
 This is useful as an approximation of the energy balance between drivers. It is not a full polar-integrated power response calculation, but it is a practical design guide when shaping driver transitions and avoiding energetically uneven crossover behaviour.
+
+### SPL correction curves
+
+The **Measurements** menu can be used to draw a relative SPL correction curve for each driver. Waypoints are stored in Hz and dB and connected over the logarithmic frequency axis.
+
+Absolute measurement files can also be imported per driver. The import dialog calculates a constant offset from the median level in a user-selected calibration range, so that this reference range becomes `0 dB`. A separate correction window defines which part of the measurement is retained. Optional lower and upper fades use logarithmic frequency spacing and smoothstep weighting; outside the retained curve span the correction remains neutral. Additional columns such as phase are ignored.
+
+The importer accepts text-oriented FRD/CSV/DAT-style files whose first two numeric columns contain frequency in Hz and level in dB. Whitespace, tabs, semicolons, and unambiguous comma-separated rows are supported. Duplicate frequencies are combined using the median level. Imported curves replace the existing correction curve of the selected driver only after explicit confirmation.
+
+With **Merge Measurement** enabled, the interpolated correction is applied to the corresponding simulated driver SPL curve; `0 dB` is neutral. For vector and energetic sums, the dB correction is converted to the linear pressure factor `10^(correctionDb / 20)`. The factor scales real and imaginary pressure components equally, so the simulated phase remains unchanged while the corrected magnitude enters both sum calculations.
+
+Only the resulting relative correction points are project data. The original measurement file, absolute raw levels, calibration range, offset settings, and fade settings are not persisted in Patch 158. Correction curves and the merge switch remain stored in `.kfp` JSON format version 2. PDF export continues to suppress both the correction curves and every merge effect.
 
 ### Network preview
 
@@ -155,6 +172,8 @@ Available options include:
 -DKFILTER_BUILD_PROJECTIO_SMOKETEST=ON
 -DKFILTER_BUILD_DOCUMENT_SMOKETEST=ON
 -DKFILTER_BUILD_DEFAULTS_SMOKETEST=ON
+-DKFILTER_BUILD_MEASUREMENT_CURVE_SMOKETEST=ON
+-DKFILTER_BUILD_MEASUREMENT_IMPORT_SMOKETEST=ON
 -DKFILTER_ENABLE_WIZARD=OFF
 ```
 
@@ -290,7 +309,7 @@ File -> Save
 File -> Save As...
 ```
 
-Projects use the legacy KFilter `.kfp` file format.
+Projects are saved as versioned, human-readable JSON while retaining the `.kfp` extension. Legacy text-based `.kfp` files and JSON format version 1 projects can still be opened; saving such a project rewrites it in the current JSON format. SPL correction curves and the `Merge Measurement` state are project data in format version 2.
 
 ## User settings
 
@@ -332,9 +351,11 @@ kfilterqt6app.cpp
 
 KFilter6 is being ported and improved incrementally. The preferred change style is small, reviewable patches that keep the application buildable after each step.
 
-Important compatibility rule:
+Project-format compatibility rules:
 
-- Do not change the `.kfp` project-file format unless the migration and compatibility implications are explicitly handled.
+- Increment `formatVersion` when a future change is not backward-compatible or older builds cannot preserve the newly added project data.
+- Continue recognizing legacy text-based `.kfp` files through the dedicated legacy loader.
+- New saves must use the current JSON format; do not add new fields to the legacy writer.
 
 Terminology note:
 

@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(kfilter VERSION 0.1.0 LANGUAGES CXX)
 
-set(KFILTER_PATCH_LEVEL "151")
+set(KFILTER_PATCH_LEVEL "161")
 set(KFILTER_LICENSE_STRING "GPL-3.0-or-later")
 
 set(CMAKE_CXX_STANDARD 17)
@@ -22,6 +22,8 @@ option(KFILTER_BUILD_DRIVER_SMOKETEST "Build a small compile/link test for the U
 option(KFILTER_BUILD_PROJECTIO_SMOKETEST "Build a round-trip test for Qt6 project file serialization" ON)
 option(KFILTER_BUILD_DOCUMENT_SMOKETEST "Build a KFilterDoc smoke test on top of the Qt6 core" ON)
 option(KFILTER_BUILD_DEFAULTS_SMOKETEST "Build a regression test for historical driver defaults" ON)
+option(KFILTER_BUILD_MEASUREMENT_CURVE_SMOKETEST "Build a measurement curve model test" ON)
+option(KFILTER_BUILD_MEASUREMENT_IMPORT_SMOKETEST "Build a measurement parser and calibration test" ON)
 option(KFILTER_BUILD_QT6_APP "Build the minimal Qt6 Widgets application shell" ON)
 
 add_library(kfilter_core STATIC
@@ -31,6 +33,12 @@ add_library(kfilter_core STATIC
     kfilterprojectio.h
     kfilterdriverio.cpp
     kfilterdriverio.h
+    kfiltermeasurementcurve.cpp
+    kfiltermeasurementcurve.h
+    measurementcurveparser.cpp
+    measurementcurveparser.h
+    correctioncurveimport.cpp
+    correctioncurveimport.h
     kfilterdoc.cpp
     kfilterdoc.h
 )
@@ -65,6 +73,8 @@ if(KFILTER_BUILD_QT6_APP)
         networksectioneditdialog.h
         plotcolorsdialog.cpp
         plotcolorsdialog.h
+        measurementimportdialog.cpp
+        measurementimportdialog.h
         networkvalueutils.cpp
         networkvalueutils.h
         circuitout.cpp
@@ -126,4 +136,25 @@ if(KFILTER_BUILD_DEFAULTS_SMOKETEST)
 
     enable_testing()
     add_test(NAME kfilter_defaults_smoketest COMMAND kfilter_defaults_smoketest)
+endif()
+
+if(KFILTER_BUILD_MEASUREMENT_CURVE_SMOKETEST)
+    add_executable(kfilter_measurement_curve_smoketest
+        tools/measurement_curve_smoketest.cpp
+    )
+    target_link_libraries(kfilter_measurement_curve_smoketest PRIVATE kfilter_core)
+
+    enable_testing()
+    add_test(NAME kfilter_measurement_curve_smoketest COMMAND kfilter_measurement_curve_smoketest)
+endif()
+
+
+if(KFILTER_BUILD_MEASUREMENT_IMPORT_SMOKETEST)
+    add_executable(kfilter_measurement_import_smoketest
+        tools/measurement_import_smoketest.cpp
+    )
+    target_link_libraries(kfilter_measurement_import_smoketest PRIVATE kfilter_core)
+
+    enable_testing()
+    add_test(NAME kfilter_measurement_import_smoketest COMMAND kfilter_measurement_import_smoketest)
 endif()

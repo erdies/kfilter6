@@ -9,14 +9,20 @@
 
 #include <array>
 
+#include "kfiltermeasurementcurve.h"
+
 #include <QColor>
 #include <QPointF>
 #include <QString>
 #include <QWidget>
 
 class KFilterDoc;
+class QEvent;
+class QKeyEvent;
+class QMouseEvent;
 class QPaintEvent;
 class QPainter;
+class QResizeEvent;
 
 /**
  * Qt6 porting version of the original KFilter plot view.
@@ -87,8 +93,40 @@ public:
     /** gives back the scalarpressuresummarycolor */
     QColor& scalarPressureSummaryColor();
 
+    bool beginSplCorrectionDrawing(int driverIndex);
+    bool finishSplCorrectionDrawing();
+    bool cancelSplCorrectionDrawing();
+    bool undoSplCorrectionWaypoint();
+    bool clearMeasurementCurve(int driverIndex);
+    void clearMeasurementCurves();
+    bool hasMeasurementCurves() const;
+    bool hasMergeableMeasurementCurves() const;
+    bool measurementDrawingActive() const;
+    int activeMeasurementDriverIndex() const;
+
+    bool mergeMeasurementsEnabled() const;
+    void setMergeMeasurementsEnabled(bool enabled);
+
+    double xToFrequencyHz(double x) const;
+    double frequencyHzToX(double frequencyHz) const;
+    double yToPressureDb(double y) const;
+    double pressureDbToY(double valueDb) const;
+
+    bool printRendering() const;
+    void setPrintRendering(bool enabled);
+
+signals:
+    void measurementStatusMessage(const QString& message);
+    void measurementDrawingStateChanged(bool active, int driverIndex);
+    void measurementProjectStateChanged();
+
 protected:
     void paintEvent(QPaintEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void leaveEvent(QEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private:
     KFilterDoc *m_document = nullptr;
@@ -103,6 +141,13 @@ private:
     QColor cpressureS;
     QColor cimpedanceS;
     QColor cscalarpressureS;
+
+    KFilterMeasurementCurve m_measurementCurveSnapshot;
+    int m_activeMeasurementDriverIndex = -1;
+    QPointF m_measurementCursorPosition;
+    bool m_measurementDrawingActive = false;
+    bool m_measurementCursorValid = false;
+    bool m_printRendering = false;
 
     double Faktor = 1.047128548;
     double Start = 125.6637061;
@@ -120,11 +165,19 @@ private:
         bool valid = false;
     };
 
-    CurveLabelAnchor findLastVisibleCurvePoint(const double values[200], int type) const;
+    CurveLabelAnchor findLastVisibleCurvePoint(const double values[200], int type, int driverIndex = -1) const;
     void drawCurve(QPainter& painter, const double values[200], int type);
+    void drawDriverPressureCurve(QPainter& painter, const double values[200], int driverIndex);
     void drawCurveLabel(QPainter& painter, const QPointF& point, const QString& label) const;
     void drawDriverCurveLabels(QPainter& painter);
+    void drawMeasurementCurves(QPainter& painter);
     void drawLegend(QPainter& painter);
+    void drawPrintMeasurementStatus(QPainter& painter);
+    QString measurementDriverLabel(int driverIndex) const;
+    QString measurementPointerText(const QPointF& position) const;
+    bool measurementMergeAppliedForDriver(int driverIndex) const;
+    double effectivePressureDb(int driverIndex, int sampleIndex, double simulatedDb) const;
+    void endMeasurementDrawing();
 };
 
 #endif // KFILTERVIEW_H

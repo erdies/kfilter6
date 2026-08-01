@@ -72,6 +72,12 @@ private slots:
     void resetPlotColors();
     void chooseCircuitPreviewBackgroundColor();
     void resetCircuitPreviewBackgroundColor();
+    void finishMeasurementDrawing();
+    void undoMeasurementWaypoint();
+    void cancelMeasurementDrawing();
+    void clearMeasurementForDriver(int driverIndex);
+    void clearAllMeasurements();
+    void setMergeMeasurementEnabled(bool enabled);
     void editNetworkSectionFromPreview(int driverIndex, int sectionIndex, int groupValue);
     void showNetworkSectionContextMenuFromPreview(int driverIndex, int sectionIndex, int groupValue, const QPoint& globalPosition);
     void clearNetworkSectionFromPreview(int driverIndex, int sectionIndex, int groupValue);
@@ -103,6 +109,10 @@ private:
     void updateCircuitPreviewDriverActions();
     bool circuitPreviewDriverSlotAvailable(int driverIndex) const;
     QString circuitPreviewDriverMenuText(int driverIndex) const;
+    void importMeasurementForDriver(int driverIndex);
+    void startMeasurementDrawingForDriver(int driverIndex);
+    void updateMeasurementActions();
+    QString measurementDriverMenuText(int driverIndex) const;
     void openDriverParametersDialog(int initialDriverIndex);
     bool networkSectionEditInProgress() const;
     bool raiseActiveNetworkSectionEditor();
@@ -148,6 +158,14 @@ private:
     QAction *m_resetLayoutAction = nullptr;
     QAction *m_configurePlotColorsAction = nullptr;
     QAction *m_resetPlotColorsAction = nullptr;
+    std::array<QAction *, CircuitPreviewDriverActionCount> m_importMeasurementDriverActions{};
+    std::array<QAction *, CircuitPreviewDriverActionCount> m_drawMeasurementDriverActions{};
+    std::array<QAction *, CircuitPreviewDriverActionCount> m_clearMeasurementDriverActions{};
+    QAction *m_finishMeasurementDrawingAction = nullptr;
+    QAction *m_undoMeasurementWaypointAction = nullptr;
+    QAction *m_cancelMeasurementDrawingAction = nullptr;
+    QAction *m_clearAllMeasurementsAction = nullptr;
+    QAction *m_mergeMeasurementAction = nullptr;
     QActionGroup *m_circuitPreviewDriverActionGroup = nullptr;
     QAction *m_circuitPreviewAllDriversAction = nullptr;
     std::array<QAction *, CircuitPreviewDriverActionCount> m_circuitPreviewDriverActions{};

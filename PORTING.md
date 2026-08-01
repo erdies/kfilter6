@@ -509,3 +509,96 @@ preview:
 
 This is a visual-only change. No calculation logic or project file I/O was
 changed.
+
+
+## Patch 155: Versioned JSON project files
+
+- `KFilterProjectIo::saveToFile()` now writes `.kfp` projects as indented, versioned JSON.
+- The JSON root contains an explicit format name and `formatVersion = 1`.
+- Each of the four driver entries separates persistent driver parameters from the 48 network values.
+- `fullCircuit` is now persisted as part of the JSON driver state.
+- The existing text-based `.kfp` parser remains available as a read-only legacy loader.
+- Opening a legacy project and saving it migrates the file to JSON automatically.
+- JSON detection is content-based rather than extension-based.
+- Saves use `QSaveFile` so replacement of an existing project is atomic.
+- Failed loads are transactional: destination drivers are updated only after the complete file has validated.
+- Measurement/correction curves remain transient in this patch and are intentionally not part of format version 1 yet.
+- A later persistent measurement schema must use a newer format version so Patch 155 builds reject it instead of silently dropping unknown measurement data on save.
+
+## Patch 156: Persistent SPL correction curves
+
+- SPL correction curves are now project data rather than view-local transient state.
+- `KFilterDoc` owns one `KFilterMeasurementCurve` per driver plus the global
+  `Merge Measurement` state.
+- The JSON project format is advanced to `formatVersion = 2` so Patch 155 builds
+  reject files containing persistent measurement data instead of opening and
+  later discarding unknown fields.
+- JSON format version 1 from Patch 155 remains readable and loads with empty
+  correction curves and merge disabled.
+- Legacy text-based `.kfp` files remain readable with empty correction curves;
+  saving them writes current JSON format version 2.
+- Each driver can contain an optional `measurements.splCorrection` object with
+  an explicit curve type and a strictly frequency-ordered list of
+  `frequencyHz`/`valueDb` points.
+- `project.measurementSettings.mergeCorrectionCurves` persists the global merge
+  switch. It is restored only when at least one curve has two or more points.
+- Measurement loading is transactional together with driver and network data.
+  Invalid point values or non-increasing frequencies leave the current project
+  unchanged.
+- Creating, replacing, clearing or changing the merge state now marks the
+  document as modified.
+- The existing PDF behaviour is unchanged: correction curves and merged SPL
+  rendering are still suppressed during PDF export.
+
+## Patch 157: Measurement-aware SPL sums
+
+- `Merge Measurement` now affects the vector and energetic SPL sums in addition
+  to the individual driver SPL curves.
+- The interpolated dB correction is converted to a linear pressure-amplitude
+  factor with `10^(correctionDb / 20)`.
+- For the vector sum, the same positive real factor scales both the real and
+  imaginary simulated pressure components before complex addition. The existing
+  simulated phase is therefore preserved; no measurement phase is synthesized.
+- For the energetic sum, the corrected real and imaginary components are squared
+  and accumulated, which is equivalent to applying `10^(correctionDb / 10)` to
+  each driver's pressure-energy contribution.
+- Outside the frequency span of a correction curve, the neutral factor `1.0` is
+  used. Curves with fewer than two points remain non-mergeable.
+- Impedance calculations and stored driver-core results remain unchanged.
+- PDF export keeps its established suppression policy: the view requests sum
+  calculations without measurement merge while PDF rendering is active.
+- The document smoke test now checks vector-sum correction, energetic-sum
+  correction, neutral behaviour outside the curve range, PDF-style suppression,
+  and preservation of simulated phase in a cancellation scenario.
+
+
+## Patch 158: Calibrated measurement import
+
+- Added a per-driver `Import Measurement for Driver` submenu under
+  **Measurements**.
+- Text-oriented FRD/CSV/DAT-style files are parsed from their first two numeric
+  columns as frequency in Hz and absolute SPL level in dB. Additional columns,
+  including phase, are ignored.
+- The parser accepts whitespace, tabs, semicolons, decimal commas when the
+  column separation is otherwise unambiguous, and comma-separated rows using
+  decimal points. Invalid rows are skipped and duplicate frequencies are
+  combined with the median level.
+- The import dialog separates the 0 dB calibration range from the retained
+  correction window. The automatic offset is the negative median SPL level in
+  the selected calibration range; a manual offset can be added.
+- Only points inside the correction window are converted into the existing
+  relative `KFilterMeasurementCurve`. Exact boundary points are synthesized by
+  logarithmic interpolation when necessary.
+- Optional lower and upper fades operate in logarithmic frequency space using a
+  smoothstep weight. Enabled fades begin or end at a neutral 0 dB boundary.
+- A two-panel preview shows the absolute raw measurement separately from the
+  calibrated measurement and final relative correction curve.
+- Importing replaces an existing curve only after explicit confirmation. The
+  imported result immediately uses the existing merge, sum, JSON persistence,
+  and manual editing paths.
+- Patch 158 intentionally stores only the resulting correction points. Source
+  files, raw measurements, calibration metadata, and fade settings are not yet
+  persisted, and correction-curve export remains deferred.
+- Added `kfilter_measurement_import_smoketest` for parser cleanup, duplicate
+  handling, median calibration, manual offset, correction-window extraction,
+  and lower/upper fade behaviour.

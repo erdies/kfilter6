@@ -15,7 +15,10 @@
 #include <QList>
 #include <QUrl>
 
+#include <array>
+
 #include "driver.h"
+#include "kfiltermeasurementcurve.h"
 
 class KFilterView;
 
@@ -50,6 +53,15 @@ void initToolsWizard();
 
 double  m_doubleXContainer[ 4 ][ 200 ];
 driver m_driverDriver[ 4 ];
+
+KFilterMeasurementCurve& splCorrectionCurve(int driverIndex);
+const KFilterMeasurementCurve& splCorrectionCurve(int driverIndex) const;
+bool hasMeasurementCurves() const;
+bool hasMergeableMeasurementCurves() const;
+bool clearMeasurementCurve(int driverIndex);
+bool clearMeasurementCurves();
+bool measurementMergeEnabled() const;
+bool setMeasurementMergeEnabled(bool enabled);
 
 //////////////////////////////////////////////////////////
     /** adds a view to the document which represents the document contents. Usually this is your main view. */
@@ -97,8 +109,11 @@ driver m_driverDriver[ 4 ];
     /** the modified flag of the current document */
     bool modified = false;
     QUrl doc_url;
+    std::array<KFilterMeasurementCurve, 4> m_splCorrectionCurves;
+    bool m_measurementMergeEnabled = false;
 
     void markLoadedContentsReady();
+    double splCorrectionAmplitudeFactor(int driverIndex, int sampleIndex) const;
 
   private slots:
     /** is called when open dialogs

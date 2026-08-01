@@ -11,7 +11,10 @@
 #include <QDebug>
 #include <QString>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
 
 #ifdef KFILTER_ENABLE_LEGACY_UI
 #include "kfilterview.h"
@@ -30,6 +33,24 @@ QString localFilePathFromUrl(const QUrl& url)
     }
 
     return QString();
+}
+
+constexpr int PressureSampleCount = 150;
+constexpr double MinimumPressureFrequencyHz = 20.0;
+constexpr double PressureFrequencyStep = 1.047128548;
+
+const std::array<double, PressureSampleCount>& pressureSampleFrequenciesHz()
+{
+    static const std::array<double, PressureSampleCount> frequencies = []() {
+        std::array<double, PressureSampleCount> values{};
+        values[0] = MinimumPressureFrequencyHz;
+        for (int sampleIndex = 1; sampleIndex < PressureSampleCount; ++sampleIndex) {
+            values[static_cast<std::size_t>(sampleIndex)] =
+                values[static_cast<std::size_t>(sampleIndex - 1)] * PressureFrequencyStep;
+        }
+        return values;
+    }();
+    return frequencies;
 }
 }
 
@@ -50,6 +71,99 @@ KFilterDoc::KFilterDoc(QObject *parent, const char *name)
 
 KFilterDoc::~KFilterDoc()
 {
+}
+
+
+KFilterMeasurementCurve& KFilterDoc::splCorrectionCurve(int driverIndex)
+{
+  return m_splCorrectionCurves.at(static_cast<std::size_t>(driverIndex));
+}
+
+const KFilterMeasurementCurve& KFilterDoc::splCorrectionCurve(int driverIndex) const
+{
+  return m_splCorrectionCurves.at(static_cast<std::size_t>(driverIndex));
+}
+
+bool KFilterDoc::hasMeasurementCurves() const
+{
+  return std::any_of(m_splCorrectionCurves.cbegin(),
+                     m_splCorrectionCurves.cend(),
+                     [](const KFilterMeasurementCurve& curve) { return !curve.isEmpty(); });
+}
+
+bool KFilterDoc::hasMergeableMeasurementCurves() const
+{
+  return std::any_of(m_splCorrectionCurves.cbegin(),
+                     m_splCorrectionCurves.cend(),
+                     [](const KFilterMeasurementCurve& curve) { return curve.size() >= 2; });
+}
+
+bool KFilterDoc::clearMeasurementCurve(int driverIndex)
+{
+  if (driverIndex < 0 || driverIndex >= static_cast<int>(m_splCorrectionCurves.size())) {
+    return false;
+  }
+
+  KFilterMeasurementCurve& curve =
+      m_splCorrectionCurves[static_cast<std::size_t>(driverIndex)];
+  const bool curveChanged = !curve.isEmpty();
+  curve.clear();
+
+  const bool mergeChanged = m_measurementMergeEnabled && !hasMergeableMeasurementCurves();
+  if (mergeChanged) {
+    m_measurementMergeEnabled = false;
+  }
+
+  return curveChanged || mergeChanged;
+}
+
+bool KFilterDoc::clearMeasurementCurves()
+{
+  const bool changed = hasMeasurementCurves() || m_measurementMergeEnabled;
+  for (KFilterMeasurementCurve& curve : m_splCorrectionCurves) {
+    curve.clear();
+  }
+  m_measurementMergeEnabled = false;
+  return changed;
+}
+
+bool KFilterDoc::measurementMergeEnabled() const
+{
+  return m_measurementMergeEnabled;
+}
+
+bool KFilterDoc::setMeasurementMergeEnabled(bool enabled)
+{
+  const bool effectiveEnabled = enabled && hasMergeableMeasurementCurves();
+  if (m_measurementMergeEnabled == effectiveEnabled) {
+    return false;
+  }
+
+  m_measurementMergeEnabled = effectiveEnabled;
+  return true;
+}
+
+double KFilterDoc::splCorrectionAmplitudeFactor(int driverIndex, int sampleIndex) const
+{
+  if (!m_measurementMergeEnabled ||
+      driverIndex < 0 || driverIndex >= 4 ||
+      sampleIndex < 0 || sampleIndex >= PressureSampleCount) {
+    return 1.0;
+  }
+
+  const KFilterMeasurementCurve& curve = splCorrectionCurve(driverIndex);
+  if (curve.size() < 2) {
+    return 1.0;
+  }
+
+  double correctionDb = 0.0;
+  const double frequencyHz =
+      pressureSampleFrequenciesHz()[static_cast<std::size_t>(sampleIndex)];
+  if (!curve.interpolatedValueAt(frequencyHz, correctionDb)) {
+    return 1.0;
+  }
+
+  return std::pow(10.0, correctionDb / 20.0);
 }
 
 void KFilterDoc::addView(KFilterView *view)
@@ -125,7 +239,11 @@ bool KFilterDoc::openDocument(const QUrl& url, const char *format /*=nullptr*/)
   }
 
   QString errorMessage;
-  if (!KFilterProjectIo::loadFromFile(filePath, m_driverDriver, &errorMessage)) {
+  if (!KFilterProjectIo::loadFromFile(filePath,
+                                      m_driverDriver,
+                                      m_splCorrectionCurves,
+                                      m_measurementMergeEnabled,
+                                      &errorMessage)) {
     qWarning().noquote() << errorMessage;
     return false;
   }
@@ -146,7 +264,11 @@ bool KFilterDoc::saveDocument(const QUrl& url, const char *format /*=nullptr*/)
   }
 
   QString errorMessage;
-  if (!KFilterProjectIo::saveToFile(filePath, m_driverDriver, &errorMessage)) {
+  if (!KFilterProjectIo::saveToFile(filePath,
+                                    m_driverDriver,
+                                    m_splCorrectionCurves,
+                                    m_measurementMergeEnabled,
+                                    &errorMessage)) {
     qWarning().noquote() << errorMessage;
     return false;
   }
@@ -161,7 +283,9 @@ void KFilterDoc::deleteContents()
   for (int intI = 0; intI < 4; intI++ )
   {
     m_driverDriver[ intI ].initContents();
+    m_splCorrectionCurves[static_cast<std::size_t>(intI)].clear();
   }
+  m_measurementMergeEnabled = false;
   modified = false;
 }
 
@@ -253,10 +377,15 @@ bool KFilterDoc::PressureSummary()
 		if ( m_driverDriver[ intIndex ].SummaryisActive )
 		{
 			m_driverDriver[ intIndex ].Schall();
-			for ( int intI = 0; intI < 300; intI++ )
+			for ( int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex )
 			{
-				doubleSum[ intI ] = doubleSum[ intI ] + \
-					m_driverDriver[ intIndex ].ResultSchall[ intI ];
+				const int resultIndex = sampleIndex * 2;
+				const double amplitudeFactor =
+					splCorrectionAmplitudeFactor(intIndex, sampleIndex);
+				doubleSum[ resultIndex ] +=
+					m_driverDriver[ intIndex ].ResultSchall[ resultIndex ] * amplitudeFactor;
+				doubleSum[ resultIndex + 1 ] +=
+					m_driverDriver[ intIndex ].ResultSchall[ resultIndex + 1 ] * amplitudeFactor;
 			}
 		}
 	}
@@ -276,7 +405,7 @@ bool KFilterDoc::PressureSummary()
 bool KFilterDoc::PressureScalarSummary()
 {
 	///////////////////init m_doubleXContainer
-	for ( int intI = 0; intI < 150; intI++ )
+	for ( int intI = 0; intI < PressureSampleCount; intI++ )
 	{
 		m_doubleXContainer[ 0 ][ intI ] = 0;
 	}
@@ -286,19 +415,23 @@ bool KFilterDoc::PressureScalarSummary()
 		if ( m_driverDriver[ intIndex ].ScalarSummaryisActive )
 		{
 			m_driverDriver[ intIndex ].Schall();
-			int intJ = 0;
-			for ( int intI = 0; intI < 300; intI = intI + 2 )
+			for ( int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex )
 			{
-				//		turbo pascal version				dB0-round(	ln(std::sqrt(sqr(qx1)+sqr(qy1)+sqr(qx2)+sqr(qy2)+sqr(qx3)+sqr(qy3))	)
+				//		turbo pascal version			dB0-round(	ln(std::sqrt(sqr(qx1)+sqr(qy1)+sqr(qx2)+sqr(qy2)+sqr(qx3)+sqr(qy3))	)
 				//  	old C version 				m_doubleXContainer[0][j] = m_doubleXContainer[0][j] + std::sqrt(std::pow(m_driverDriver[index].ResultSchall[i],2.0)+std::pow(m_driverDriver[index].ResultSchall[i+1],2.0));
-				m_doubleXContainer[ 0 ][ intJ ] = \
-					m_doubleXContainer[ 0 ][ intJ ] + std::pow( m_driverDriver[ intIndex ].ResultSchall[ intI ], 2.0) + \
-					std::pow( m_driverDriver[ intIndex ].ResultSchall[ intI + 1 ], 2.0 );
-				intJ++;
+				const int resultIndex = sampleIndex * 2;
+				const double amplitudeFactor =
+					splCorrectionAmplitudeFactor(intIndex, sampleIndex);
+				const double correctedReal =
+					m_driverDriver[ intIndex ].ResultSchall[ resultIndex ] * amplitudeFactor;
+				const double correctedImaginary =
+					m_driverDriver[ intIndex ].ResultSchall[ resultIndex + 1 ] * amplitudeFactor;
+				m_doubleXContainer[ 0 ][ sampleIndex ] +=
+					std::pow( correctedReal, 2.0 ) + std::pow( correctedImaginary, 2.0 );
 			}
 		}
 	}
-	for (int intI = 0; intI < 150; intI++ )
+	for (int intI = 0; intI < PressureSampleCount; intI++ )
 	{
 		m_doubleXContainer[ 0 ][ intI ] = DB( std::sqrt( m_doubleXContainer[ 0 ][ intI ] ) );
 	}
