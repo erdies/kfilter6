@@ -7,6 +7,7 @@
 #include "kfilterqt6app.h"
 
 #include "circuitout.h"
+#include "correctioncurveexport.h"
 #include "driver.h"
 #include "driverparametersdialog.h"
 #include "networkparametersdialog.h"
@@ -93,6 +94,14 @@ QString ensurePdfSuffix(QString filePath)
 {
     if (!filePath.endsWith(QStringLiteral(".pdf"), Qt::CaseInsensitive)) {
         filePath += QStringLiteral(".pdf");
+    }
+    return filePath;
+}
+
+QString ensureFrdSuffix(QString filePath)
+{
+    if (!filePath.endsWith(QStringLiteral(".frd"), Qt::CaseInsensitive)) {
+        filePath += QStringLiteral(".frd");
     }
     return filePath;
 }
@@ -614,6 +623,11 @@ void KFilterQt6App::createActions()
             importMeasurementForDriver(index);
         });
 
+        m_exportMeasurementDriverActions[index] = new QAction(measurementDriverMenuText(index), this);
+        connect(m_exportMeasurementDriverActions[index], &QAction::triggered, this, [this, index]() {
+            exportMeasurementForDriver(index);
+        });
+
         m_drawMeasurementDriverActions[index] = new QAction(measurementDriverMenuText(index), this);
         connect(m_drawMeasurementDriverActions[index], &QAction::triggered, this, [this, index]() {
             startMeasurementDrawingForDriver(index);
@@ -710,6 +724,13 @@ void KFilterQt6App::createMenusAndToolBar()
     for (QAction *driverAction : m_importMeasurementDriverActions) {
         if (driverAction != nullptr) {
             importMeasurementMenu->addAction(driverAction);
+        }
+    }
+
+    QMenu *exportMeasurementMenu = measurementMenu->addMenu(tr("&Export Measurement for Driver"));
+    for (QAction *driverAction : m_exportMeasurementDriverActions) {
+        if (driverAction != nullptr) {
+            exportMeasurementMenu->addAction(driverAction);
         }
     }
 
@@ -948,6 +969,74 @@ void KFilterQt6App::importMeasurementForDriver(int driverIndex)
         5000);
 }
 
+void KFilterQt6App::exportMeasurementForDriver(int driverIndex)
+{
+    if (raiseActiveNetworkSectionEditor() || m_plotView == nullptr || m_doc == nullptr ||
+        driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount ||
+        m_plotView->measurementDrawingActive()) {
+        return;
+    }
+
+    const KFilterMeasurementCurve& curve = m_doc->splCorrectionCurve(driverIndex);
+    if (curve.isEmpty()) {
+        QMessageBox::information(
+            this,
+            tr("Export Measurement"),
+            tr("%1 does not contain an SPL correction curve to export.")
+                .arg(measurementDriverMenuText(driverIndex)));
+        return;
+    }
+
+    QString projectBaseName = QStringLiteral("Untitled");
+    const QString projectPath = currentLocalPath();
+    if (!projectPath.isEmpty()) {
+        const QString candidateBaseName = QFileInfo(projectPath).completeBaseName().trimmed();
+        if (!candidateBaseName.isEmpty()) {
+            projectBaseName = candidateBaseName;
+        }
+    }
+
+    const QString proposedPath = QDir(dialogStartDirectory()).filePath(
+        QStringLiteral("%1_driver%2_correction.frd")
+            .arg(projectBaseName)
+            .arg(driverIndex + 1));
+
+    QString filePath = QFileDialog::getSaveFileName(
+        this,
+        tr("Export Measurement Correction as FRD"),
+        proposedPath,
+        tr("FRD files (*.frd);;All files (*)"));
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    filePath = ensureFrdSuffix(filePath);
+    const KFilterCorrectionCurveExportResult exportResult =
+        exportKFilterCorrectionCurveAsFrd(
+            filePath,
+            curve,
+            measurementDriverMenuText(driverIndex),
+            QStringLiteral(KFILTER_PATCH_LEVEL_STRING));
+
+    if (!exportResult.isValid()) {
+        QMessageBox::critical(
+            this,
+            tr("Measurement Export Failed"),
+            exportResult.errorMessage.isEmpty()
+                ? tr("The correction curve could not be exported.")
+                : exportResult.errorMessage);
+        return;
+    }
+
+    rememberDirectoryForPath(filePath);
+    statusBar()->showMessage(
+        tr("Exported %1 correction points for %2 to %3.")
+            .arg(static_cast<qlonglong>(exportResult.exportedPointCount))
+            .arg(measurementDriverMenuText(driverIndex))
+            .arg(filePath),
+        5000);
+}
+
 void KFilterQt6App::startMeasurementDrawingForDriver(int driverIndex)
 {
     if (raiseActiveNetworkSectionEditor() || m_plotView == nullptr) {
@@ -1081,6 +1170,15 @@ void KFilterQt6App::updateMeasurementActions()
         if (importAction != nullptr) {
             importAction->setText(measurementDriverMenuText(index));
             importAction->setEnabled(!networkEditorOpen && !drawingActive);
+        }
+
+        QAction *exportAction = m_exportMeasurementDriverActions[index];
+        if (exportAction != nullptr) {
+            exportAction->setText(measurementDriverMenuText(index));
+            const bool driverHasCurve =
+                m_doc != nullptr && !m_doc->splCorrectionCurve(index).isEmpty();
+            exportAction->setEnabled(
+                !networkEditorOpen && !drawingActive && driverHasCurve);
         }
 
         QAction *drawAction = m_drawMeasurementDriverActions[index];

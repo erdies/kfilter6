@@ -65,6 +65,7 @@ Current major functionality includes:
 - Import of absolute SPL measurement files with 0 dB calibration, a dedicated
   correction window, and optional logarithmic fades.
 - Optional merging of correction curves into individual, vector-sum, and energetic-sum SPL curves.
+- Per-driver export of stored relative SPL correction points as three-column FRD files with neutral `0 deg` phase.
 - Persistent correction curves and merge state in JSON project format version 2.
 
 ## Conceptual notes
@@ -88,6 +89,8 @@ The **Measurements** menu can be used to draw a relative SPL correction curve fo
 Absolute measurement files can also be imported per driver. The import dialog calculates a constant offset from the median level in a user-selected calibration range, so that this reference range becomes `0 dB`. A separate correction window defines which part of the measurement is retained. Optional lower and upper fades use logarithmic frequency spacing and smoothstep weighting; outside the retained curve span the correction remains neutral. Additional columns such as phase are ignored.
 
 The importer accepts text-oriented FRD/CSV/DAT-style files whose first two numeric columns contain frequency in Hz and level in dB. Whitespace, tabs, semicolons, and unambiguous comma-separated rows are supported. Duplicate frequencies are combined using the median level. Imported curves replace the existing correction curve of the selected driver only after explicit confirmation.
+
+The **Export Measurement for Driver** submenu writes the stored correction points of the selected driver as a UTF-8, three-column FRD file. The columns contain frequency in Hz, relative correction in dB, and an intentionally neutral phase of `0 deg`. KFilter metadata marks the file as `magnitude-correction`, states that the values are not absolute SPL, and identifies the phase column as having no independent phase meaning. Only the stored points are exported; no interpolation grid, driver gain, simulated response, or merged response is added. Patch 163 does not yet implement the special reimport semantics for KFilter correction FRD files, so such a file should not currently be reimported as an absolute measurement without deliberate handling.
 
 With **Merge Measurement** enabled, the interpolated correction is applied to the corresponding simulated driver SPL curve; `0 dB` is neutral. For vector and energetic sums, the dB correction is converted to the linear pressure factor `10^(correctionDb / 20)`. The factor scales real and imaginary pressure components equally, so the simulated phase remains unchanged while the corrected magnitude enters both sum calculations.
 
@@ -174,6 +177,7 @@ Available options include:
 -DKFILTER_BUILD_DEFAULTS_SMOKETEST=ON
 -DKFILTER_BUILD_MEASUREMENT_CURVE_SMOKETEST=ON
 -DKFILTER_BUILD_MEASUREMENT_IMPORT_SMOKETEST=ON
+-DKFILTER_BUILD_MEASUREMENT_EXPORT_SMOKETEST=ON
 -DKFILTER_ENABLE_WIZARD=OFF
 ```
 

@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(kfilter VERSION 0.1.0 LANGUAGES CXX)
 
-set(KFILTER_PATCH_LEVEL "161")
+set(KFILTER_PATCH_LEVEL "163")
 set(KFILTER_LICENSE_STRING "GPL-3.0-or-later")
 
 set(CMAKE_CXX_STANDARD 17)
@@ -24,6 +24,7 @@ option(KFILTER_BUILD_DOCUMENT_SMOKETEST "Build a KFilterDoc smoke test on top of
 option(KFILTER_BUILD_DEFAULTS_SMOKETEST "Build a regression test for historical driver defaults" ON)
 option(KFILTER_BUILD_MEASUREMENT_CURVE_SMOKETEST "Build a measurement curve model test" ON)
 option(KFILTER_BUILD_MEASUREMENT_IMPORT_SMOKETEST "Build a measurement parser and calibration test" ON)
+option(KFILTER_BUILD_MEASUREMENT_EXPORT_SMOKETEST "Build an FRD correction-curve export test" ON)
 option(KFILTER_BUILD_QT6_APP "Build the minimal Qt6 Widgets application shell" ON)
 
 add_library(kfilter_core STATIC
@@ -39,6 +40,8 @@ add_library(kfilter_core STATIC
     measurementcurveparser.h
     correctioncurveimport.cpp
     correctioncurveimport.h
+    correctioncurveexport.cpp
+    correctioncurveexport.h
     kfilterdoc.cpp
     kfilterdoc.h
 )
@@ -157,4 +160,15 @@ if(KFILTER_BUILD_MEASUREMENT_IMPORT_SMOKETEST)
 
     enable_testing()
     add_test(NAME kfilter_measurement_import_smoketest COMMAND kfilter_measurement_import_smoketest)
+endif()
+
+
+if(KFILTER_BUILD_MEASUREMENT_EXPORT_SMOKETEST)
+    add_executable(kfilter_measurement_export_smoketest
+        tools/measurement_export_smoketest.cpp
+    )
+    target_link_libraries(kfilter_measurement_export_smoketest PRIVATE kfilter_core)
+
+    enable_testing()
+    add_test(NAME kfilter_measurement_export_smoketest COMMAND kfilter_measurement_export_smoketest)
 endif()

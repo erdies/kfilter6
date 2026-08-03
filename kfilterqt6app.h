@@ -110,6 +110,7 @@ private:
     bool circuitPreviewDriverSlotAvailable(int driverIndex) const;
     QString circuitPreviewDriverMenuText(int driverIndex) const;
     void importMeasurementForDriver(int driverIndex);
+    void exportMeasurementForDriver(int driverIndex);
     void startMeasurementDrawingForDriver(int driverIndex);
     void updateMeasurementActions();
     QString measurementDriverMenuText(int driverIndex) const;
@@ -159,6 +160,7 @@ private:
     QAction *m_configurePlotColorsAction = nullptr;
     QAction *m_resetPlotColorsAction = nullptr;
     std::array<QAction *, CircuitPreviewDriverActionCount> m_importMeasurementDriverActions{};
+    std::array<QAction *, CircuitPreviewDriverActionCount> m_exportMeasurementDriverActions{};
     std::array<QAction *, CircuitPreviewDriverActionCount> m_drawMeasurementDriverActions{};
     std::array<QAction *, CircuitPreviewDriverActionCount> m_clearMeasurementDriverActions{};
     QAction *m_finishMeasurementDrawingAction = nullptr;

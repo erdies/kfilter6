@@ -602,3 +602,29 @@ changed.
 - Added `kfilter_measurement_import_smoketest` for parser cleanup, duplicate
   handling, median calibration, manual offset, correction-window extraction,
   and lower/upper fade behaviour.
+
+
+## Patch 163: FRD export of stored correction curves
+
+- Added an **Export Measurement for Driver** submenu under **Measurements**,
+  parallel to the existing per-driver import action.
+- Export actions are available only for drivers that currently contain a stored
+  SPL correction curve and are disabled while measurement drawing or a network
+  section editor is active.
+- The export writes only the stored correction control points. It does not add
+  interpolation points, Driver Gain, simulated SPL data, or merged response data.
+- FRD output uses three columns: frequency in Hz, relative correction in dB, and
+  an intentionally neutral phase value of `0.000` degrees.
+- The UTF-8 header identifies the file as `magnitude-correction`, states that the
+  levels are relative rather than absolute SPL, and marks the phase meaning as
+  `none`. Driver description, patch level, and correction range are included as
+  metadata.
+- Frequencies are sorted before writing. Invalid/non-finite points and duplicate
+  frequencies are rejected, and output is committed atomically with `QSaveFile`.
+- Number formatting is forced to the C locale so FRD data always uses a decimal
+  point regardless of the desktop locale.
+- Added `kfilter_measurement_export_smoketest`, covering metadata, neutral phase,
+  sorted output, locale independence, empty curves, and duplicate frequencies.
+- Reimport recognition of KFilter-specific correction metadata remains a later
+  step; the existing measurement importer still treats input as an absolute
+  measurement requiring calibration.
