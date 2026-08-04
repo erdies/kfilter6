@@ -308,19 +308,11 @@ bool KFilterView::measurementMergeAppliedForDriver(int driverIndex) const
 
 double KFilterView::effectivePressureDb(int driverIndex, int sampleIndex, double simulatedDb) const
 {
-    if (!measurementMergeAppliedForDriver(driverIndex) ||
-        sampleIndex < 0 || sampleIndex >= 150 || !std::isfinite(simulatedDb)) {
+    if (m_document == nullptr || !std::isfinite(simulatedDb)) {
         return simulatedDb;
     }
 
-    constexpr double MinimumFrequencyHz = 20.0;
-    const double frequencyHz = MinimumFrequencyHz * Xvalue[sampleIndex] / Xvalue[0];
-    double correctionDb = 0.0;
-    if (!m_document->splCorrectionCurve(driverIndex).interpolatedValueAt(frequencyHz, correctionDb)) {
-        return simulatedDb;
-    }
-
-    return simulatedDb + correctionDb;
+    return simulatedDb + m_document->splCorrectionDb(driverIndex, sampleIndex);
 }
 
 void KFilterView::initXvalue()

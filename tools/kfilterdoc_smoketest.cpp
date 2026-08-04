@@ -64,6 +64,62 @@ bool expectNear(const char* label, double actual, double expected, double tolera
     return true;
 }
 
+bool checkCentralizedCorrectionCalculation()
+{
+    constexpr double PressureFrequencyStep = 1.047128548;
+    constexpr int InterpolationSampleIndex = 10;
+    constexpr double LowerCorrectionDb = 0.0;
+    constexpr double UpperCorrectionDb = 8.0;
+    constexpr double ExpectedInterpolatedDb = 4.0;
+
+    KFilterDoc document;
+    KFilterMeasurementCurve& curve = document.splCorrectionCurve(0);
+    const double lowerFrequencyHz =
+        20.0 * std::pow(PressureFrequencyStep, InterpolationSampleIndex - 1);
+    const double upperFrequencyHz =
+        20.0 * std::pow(PressureFrequencyStep, InterpolationSampleIndex + 1);
+    curve.appendPoint(lowerFrequencyHz, LowerCorrectionDb);
+    curve.appendPoint(upperFrequencyHz, UpperCorrectionDb);
+
+    if (!expectNear("Correction dB with merge disabled",
+                    document.splCorrectionDb(0, InterpolationSampleIndex),
+                    0.0) ||
+        !expectNear("Correction factor with merge disabled",
+                    document.splCorrectionAmplitudeFactor(0, InterpolationSampleIndex),
+                    1.0)) {
+        return false;
+    }
+
+    document.setMeasurementMergeEnabled(true);
+    if (!expectNear("Central logarithmic correction interpolation",
+                    document.splCorrectionDb(0, InterpolationSampleIndex),
+                    ExpectedInterpolatedDb) ||
+        !expectNear("Central correction amplitude factor",
+                    document.splCorrectionAmplitudeFactor(0, InterpolationSampleIndex),
+                    std::pow(10.0, ExpectedInterpolatedDb / 20.0))) {
+        return false;
+    }
+
+    if (!expectNear("Correction below curve range", document.splCorrectionDb(0, 0), 0.0) ||
+        !expectNear("Correction factor below curve range",
+                    document.splCorrectionAmplitudeFactor(0, 0),
+                    1.0) ||
+        !expectNear("Correction for invalid driver",
+                    document.splCorrectionDb(-1, InterpolationSampleIndex),
+                    0.0) ||
+        !expectNear("Correction factor for invalid driver",
+                    document.splCorrectionAmplitudeFactor(4, InterpolationSampleIndex),
+                    1.0) ||
+        !expectNear("Correction for invalid sample", document.splCorrectionDb(0, 150), 0.0) ||
+        !expectNear("Correction factor for invalid sample",
+                    document.splCorrectionAmplitudeFactor(0, -1),
+                    1.0)) {
+        return false;
+    }
+
+    return true;
+}
+
 bool checkMeasurementSummaryMerge()
 {
     constexpr int TestSampleIndex = 75;
@@ -242,7 +298,9 @@ int main(int argc, char** argv)
     QCoreApplication app(argc, argv);
     (void)app;
 
-    if (!checkMeasurementSummaryMerge() || !checkSelectiveMeasurementClearing()) {
+    if (!checkCentralizedCorrectionCalculation() ||
+        !checkMeasurementSummaryMerge() ||
+        !checkSelectiveMeasurementClearing()) {
         return 1;
     }
 

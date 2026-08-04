@@ -62,6 +62,8 @@ bool clearMeasurementCurve(int driverIndex);
 bool clearMeasurementCurves();
 bool measurementMergeEnabled() const;
 bool setMeasurementMergeEnabled(bool enabled);
+double splCorrectionDb(int driverIndex, int sampleIndex) const;
+double splCorrectionAmplitudeFactor(int driverIndex, int sampleIndex) const;
 
 //////////////////////////////////////////////////////////
     /** adds a view to the document which represents the document contents. Usually this is your main view. */
@@ -113,7 +115,6 @@ bool setMeasurementMergeEnabled(bool enabled);
     bool m_measurementMergeEnabled = false;
 
     void markLoadedContentsReady();
-    double splCorrectionAmplitudeFactor(int driverIndex, int sampleIndex) const;
 
   private slots:
     /** is called when open dialogs

@@ -628,3 +628,23 @@ changed.
 - Reimport recognition of KFilter-specific correction metadata remains a later
   step; the existing measurement importer still treats input as an absolute
   measurement requiring calibration.
+
+## Patch 164: Centralized SPL correction calculation
+
+- Added `KFilterDoc::splCorrectionDb()` as the single document-level entry point
+  for interpolating the effective scalar measurement correction on the fixed SPL
+  simulation raster.
+- Exposed `KFilterDoc::splCorrectionAmplitudeFactor()` as the corresponding
+  centralized dB-to-linear conversion used by vector and energetic sums.
+- Individual merged driver curves and their label anchors no longer interpolate
+  `KFilterMeasurementCurve` directly in `KFilterView`; they use the same document
+  API as the sum calculations.
+- Invalid driver/sample indices, disabled merge state, non-mergeable curves,
+  out-of-range frequencies, and non-finite interpolation results all resolve to
+  the neutral correction (`0 dB` / amplitude factor `1.0`).
+- This patch is intentionally a behaviour-preserving refactoring. It adds no
+  correction cache, no complex phase representation, and no JSON or FRD format
+  changes.
+- The document smoke test now verifies the centralized dB and amplitude APIs,
+  including merge-disabled, outside-range, invalid-index, and logarithmic
+  interpolation cases.

@@ -143,27 +143,37 @@ bool KFilterDoc::setMeasurementMergeEnabled(bool enabled)
   return true;
 }
 
-double KFilterDoc::splCorrectionAmplitudeFactor(int driverIndex, int sampleIndex) const
+double KFilterDoc::splCorrectionDb(int driverIndex, int sampleIndex) const
 {
   if (!m_measurementMergeEnabled ||
-      driverIndex < 0 || driverIndex >= 4 ||
+      driverIndex < 0 || driverIndex >= static_cast<int>(m_splCorrectionCurves.size()) ||
       sampleIndex < 0 || sampleIndex >= PressureSampleCount) {
-    return 1.0;
+    return 0.0;
   }
 
   const KFilterMeasurementCurve& curve = splCorrectionCurve(driverIndex);
   if (curve.size() < 2) {
-    return 1.0;
+    return 0.0;
   }
 
   double correctionDb = 0.0;
   const double frequencyHz =
       pressureSampleFrequenciesHz()[static_cast<std::size_t>(sampleIndex)];
-  if (!curve.interpolatedValueAt(frequencyHz, correctionDb)) {
-    return 1.0;
+  if (!curve.interpolatedValueAt(frequencyHz, correctionDb) ||
+      !std::isfinite(correctionDb)) {
+    return 0.0;
   }
 
-  return std::pow(10.0, correctionDb / 20.0);
+  return correctionDb;
+}
+
+double KFilterDoc::splCorrectionAmplitudeFactor(int driverIndex, int sampleIndex) const
+{
+  const double amplitudeFactor =
+      std::pow(10.0, splCorrectionDb(driverIndex, sampleIndex) / 20.0);
+  return std::isfinite(amplitudeFactor) && amplitudeFactor > 0.0
+             ? amplitudeFactor
+             : 1.0;
 }
 
 void KFilterDoc::addView(KFilterView *view)
