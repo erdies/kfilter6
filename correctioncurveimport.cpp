@@ -48,9 +48,8 @@ double logarithmicFraction(double frequencyHz, double startHz, double endHz)
 
 bool appendOrReplacePoint(KFilterMeasurementCurve& curve, double frequencyHz, double value)
 {
-    if (!curve.points.isEmpty() && curve.points.constLast().frequencyHz == frequencyHz) {
-        curve.points.last().value = value;
-        return true;
+    if (!curve.points().isEmpty() && curve.points().constLast().frequencyHz == frequencyHz) {
+        return curve.setPointValue(curve.size() - 1, value);
     }
     return curve.appendPoint(frequencyHz, value);
 }
@@ -214,7 +213,7 @@ KFilterCorrectionImportResult createKFilterCorrectionCurve(
                          settings.correctionMinHz,
                          effectiveCorrection(settings.correctionMinHz, lowerBoundaryValue));
 
-    for (const KFilterMeasurementPoint& point : normalizedSource.points) {
+    for (const KFilterMeasurementPoint& point : normalizedSource.points()) {
         if (point.frequencyHz <= settings.correctionMinHz ||
             point.frequencyHz >= settings.correctionMaxHz) {
             continue;

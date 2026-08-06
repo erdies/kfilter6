@@ -46,8 +46,10 @@ int main(int argc, char **argv)
     const QString fileName = temporaryDir.filePath(QStringLiteral("driver-correction.frd"));
 
     KFilterMeasurementCurve curve;
-    curve.points.append(KFilterMeasurementPoint{2000.0, -3.0});
-    curve.points.append(KFilterMeasurementPoint{1000.0, 6.0});
+    if (!require(curve.appendPoint(1000.0, 6.0), "first export point was rejected") ||
+        !require(curve.appendPoint(2000.0, -3.0), "second export point was rejected")) {
+        return 1;
+    }
 
     const QLocale previousLocale = QLocale();
     QLocale::setDefault(QLocale(QLocale::German, QLocale::Germany));
@@ -98,14 +100,10 @@ int main(int argc, char **argv)
     }
 
     KFilterMeasurementCurve duplicateCurve;
-    duplicateCurve.points.append(KFilterMeasurementPoint{1000.0, 1.0});
-    duplicateCurve.points.append(KFilterMeasurementPoint{1000.0, 2.0});
-    const KFilterCorrectionCurveExportResult duplicateResult =
-        exportKFilterCorrectionCurveAsFrd(temporaryDir.filePath(QStringLiteral("duplicate.frd")),
-                                          duplicateCurve,
-                                          QStringLiteral("Driver 1"),
-                                          QStringLiteral("163"));
-    if (!require(!duplicateResult.isValid(), "duplicate frequencies were accepted")) {
+    if (!require(duplicateCurve.appendPoint(1000.0, 1.0),
+                 "first duplicate-check point was rejected") ||
+        !require(!duplicateCurve.appendPoint(1000.0, 2.0),
+                 "duplicate frequencies were accepted by the curve model")) {
         return 1;
     }
 

@@ -542,9 +542,13 @@ bool jsonToDriverNetwork(const QJsonObject& network,
 
 bool jsonToSplCorrectionCurve(const QJsonObject& correctionObject,
                               KFilterMeasurementCurve& curve,
+                              bool& measurementHidden,
+                              int formatVersion,
                               const QString& context,
                               QString* errorMessage)
 {
+    measurementHidden = false;
+
     QString type;
     if (!readRequiredString(correctionObject,
                             QStringLiteral("type"),
@@ -558,6 +562,16 @@ bool jsonToSplCorrectionCurve(const QJsonObject& correctionObject,
         setError(errorMessage,
                  QStringLiteral("Unsupported measurement curve type '%1' in '%2'.")
                      .arg(type, context));
+        return false;
+    }
+
+    bool parsedHidden = false;
+    if (formatVersion >= 4 &&
+        !readRequiredBool(correctionObject,
+                          QStringLiteral("hidden"),
+                          parsedHidden,
+                          context,
+                          errorMessage)) {
         return false;
     }
 
@@ -603,15 +617,19 @@ bool jsonToSplCorrectionCurve(const QJsonObject& correctionObject,
     }
 
     curve = parsedCurve;
+    measurementHidden = parsedHidden && !curve.isEmpty();
     return true;
 }
 
 bool jsonToDriverMeasurements(const QJsonObject& driverObject,
                               KFilterMeasurementCurve& curve,
+                              bool& measurementHidden,
+                              int formatVersion,
                               const QString& driverContext,
                               QString* errorMessage)
 {
     curve.clear();
+    measurementHidden = false;
     const QJsonValue measurementsValue = driverObject.value(QStringLiteral("measurements"));
     if (measurementsValue.isUndefined() || measurementsValue.isNull()) {
         return true;
@@ -635,17 +653,27 @@ bool jsonToDriverMeasurements(const QJsonObject& driverObject,
 
     return jsonToSplCorrectionCurve(correctionValue.toObject(),
                                     curve,
+                                    measurementHidden,
+                                    formatVersion,
                                     driverContext + QStringLiteral(".measurements.splCorrection"),
                                     errorMessage);
 }
 
 bool jsonToMeasurementSettings(const QJsonObject& project,
+                               int formatVersion,
                                bool& mergeMeasurementsEnabled,
+                               bool& legacyMeasurementsHidden,
                                QString* errorMessage)
 {
     mergeMeasurementsEnabled = false;
+    legacyMeasurementsHidden = false;
     const QJsonValue settingsValue = project.value(QStringLiteral("measurementSettings"));
     if (settingsValue.isUndefined() || settingsValue.isNull()) {
+        if (formatVersion >= 3) {
+            setError(errorMessage,
+                     QStringLiteral("Missing object 'root.project.measurementSettings'."));
+            return false;
+        }
         return true;
     }
     if (!settingsValue.isObject()) {
@@ -654,9 +682,21 @@ bool jsonToMeasurementSettings(const QJsonObject& project,
     }
 
     const QJsonObject settings = settingsValue.toObject();
+    if (!readRequiredBool(settings,
+                          QStringLiteral("mergeCorrectionCurves"),
+                          mergeMeasurementsEnabled,
+                          QStringLiteral("root.project.measurementSettings"),
+                          errorMessage)) {
+        return false;
+    }
+
+    if (formatVersion != 3) {
+        return true;
+    }
+
     return readRequiredBool(settings,
-                            QStringLiteral("mergeCorrectionCurves"),
-                            mergeMeasurementsEnabled,
+                            QStringLiteral("hideMeasurements"),
+                            legacyMeasurementsHidden,
                             QStringLiteral("root.project.measurementSettings"),
                             errorMessage);
 }
@@ -665,8 +705,12 @@ bool loadJsonProject(const QByteArray& data,
                      driver (&drivers)[KFilterProjectIo::DriverCount],
                      KFilterProjectIo::MeasurementCurves& splCorrectionCurves,
                      bool& mergeMeasurementsEnabled,
+                     KFilterProjectIo::MeasurementHiddenStates& measurementHiddenForDrivers,
                      QString* errorMessage)
 {
+    mergeMeasurementsEnabled = false;
+    measurementHiddenForDrivers.fill(false);
+
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(data, &parseError);
     if (parseError.error != QJsonParseError::NoError) {
@@ -722,8 +766,13 @@ bool loadJsonProject(const QByteArray& data,
         return false;
     }
 
+    bool legacyMeasurementsHidden = false;
     if (formatVersion >= 2 &&
-        !jsonToMeasurementSettings(project, mergeMeasurementsEnabled, errorMessage)) {
+        !jsonToMeasurementSettings(project,
+                                   formatVersion,
+                                   mergeMeasurementsEnabled,
+                                   legacyMeasurementsHidden,
+                                   errorMessage)) {
         return false;
     }
 
@@ -774,11 +823,21 @@ bool loadJsonProject(const QByteArray& data,
         }
 
         if (formatVersion >= 2 &&
-            !jsonToDriverMeasurements(entry,
-                                      splCorrectionCurves[static_cast<std::size_t>(driverIndex)],
-                                      driverContext,
-                                      errorMessage)) {
+            !jsonToDriverMeasurements(
+                entry,
+                splCorrectionCurves[static_cast<std::size_t>(driverIndex)],
+                measurementHiddenForDrivers[static_cast<std::size_t>(driverIndex)],
+                formatVersion,
+                driverContext,
+                errorMessage)) {
             return false;
+        }
+    }
+
+    if (formatVersion == 3 && legacyMeasurementsHidden) {
+        for (int driverIndex = 0; driverIndex < KFilterProjectIo::DriverCount; ++driverIndex) {
+            const std::size_t index = static_cast<std::size_t>(driverIndex);
+            measurementHiddenForDrivers[index] = !splCorrectionCurves[index].isEmpty();
         }
     }
 
@@ -826,10 +885,10 @@ QJsonObject driverNetworkToJson(const driver& currentDriver)
     return network;
 }
 
-QJsonObject splCorrectionCurveToJson(const KFilterMeasurementCurve& curve)
+QJsonObject splCorrectionCurveToJson(const KFilterMeasurementCurve& curve, bool measurementHidden)
 {
     QJsonArray points;
-    for (const KFilterMeasurementPoint& point : curve.points) {
+    for (const KFilterMeasurementPoint& point : curve.points()) {
         QJsonObject pointObject;
         pointObject.insert(QStringLiteral("frequencyHz"), point.frequencyHz);
         pointObject.insert(QStringLiteral("valueDb"), point.value);
@@ -838,15 +897,17 @@ QJsonObject splCorrectionCurveToJson(const KFilterMeasurementCurve& curve)
 
     QJsonObject correction;
     correction.insert(QStringLiteral("type"), QStringLiteral("splCorrection"));
+    correction.insert(QStringLiteral("hidden"), measurementHidden);
     correction.insert(QStringLiteral("points"), points);
     return correction;
 }
 
-QJsonObject driverMeasurementsToJson(const KFilterMeasurementCurve& curve)
+QJsonObject driverMeasurementsToJson(const KFilterMeasurementCurve& curve, bool measurementHidden)
 {
     QJsonObject measurements;
     if (!curve.isEmpty()) {
-        measurements.insert(QStringLiteral("splCorrection"), splCorrectionCurveToJson(curve));
+        measurements.insert(QStringLiteral("splCorrection"),
+                            splCorrectionCurveToJson(curve, measurementHidden));
     }
     return measurements;
 }
@@ -857,8 +918,8 @@ bool validateMeasurementCurve(const KFilterMeasurementCurve& curve,
 {
     double previousFrequencyHz = 0.0;
     bool havePreviousFrequency = false;
-    for (qsizetype pointIndex = 0; pointIndex < curve.points.size(); ++pointIndex) {
-        const KFilterMeasurementPoint& point = curve.points.at(pointIndex);
+    for (qsizetype pointIndex = 0; pointIndex < curve.points().size(); ++pointIndex) {
+        const KFilterMeasurementPoint& point = curve.points().at(pointIndex);
         if (!std::isfinite(point.frequencyHz) || point.frequencyHz <= 0.0 ||
             !std::isfinite(point.value)) {
             setError(errorMessage,
@@ -961,6 +1022,7 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
                                     driver (&drivers)[DriverCount],
                                     MeasurementCurves& splCorrectionCurves,
                                     bool& mergeMeasurementsEnabled,
+                                    MeasurementHiddenStates& measurementHiddenForDrivers,
                                     QString* errorMessage)
 {
     QFile file(filePath);
@@ -981,6 +1043,7 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
     driver parsedDrivers[DriverCount];
     MeasurementCurves parsedSplCorrectionCurves;
     bool parsedMergeMeasurementsEnabled = false;
+    MeasurementHiddenStates parsedMeasurementHiddenForDrivers{};
     const char firstByte = data.at(firstByteIndex);
     const bool isJson = firstByte == '{' || firstByte == '[';
     const QByteArray significantData = data.mid(firstByteIndex);
@@ -989,6 +1052,7 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
                           parsedDrivers,
                           parsedSplCorrectionCurves,
                           parsedMergeMeasurementsEnabled,
+                          parsedMeasurementHiddenForDrivers,
                           errorMessage)
         : loadLegacyProject(significantData, parsedDrivers, errorMessage);
     if (!loaded) {
@@ -997,9 +1061,11 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
 
     finalizeDrivers(parsedDrivers);
     for (int driverIndex = 0; driverIndex < DriverCount; ++driverIndex) {
+        const std::size_t index = static_cast<std::size_t>(driverIndex);
         drivers[driverIndex] = parsedDrivers[driverIndex];
-        splCorrectionCurves[static_cast<std::size_t>(driverIndex)] =
-            parsedSplCorrectionCurves[static_cast<std::size_t>(driverIndex)];
+        splCorrectionCurves[index] = parsedSplCorrectionCurves[index];
+        measurementHiddenForDrivers[index] =
+            parsedMeasurementHiddenForDrivers[index] && !splCorrectionCurves[index].isEmpty();
     }
     mergeMeasurementsEnabled = parsedMergeMeasurementsEnabled &&
         std::any_of(splCorrectionCurves.cbegin(),
@@ -1013,6 +1079,7 @@ bool KFilterProjectIo::saveToFile(const QString& filePath,
                                   driver (&drivers)[DriverCount],
                                   const MeasurementCurves& splCorrectionCurves,
                                   bool mergeMeasurementsEnabled,
+                                  const MeasurementHiddenStates& measurementHiddenForDrivers,
                                   QString* errorMessage)
 {
     QJsonArray driverArray;
@@ -1028,7 +1095,12 @@ bool KFilterProjectIo::saveToFile(const QString& filePath,
         QJsonObject driverObject;
         driverObject.insert(QStringLiteral("parameters"), driverParametersToJson(currentDriver));
         driverObject.insert(QStringLiteral("network"), driverNetworkToJson(currentDriver));
-        driverObject.insert(QStringLiteral("measurements"), driverMeasurementsToJson(correctionCurve));
+        driverObject.insert(
+            QStringLiteral("measurements"),
+            driverMeasurementsToJson(
+                correctionCurve,
+                measurementHiddenForDrivers[static_cast<std::size_t>(driverIndex)] &&
+                    !correctionCurve.isEmpty()));
         driverArray.append(driverObject);
     }
 
@@ -1040,7 +1112,6 @@ bool KFilterProjectIo::saveToFile(const QString& filePath,
                                                [](const KFilterMeasurementCurve& curve) {
                                                    return curve.size() >= 2;
                                                }));
-
     QJsonObject project;
     project.insert(QStringLiteral("drivers"), driverArray);
     project.insert(QStringLiteral("measurementSettings"), measurementSettings);

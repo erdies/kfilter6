@@ -78,6 +78,7 @@ private slots:
     void clearMeasurementForDriver(int driverIndex);
     void clearAllMeasurements();
     void setMergeMeasurementEnabled(bool enabled);
+    void setMeasurementHiddenForDriver(int driverIndex, bool hidden);
     void editNetworkSectionFromPreview(int driverIndex, int sectionIndex, int groupValue);
     void showNetworkSectionContextMenuFromPreview(int driverIndex, int sectionIndex, int groupValue, const QPoint& globalPosition);
     void clearNetworkSectionFromPreview(int driverIndex, int sectionIndex, int groupValue);
@@ -163,6 +164,7 @@ private:
     std::array<QAction *, CircuitPreviewDriverActionCount> m_exportMeasurementDriverActions{};
     std::array<QAction *, CircuitPreviewDriverActionCount> m_drawMeasurementDriverActions{};
     std::array<QAction *, CircuitPreviewDriverActionCount> m_clearMeasurementDriverActions{};
+    std::array<QAction *, CircuitPreviewDriverActionCount> m_hideMeasurementDriverActions{};
     QAction *m_finishMeasurementDrawingAction = nullptr;
     QAction *m_undoMeasurementWaypointAction = nullptr;
     QAction *m_cancelMeasurementDrawingAction = nullptr;

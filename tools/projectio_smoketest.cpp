@@ -132,8 +132,8 @@ bool compareMeasurements(const KFilterProjectIo::MeasurementCurves& expected,
         }
 
         for (qsizetype pointIndex = 0; pointIndex < expectedCurve.size(); ++pointIndex) {
-            const KFilterMeasurementPoint& expectedPoint = expectedCurve.points.at(pointIndex);
-            const KFilterMeasurementPoint& actualPoint = actualCurve.points.at(pointIndex);
+            const KFilterMeasurementPoint& expectedPoint = expectedCurve.points().at(pointIndex);
+            const KFilterMeasurementPoint& actualPoint = actualCurve.points().at(pointIndex);
             if (!fuzzyEqual(expectedPoint.frequencyHz, actualPoint.frequencyHz) ||
                 !fuzzyEqual(expectedPoint.value, actualPoint.value)) {
                 error = QStringLiteral("Measurement point mismatch for driver %1, point %2")
@@ -144,6 +144,22 @@ bool compareMeasurements(const KFilterProjectIo::MeasurementCurves& expected,
         }
     }
 
+    return true;
+}
+
+bool compareMeasurementHiddenStates(
+    const KFilterProjectIo::MeasurementHiddenStates& expected,
+    const KFilterProjectIo::MeasurementHiddenStates& actual,
+    QString& error)
+{
+    for (int driverIndex = 0; driverIndex < KFilterProjectIo::DriverCount; ++driverIndex) {
+        const std::size_t index = static_cast<std::size_t>(driverIndex);
+        if (expected[index] != actual[index]) {
+            error = QStringLiteral("Measurement hidden-state mismatch for driver %1")
+                        .arg(driverIndex + 1);
+            return false;
+        }
+    }
     return true;
 }
 
@@ -253,11 +269,14 @@ int main(int argc, char** argv)
     populateDrivers(original, true);
     KFilterProjectIo::MeasurementCurves originalMeasurements;
     populateMeasurements(originalMeasurements);
+    KFilterProjectIo::MeasurementHiddenStates originalHiddenStates{};
+    originalHiddenStates[0] = true;
 
     if (!KFilterProjectIo::saveToFile(jsonFilePath,
                                       original,
                                       originalMeasurements,
                                       true,
+                                      originalHiddenStates,
                                       &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -275,11 +294,19 @@ int main(int argc, char** argv)
         project.value(QStringLiteral("measurementSettings")).toObject();
     const QJsonObject firstDriverMeasurements =
         jsonDrivers.at(0).toObject().value(QStringLiteral("measurements")).toObject();
+    const QJsonObject firstCorrection =
+        firstDriverMeasurements.value(QStringLiteral("splCorrection")).toObject();
+    const QJsonObject thirdCorrection =
+        jsonDrivers.at(2).toObject()
+            .value(QStringLiteral("measurements")).toObject()
+            .value(QStringLiteral("splCorrection")).toObject();
     if (validRoot.value(QStringLiteral("format")).toString() != QStringLiteral("KFilter project") ||
         validRoot.value(QStringLiteral("formatVersion")).toInt(-1) != KFilterProjectIo::JsonFormatVersion ||
         jsonDrivers.size() != KFilterProjectIo::DriverCount ||
         !measurementSettings.value(QStringLiteral("mergeCorrectionCurves")).toBool(false) ||
-        !firstDriverMeasurements.value(QStringLiteral("splCorrection")).isObject()) {
+        measurementSettings.contains(QStringLiteral("hideMeasurements")) ||
+        firstCorrection.value(QStringLiteral("hidden")).toBool(false) != true ||
+        thirdCorrection.value(QStringLiteral("hidden")).toBool(true) != false) {
         QTextStream(stderr) << "Saved JSON project metadata, measurements or driver count is invalid\n";
         return 1;
     }
@@ -287,10 +314,12 @@ int main(int argc, char** argv)
     driver jsonLoaded[KFilterProjectIo::DriverCount];
     KFilterProjectIo::MeasurementCurves jsonLoadedMeasurements;
     bool jsonLoadedMergeEnabled = false;
+    KFilterProjectIo::MeasurementHiddenStates jsonLoadedHiddenStates{};
     if (!KFilterProjectIo::loadFromFile(jsonFilePath,
                                         jsonLoaded,
                                         jsonLoadedMeasurements,
                                         jsonLoadedMergeEnabled,
+                                        jsonLoadedHiddenStates,
                                         &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -298,9 +327,10 @@ int main(int argc, char** argv)
 
     if (!compareDrivers(original, jsonLoaded, true, errorMessage) ||
         !compareMeasurements(originalMeasurements, jsonLoadedMeasurements, errorMessage) ||
+        !compareMeasurementHiddenStates(originalHiddenStates, jsonLoadedHiddenStates, errorMessage) ||
         !jsonLoadedMergeEnabled) {
         QTextStream(stderr) << (errorMessage.isEmpty()
-                                    ? QStringLiteral("Measurement merge state was not restored")
+                                    ? QStringLiteral("Measurement merge/per-driver hide state was not restored")
                                     : errorMessage)
                             << '\n';
         return 1;
@@ -317,10 +347,13 @@ int main(int argc, char** argv)
     KFilterProjectIo::MeasurementCurves legacyMeasurements;
     legacyMeasurements[0].appendPoint(50.0, 9.0);
     bool legacyMergeEnabled = true;
+    KFilterProjectIo::MeasurementHiddenStates legacyHiddenStates{};
+    legacyHiddenStates.fill(true);
     if (!KFilterProjectIo::loadFromFile(legacyFilePath,
                                         legacyLoaded,
                                         legacyMeasurements,
                                         legacyMergeEnabled,
+                                        legacyHiddenStates,
                                         &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -330,7 +363,9 @@ int main(int argc, char** argv)
         !std::all_of(legacyMeasurements.cbegin(),
                      legacyMeasurements.cend(),
                      [](const KFilterMeasurementCurve& curve) { return curve.isEmpty(); }) ||
-        legacyMergeEnabled) {
+        legacyMergeEnabled ||
+        std::any_of(legacyHiddenStates.cbegin(), legacyHiddenStates.cend(),
+                    [](bool hidden) { return hidden; })) {
         QTextStream(stderr) << (errorMessage.isEmpty()
                                     ? QStringLiteral("Legacy load did not reset measurement state")
                                     : errorMessage)
@@ -342,6 +377,7 @@ int main(int argc, char** argv)
                                       legacyLoaded,
                                       legacyMeasurements,
                                       legacyMergeEnabled,
+                                      legacyHiddenStates,
                                       &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -364,10 +400,12 @@ int main(int argc, char** argv)
     driver oldLegacyLoaded[KFilterProjectIo::DriverCount];
     KFilterProjectIo::MeasurementCurves oldLegacyMeasurements;
     bool oldLegacyMergeEnabled = false;
+    KFilterProjectIo::MeasurementHiddenStates oldLegacyHiddenStates{};
     if (!KFilterProjectIo::loadFromFile(oldLegacyFilePath,
                                         oldLegacyLoaded,
                                         oldLegacyMeasurements,
                                         oldLegacyMergeEnabled,
+                                        oldLegacyHiddenStates,
                                         &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -404,17 +442,95 @@ int main(int argc, char** argv)
     driver patch155Loaded[KFilterProjectIo::DriverCount];
     KFilterProjectIo::MeasurementCurves patch155Measurements;
     bool patch155MergeEnabled = true;
+    KFilterProjectIo::MeasurementHiddenStates patch155HiddenStates{};
+    patch155HiddenStates.fill(true);
     if (!KFilterProjectIo::loadFromFile(invalidFilePath,
                                         patch155Loaded,
                                         patch155Measurements,
                                         patch155MergeEnabled,
+                                        patch155HiddenStates,
                                         &errorMessage) ||
         !compareDrivers(original, patch155Loaded, true, errorMessage) ||
         !std::all_of(patch155Measurements.cbegin(),
                      patch155Measurements.cend(),
                      [](const KFilterMeasurementCurve& curve) { return curve.isEmpty(); }) ||
-        patch155MergeEnabled) {
+        patch155MergeEnabled ||
+        std::any_of(patch155HiddenStates.cbegin(), patch155HiddenStates.cend(),
+                    [](bool hidden) { return hidden; })) {
         QTextStream(stderr) << "Patch 155 JSON compatibility failed: " << errorMessage << '\n';
+        return 1;
+    }
+
+    // Format version 3 stores one global hide flag. It migrates to all
+    // drivers that actually contain a measurement curve.
+    QJsonObject version3Root = validRoot;
+    version3Root.insert(QStringLiteral("formatVersion"), 3);
+    QJsonObject version3Project = version3Root.value(QStringLiteral("project")).toObject();
+    QJsonObject version3Settings =
+        version3Project.value(QStringLiteral("measurementSettings")).toObject();
+    version3Settings.insert(QStringLiteral("hideMeasurements"), true);
+    version3Project.insert(QStringLiteral("measurementSettings"), version3Settings);
+    version3Root.insert(QStringLiteral("project"), version3Project);
+    if (!writeTextFile(invalidFilePath,
+                       QString::fromUtf8(QJsonDocument(version3Root).toJson(QJsonDocument::Indented)),
+                       errorMessage)) {
+        QTextStream(stderr) << errorMessage << '\n';
+        return 1;
+    }
+
+    driver version3Loaded[KFilterProjectIo::DriverCount];
+    KFilterProjectIo::MeasurementCurves version3Measurements;
+    bool version3MergeEnabled = false;
+    KFilterProjectIo::MeasurementHiddenStates version3HiddenStates{};
+    if (!KFilterProjectIo::loadFromFile(invalidFilePath,
+                                        version3Loaded,
+                                        version3Measurements,
+                                        version3MergeEnabled,
+                                        version3HiddenStates,
+                                        &errorMessage) ||
+        !compareDrivers(original, version3Loaded, true, errorMessage) ||
+        !compareMeasurements(originalMeasurements, version3Measurements, errorMessage) ||
+        !version3MergeEnabled ||
+        !version3HiddenStates[0] || version3HiddenStates[1] ||
+        !version3HiddenStates[2] || version3HiddenStates[3]) {
+        QTextStream(stderr) << "Format version 3 global-hide migration failed: "
+                            << errorMessage << '\n';
+        return 1;
+    }
+
+    // Format version 2 persists merge state but predates every hide state.
+    QJsonObject version2Root = validRoot;
+    version2Root.insert(QStringLiteral("formatVersion"), 2);
+    QJsonObject version2Project = version2Root.value(QStringLiteral("project")).toObject();
+    QJsonObject version2Settings =
+        version2Project.value(QStringLiteral("measurementSettings")).toObject();
+    version2Settings.remove(QStringLiteral("hideMeasurements"));
+    version2Project.insert(QStringLiteral("measurementSettings"), version2Settings);
+    version2Root.insert(QStringLiteral("project"), version2Project);
+    if (!writeTextFile(invalidFilePath,
+                       QString::fromUtf8(QJsonDocument(version2Root).toJson(QJsonDocument::Indented)),
+                       errorMessage)) {
+        QTextStream(stderr) << errorMessage << '\n';
+        return 1;
+    }
+
+    driver version2Loaded[KFilterProjectIo::DriverCount];
+    KFilterProjectIo::MeasurementCurves version2Measurements;
+    bool version2MergeEnabled = false;
+    KFilterProjectIo::MeasurementHiddenStates version2HiddenStates{};
+    version2HiddenStates.fill(true);
+    if (!KFilterProjectIo::loadFromFile(invalidFilePath,
+                                        version2Loaded,
+                                        version2Measurements,
+                                        version2MergeEnabled,
+                                        version2HiddenStates,
+                                        &errorMessage) ||
+        !compareDrivers(original, version2Loaded, true, errorMessage) ||
+        !compareMeasurements(originalMeasurements, version2Measurements, errorMessage) ||
+        !version2MergeEnabled ||
+        std::any_of(version2HiddenStates.cbegin(), version2HiddenStates.cend(),
+                    [](bool hidden) { return hidden; })) {
+        QTextStream(stderr) << "Format version 2 compatibility failed: " << errorMessage << '\n';
         return 1;
     }
 
@@ -426,13 +542,14 @@ int main(int argc, char** argv)
         invalidMeasurementProject.value(QStringLiteral("drivers")).toArray();
     QJsonObject firstDriver = invalidMeasurementDrivers.at(0).toObject();
     QJsonObject firstMeasurements = firstDriver.value(QStringLiteral("measurements")).toObject();
-    QJsonObject firstCorrection = firstMeasurements.value(QStringLiteral("splCorrection")).toObject();
-    QJsonArray invalidPoints = firstCorrection.value(QStringLiteral("points")).toArray();
+    QJsonObject invalidFirstCorrection =
+        firstMeasurements.value(QStringLiteral("splCorrection")).toObject();
+    QJsonArray invalidPoints = invalidFirstCorrection.value(QStringLiteral("points")).toArray();
     QJsonObject secondPoint = invalidPoints.at(1).toObject();
     secondPoint.insert(QStringLiteral("frequencyHz"), 50.0);
     invalidPoints[1] = secondPoint;
-    firstCorrection.insert(QStringLiteral("points"), invalidPoints);
-    firstMeasurements.insert(QStringLiteral("splCorrection"), firstCorrection);
+    invalidFirstCorrection.insert(QStringLiteral("points"), invalidPoints);
+    firstMeasurements.insert(QStringLiteral("splCorrection"), invalidFirstCorrection);
     firstDriver.insert(QStringLiteral("measurements"), firstMeasurements);
     invalidMeasurementDrivers[0] = firstDriver;
     invalidMeasurementProject.insert(QStringLiteral("drivers"), invalidMeasurementDrivers);
@@ -449,19 +566,65 @@ int main(int argc, char** argv)
     KFilterProjectIo::MeasurementCurves unchangedMeasurements;
     unchangedMeasurements[0].appendPoint(123.0, 4.5);
     bool unchangedMergeEnabled = true;
+    KFilterProjectIo::MeasurementHiddenStates unchangedHiddenStates{};
+    unchangedHiddenStates.fill(true);
     if (KFilterProjectIo::loadFromFile(invalidFilePath,
                                        unchanged,
                                        unchangedMeasurements,
                                        unchangedMergeEnabled,
+                                       unchangedHiddenStates,
                                        &errorMessage)) {
         QTextStream(stderr) << "Invalid measurement point ordering was accepted\n";
         return 1;
     }
     if (unchanged[0].GetTitle() != QStringLiteral("unchanged sentinel") ||
         unchangedMeasurements[0].size() != 1 ||
-        !fuzzyEqual(unchangedMeasurements[0].points.constFirst().frequencyHz, 123.0) ||
-        !unchangedMergeEnabled) {
+        !fuzzyEqual(unchangedMeasurements[0].points().constFirst().frequencyHz, 123.0) ||
+        !unchangedMergeEnabled ||
+        !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
+                     [](bool hidden) { return hidden; })) {
         QTextStream(stderr) << "Failed measurement load modified the destination project state\n";
+        return 1;
+    }
+
+    // Invalid per-driver hide state must fail transactionally.
+    QJsonObject invalidHideRoot = validRoot;
+    QJsonObject invalidHideProject = invalidHideRoot.value(QStringLiteral("project")).toObject();
+    QJsonArray invalidHideDrivers =
+        invalidHideProject.value(QStringLiteral("drivers")).toArray();
+    QJsonObject invalidHideDriver = invalidHideDrivers.at(0).toObject();
+    QJsonObject invalidHideMeasurements =
+        invalidHideDriver.value(QStringLiteral("measurements")).toObject();
+    QJsonObject invalidHideCorrection =
+        invalidHideMeasurements.value(QStringLiteral("splCorrection")).toObject();
+    invalidHideCorrection.insert(QStringLiteral("hidden"), QStringLiteral("yes"));
+    invalidHideMeasurements.insert(QStringLiteral("splCorrection"), invalidHideCorrection);
+    invalidHideDriver.insert(QStringLiteral("measurements"), invalidHideMeasurements);
+    invalidHideDrivers[0] = invalidHideDriver;
+    invalidHideProject.insert(QStringLiteral("drivers"), invalidHideDrivers);
+    invalidHideRoot.insert(QStringLiteral("project"), invalidHideProject);
+    if (!writeTextFile(invalidFilePath,
+                       QString::fromUtf8(QJsonDocument(invalidHideRoot).toJson(QJsonDocument::Indented)),
+                       errorMessage)) {
+        QTextStream(stderr) << errorMessage << '\n';
+        return 1;
+    }
+
+    if (KFilterProjectIo::loadFromFile(invalidFilePath,
+                                       unchanged,
+                                       unchangedMeasurements,
+                                       unchangedMergeEnabled,
+                                       unchangedHiddenStates,
+                                       &errorMessage)) {
+        QTextStream(stderr) << "Invalid per-driver hidden value was accepted\n";
+        return 1;
+    }
+    if (unchanged[0].GetTitle() != QStringLiteral("unchanged sentinel") ||
+        unchangedMeasurements[0].size() != 1 ||
+        !unchangedMergeEnabled ||
+        !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
+                     [](bool hidden) { return hidden; })) {
+        QTextStream(stderr) << "Failed hide-state load modified the destination project state\n";
         return 1;
     }
 
@@ -478,13 +641,16 @@ int main(int argc, char** argv)
                                        unchanged,
                                        unchangedMeasurements,
                                        unchangedMergeEnabled,
+                                       unchangedHiddenStates,
                                        &errorMessage)) {
         QTextStream(stderr) << "Unsupported JSON project version was accepted\n";
         return 1;
     }
     if (unchanged[0].GetTitle() != QStringLiteral("unchanged sentinel") ||
         unchangedMeasurements[0].size() != 1 ||
-        !unchangedMergeEnabled) {
+        !unchangedMergeEnabled ||
+        !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
+                     [](bool hidden) { return hidden; })) {
         QTextStream(stderr) << "Failed JSON load modified the destination project state\n";
         return 1;
     }

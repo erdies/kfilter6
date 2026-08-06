@@ -204,6 +204,22 @@ void KFilterView::setMergeMeasurementsEnabled(bool enabled)
     emit measurementProjectStateChanged();
 }
 
+bool KFilterView::measurementHiddenForDriver(int driverIndex) const
+{
+    return m_document != nullptr && m_document->measurementHiddenForDriver(driverIndex);
+}
+
+void KFilterView::setMeasurementHiddenForDriver(int driverIndex, bool hidden)
+{
+    if (m_document == nullptr ||
+        !m_document->setMeasurementHiddenForDriver(driverIndex, hidden)) {
+        return;
+    }
+
+    update();
+    emit measurementProjectStateChanged();
+}
+
 double KFilterView::xToFrequencyHz(double x) const
 {
     if (!std::isfinite(x) || width() <= 0) {
@@ -303,6 +319,7 @@ bool KFilterView::measurementMergeAppliedForDriver(int driverIndex) const
 {
     return m_document != nullptr && m_document->measurementMergeEnabled() &&
            driverIndex >= 0 && driverIndex < 4 &&
+           !m_document->measurementHiddenForDriver(driverIndex) &&
            m_document->splCorrectionCurve(driverIndex).size() >= 2;
 }
 
@@ -360,12 +377,15 @@ KFilterView::CurveLabelAnchor KFilterView::findLastVisibleCurvePoint(const doubl
 
     QPointF points[150];
     bool valid[150] = {};
+    const bool applyCorrection =
+        type == 0 && driverIndex >= 0 && m_document != nullptr &&
+        m_document->splCorrectionActiveForDriver(driverIndex);
     for (int i = 0; i < 150; i++) {
         if (!std::isfinite(values[i])) {
             continue;
         }
         double value = values[i];
-        if (type == 0 && driverIndex >= 0) {
+        if (applyCorrection) {
             value = effectivePressureDb(driverIndex, i, value);
         }
         points[i] = QPointF(XK(Xvalue[i]), YScale(value, type));
@@ -434,10 +454,18 @@ void KFilterView::drawCurve(QPainter& painter, const double values[200], int typ
 
 void KFilterView::drawDriverPressureCurve(QPainter& painter, const double values[200], int driverIndex)
 {
-    QPoint lastPoint(XK(Xvalue[0]), YScale(effectivePressureDb(driverIndex, 0, values[0]), 0));
+    if (m_document == nullptr || !m_document->splCorrectionActiveForDriver(driverIndex)) {
+        drawCurve(painter, values, 0);
+        return;
+    }
+
+    QPoint lastPoint(
+        XK(Xvalue[0]),
+        YScale(effectivePressureDb(driverIndex, 0, values[0]), 0));
     for (int i = 1; i < 150; i++) {
-        const QPoint nextPoint(XK(Xvalue[i]),
-                               YScale(effectivePressureDb(driverIndex, i, values[i]), 0));
+        const QPoint nextPoint(
+            XK(Xvalue[i]),
+            YScale(effectivePressureDb(driverIndex, i, values[i]), 0));
         painter.drawLine(lastPoint, nextPoint);
         lastPoint = nextPoint;
     }
@@ -527,16 +555,18 @@ QColor KFilterView::shadowTextColor() const
 
 void KFilterView::drawMeasurementCurves(QPainter& painter)
 {
-    if (mergeMeasurementsEnabled() && !m_measurementDrawingActive) {
+    if (m_document == nullptr) {
         return;
     }
 
     painter.save();
     painter.setRenderHint(QPainter::Antialiasing, true);
 
-    const bool showOnlyActiveCurve = mergeMeasurementsEnabled() && m_measurementDrawingActive;
     for (int driverIndex = 0; driverIndex < 4; ++driverIndex) {
-        if (showOnlyActiveCurve && driverIndex != m_activeMeasurementDriverIndex) {
+        const bool activeDrawingCurve =
+            m_measurementDrawingActive && driverIndex == m_activeMeasurementDriverIndex;
+        if (!activeDrawingCurve &&
+            (mergeMeasurementsEnabled() || measurementHiddenForDriver(driverIndex))) {
             continue;
         }
 
@@ -553,7 +583,7 @@ void KFilterView::drawMeasurementCurves(QPainter& painter)
 
         QPointF previousPoint;
         bool havePreviousPoint = false;
-        for (const KFilterMeasurementPoint& point : curve.points) {
+        for (const KFilterMeasurementPoint& point : curve.points()) {
             const QPointF plotPoint(frequencyHzToX(point.frequencyHz), pressureDbToY(point.value));
             if (!std::isfinite(plotPoint.x()) || !std::isfinite(plotPoint.y())) {
                 continue;
@@ -580,8 +610,8 @@ void KFilterView::drawMeasurementCurves(QPainter& painter)
         painter.setBrush(Qt::NoBrush);
 
         if (!activeCurve.isEmpty() && std::isfinite(cursorFrequencyHz) &&
-            cursorFrequencyHz > activeCurve.points.constLast().frequencyHz) {
-            const KFilterMeasurementPoint& last = activeCurve.points.constLast();
+            cursorFrequencyHz > activeCurve.points().constLast().frequencyHz) {
+            const KFilterMeasurementPoint& last = activeCurve.points().constLast();
             painter.drawLine(QPointF(frequencyHzToX(last.frequencyHz), pressureDbToY(last.value)),
                              m_measurementCursorPosition);
         }
@@ -637,9 +667,10 @@ void KFilterView::drawLegend(QPainter& painter)
     }
 
     for (int driverIndex = 0; driverIndex < 4; ++driverIndex) {
-        const bool curveVisible = !mergeMeasurementsEnabled() ||
-                                  (m_measurementDrawingActive &&
-                                   driverIndex == m_activeMeasurementDriverIndex);
+        const bool curveVisible =
+            (!mergeMeasurementsEnabled() && !measurementHiddenForDriver(driverIndex)) ||
+            (m_measurementDrawingActive &&
+             driverIndex == m_activeMeasurementDriverIndex);
         if (curveVisible && !m_document->splCorrectionCurve(driverIndex).isEmpty()) {
             drawEntry(pressureCurveColor(driverIndex),
                       Qt::DashLine,
@@ -677,23 +708,50 @@ void KFilterView::drawPrintMeasurementStatus(QPainter& painter)
     }
 
     const bool mergeEnabled = m_document->measurementMergeEnabled();
-    QStringList driverNumbers;
+    QStringList activeDriverNumbers;
+    QStringList hiddenDriverNumbers;
+    QStringList nonMergeableDriverNumbers;
     for (int driverIndex = 0; driverIndex < 4; ++driverIndex) {
         const KFilterMeasurementCurve& curve = m_document->splCorrectionCurve(driverIndex);
-        if (curve.isEmpty() || (mergeEnabled && curve.size() < 2)) {
+        if (curve.isEmpty()) {
             continue;
         }
-        driverNumbers.append(QString::number(driverIndex + 1));
+
+        if (m_document->measurementHiddenForDriver(driverIndex)) {
+            hiddenDriverNumbers.append(QString::number(driverIndex + 1));
+        } else if (mergeEnabled && curve.size() < 2) {
+            nonMergeableDriverNumbers.append(QString::number(driverIndex + 1));
+        } else {
+            activeDriverNumbers.append(QString::number(driverIndex + 1));
+        }
     }
 
-    QString statusText;
-    if (mergeEnabled) {
-        statusText = tr("Measurements: merge enabled for driver(s) %1")
-                         .arg(driverNumbers.join(QStringLiteral(", ")));
-    } else {
-        statusText = tr("Measurements: merge disabled; corrections shown for driver(s) %1")
-                         .arg(driverNumbers.join(QStringLiteral(", ")));
+    // When every stored measurement is hidden, the printout intentionally
+    // represents a pure simulation without a measurement status annotation.
+    if (activeDriverNumbers.isEmpty() && nonMergeableDriverNumbers.isEmpty()) {
+        return;
     }
+
+    QStringList statusParts;
+    if (mergeEnabled) {
+        if (!activeDriverNumbers.isEmpty()) {
+            statusParts.append(tr("merged for driver(s) %1")
+                                   .arg(activeDriverNumbers.join(QStringLiteral(", "))));
+        }
+        if (!nonMergeableDriverNumbers.isEmpty()) {
+            statusParts.append(tr("not mergeable for driver(s) %1")
+                                   .arg(nonMergeableDriverNumbers.join(QStringLiteral(", "))));
+        }
+    } else if (!activeDriverNumbers.isEmpty()) {
+        statusParts.append(tr("corrections shown for driver(s) %1")
+                               .arg(activeDriverNumbers.join(QStringLiteral(", "))));
+    }
+    if (!hiddenDriverNumbers.isEmpty()) {
+        statusParts.append(tr("hidden for driver(s) %1")
+                               .arg(hiddenDriverNumbers.join(QStringLiteral(", "))));
+    }
+
+    QString statusText = tr("Measurements: %1").arg(statusParts.join(QStringLiteral("; ")));
 
     painter.save();
     const QFont statusFont(QStringLiteral("Sans Serif"), 8);
@@ -720,7 +778,8 @@ void KFilterView::drawPrintMeasurementStatus(QPainter& painter)
     painter.setPen(foregroundTextColor());
     painter.drawText(statusRect.adjusted(horizontalMargin, verticalMargin,
                                          -horizontalMargin, -verticalMargin),
-                     Qt::AlignLeft | Qt::AlignVCenter, statusText);
+                     Qt::AlignLeft | Qt::AlignVCenter,
+                     statusText);
     painter.restore();
 }
 

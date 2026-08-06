@@ -637,6 +637,14 @@ void KFilterQt6App::createActions()
         connect(m_clearMeasurementDriverActions[index], &QAction::triggered, this, [this, index]() {
             clearMeasurementForDriver(index);
         });
+
+        m_hideMeasurementDriverActions[index] = new QAction(measurementDriverMenuText(index), this);
+        m_hideMeasurementDriverActions[index]->setCheckable(true);
+        m_hideMeasurementDriverActions[index]->setChecked(false);
+        connect(m_hideMeasurementDriverActions[index], &QAction::toggled,
+                this, [this, index](bool hidden) {
+                    setMeasurementHiddenForDriver(index, hidden);
+                });
     }
 
     m_finishMeasurementDrawingAction = new QAction(tr("&Finish Drawing"), this);
@@ -660,7 +668,7 @@ void KFilterQt6App::createActions()
     connect(m_clearAllMeasurementsAction, &QAction::triggered,
             this, &KFilterQt6App::clearAllMeasurements);
 
-    m_mergeMeasurementAction = new QAction(tr("&Merge Measurement"), this);
+    m_mergeMeasurementAction = new QAction(tr("&Merge Measurements"), this);
     m_mergeMeasurementAction->setCheckable(true);
     m_mergeMeasurementAction->setChecked(false);
     connect(m_mergeMeasurementAction, &QAction::toggled,
@@ -749,6 +757,13 @@ void KFilterQt6App::createMenusAndToolBar()
     }
     clearMeasurementMenu->addSeparator();
     clearMeasurementMenu->addAction(m_clearAllMeasurementsAction);
+
+    QMenu *hideMeasurementMenu = measurementMenu->addMenu(tr("&Hide Measurement for Driver"));
+    for (QAction *driverAction : m_hideMeasurementDriverActions) {
+        if (driverAction != nullptr) {
+            hideMeasurementMenu->addAction(driverAction);
+        }
+    }
 
     measurementMenu->addSeparator();
     measurementMenu->addAction(m_finishMeasurementDrawingAction);
@@ -1147,9 +1162,42 @@ void KFilterQt6App::setMergeMeasurementEnabled(bool enabled)
 
     statusBar()->showMessage(
         effectiveEnabled
-            ? tr("Measurement correction merged into simulated SPL curves and sums; correction curves hidden.")
-            : tr("Measurement correction merge disabled; correction curves visible."),
-        3000);
+            ? tr("Measurement correction merged for each non-hidden driver; individual curves and sums use the same effective contributions.")
+            : tr("Measurement correction merge disabled; non-hidden correction curves are shown as references."),
+        4000);
+}
+
+void KFilterQt6App::setMeasurementHiddenForDriver(int driverIndex, bool hidden)
+{
+    if (m_plotView == nullptr || driverIndex < 0 ||
+        driverIndex >= KFilterProjectIo::DriverCount) {
+        return;
+    }
+
+    m_plotView->setMeasurementHiddenForDriver(driverIndex, hidden);
+    const bool effectiveHidden = m_plotView->measurementHiddenForDriver(driverIndex);
+    QAction *hideAction = m_hideMeasurementDriverActions[driverIndex];
+    if (hideAction != nullptr && hideAction->isChecked() != effectiveHidden) {
+        const QSignalBlocker blocker(hideAction);
+        hideAction->setChecked(effectiveHidden);
+    }
+
+    const QString driverText = measurementDriverMenuText(driverIndex);
+    QString message;
+    if (effectiveHidden) {
+        message = m_plotView->mergeMeasurementsEnabled()
+            ? tr("Measurement for %1 hidden; its uncorrected simulation is used in individual and sum curves.")
+                  .arg(driverText)
+            : tr("Measurement for %1 hidden; the simulation remains uncorrected.")
+                  .arg(driverText);
+    } else {
+        message = m_plotView->mergeMeasurementsEnabled()
+            ? tr("Measurement for %1 enabled; its correction is restored in individual and sum curves.")
+                  .arg(driverText)
+            : tr("Measurement for %1 shown as a correction reference; the simulation remains uncorrected.")
+                  .arg(driverText);
+    }
+    statusBar()->showMessage(message, 4000);
 }
 
 void KFilterQt6App::updateMeasurementActions()
@@ -1194,6 +1242,19 @@ void KFilterQt6App::updateMeasurementActions()
                 m_doc != nullptr && !m_doc->splCorrectionCurve(index).isEmpty();
             clearAction->setEnabled(
                 !networkEditorOpen && !drawingActive && driverHasCurve);
+        }
+
+        QAction *hideAction = m_hideMeasurementDriverActions[index];
+        if (hideAction != nullptr) {
+            const QSignalBlocker blocker(hideAction);
+            hideAction->setText(measurementDriverMenuText(index));
+            const bool driverHasCurve =
+                m_doc != nullptr && !m_doc->splCorrectionCurve(index).isEmpty();
+            hideAction->setEnabled(
+                !networkEditorOpen && !drawingActive && driverHasCurve);
+            hideAction->setChecked(
+                m_plotView != nullptr &&
+                m_plotView->measurementHiddenForDriver(index));
         }
     }
 

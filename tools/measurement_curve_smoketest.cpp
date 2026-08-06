@@ -9,6 +9,7 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <utility>
 
 namespace
 {
@@ -30,10 +31,55 @@ bool approximatelyEqual(double actual, double expected, double tolerance = 1.0e-
 int main()
 {
     KFilterMeasurementCurve curve;
+    const std::uint64_t initialRevision = curve.revision();
 
     if (!require(curve.isEmpty(), "new curve must be empty") ||
         !require(curve.size() == 0, "new curve size must be zero") ||
-        !require(!curve.removeLastPoint(), "removing from an empty curve must fail")) {
+        !require(!curve.removeLastPoint(), "removing from an empty curve must fail") ||
+        !require(curve.revision() == initialRevision,
+                 "failed mutations must not change the curve revision")) {
+        return 1;
+    }
+
+    KFilterMeasurementCurve neutralCurve;
+    if (!require(neutralCurve.isNeutral(), "an empty curve must be neutral") ||
+        !require(!neutralCurve.overlapsFrequencyRange(20.0, 20000.0),
+                 "an empty curve must not overlap a frequency range") ||
+        !require(neutralCurve.appendPoint(20.0, 0.0),
+                 "first neutral point must be accepted") ||
+        !require(neutralCurve.appendPoint(20000.0, -0.0),
+                 "second neutral point must be accepted") ||
+        !require(neutralCurve.isNeutral(), "zero-valued points must form a neutral curve") ||
+        !require(neutralCurve.overlapsFrequencyRange(20.0, 20000.0),
+                 "matching frequency ranges must overlap") ||
+        !require(neutralCurve.overlapsFrequencyRange(100.0, 1000.0),
+                 "an enclosed frequency range must overlap") ||
+        !require(!neutralCurve.overlapsFrequencyRange(20000.001, 30000.0),
+                 "a range above the curve must not overlap") ||
+        !require(!neutralCurve.overlapsFrequencyRange(1.0, 19.999),
+                 "a range below the curve must not overlap") ||
+        !require(!neutralCurve.overlapsFrequencyRange(0.0, 1000.0),
+                 "a non-positive range start must be rejected") ||
+        !require(!neutralCurve.overlapsFrequencyRange(1000.0, 100.0),
+                 "a reversed frequency range must be rejected")) {
+        return 1;
+    }
+
+    const std::uint64_t neutralRevision = neutralCurve.revision();
+    if (!require(neutralCurve.setPointValue(1, 0.001), "point value update must succeed") ||
+        !require(neutralCurve.revision() != neutralRevision,
+                 "point value update must advance the curve revision")) {
+        return 1;
+    }
+    const std::uint64_t changedNeutralRevision = neutralCurve.revision();
+    if (!require(neutralCurve.setPointValue(1, 0.001),
+                 "setting the existing point value must succeed") ||
+        !require(neutralCurve.revision() == changedNeutralRevision,
+                 "an unchanged point value must preserve the curve revision")) {
+        return 1;
+    }
+    if (!require(!neutralCurve.isNeutral(),
+                 "a non-zero correction point must make the curve active")) {
         return 1;
     }
 
@@ -80,7 +126,7 @@ int main()
 
     if (!require(curve.removeLastPoint(), "last point must be removable") ||
         !require(curve.size() == 2, "two points must remain after undo") ||
-        !require(curve.points.constLast().frequencyHz == 100.0, "undo must expose the previous point")) {
+        !require(curve.points().constLast().frequencyHz == 100.0, "undo must expose the previous point")) {
         return 1;
     }
 
@@ -99,6 +145,48 @@ int main()
 
     curve.clear();
     if (!require(curve.isEmpty(), "clear must remove all points")) {
+        return 1;
+    }
+
+    KFilterMeasurementCurve sourceCurve;
+    sourceCurve.appendPoint(100.0, -1.0);
+    sourceCurve.appendPoint(1000.0, 2.0);
+    KFilterMeasurementCurve copiedCurve(sourceCurve);
+    if (!require(copiedCurve.revision() != sourceCurve.revision(),
+                 "a copied curve must receive an independent revision") ||
+        !require(copiedCurve.points().size() == sourceCurve.points().size(),
+                 "copy construction must preserve all points")) {
+        return 1;
+    }
+
+    const std::uint64_t assignmentRevision = curve.revision();
+    curve = sourceCurve;
+    if (!require(curve.revision() != assignmentRevision,
+                 "curve assignment must advance the target revision") ||
+        !require(curve.points().size() == sourceCurve.points().size(),
+                 "curve assignment must preserve all points")) {
+        return 1;
+    }
+
+    const std::uint64_t copiedSourceRevision = copiedCurve.revision();
+    KFilterMeasurementCurve movedCurve(std::move(copiedCurve));
+    if (!require(movedCurve.size() == sourceCurve.size(),
+                 "move construction must preserve all points") ||
+        !require(copiedCurve.revision() != copiedSourceRevision,
+                 "move construction must advance the source revision")) {
+        return 1;
+    }
+
+    KFilterMeasurementCurve moveAssignedCurve;
+    const std::uint64_t moveTargetRevision = moveAssignedCurve.revision();
+    const std::uint64_t moveSourceRevision = movedCurve.revision();
+    moveAssignedCurve = std::move(movedCurve);
+    if (!require(moveAssignedCurve.revision() != moveTargetRevision,
+                 "move assignment must advance the target revision") ||
+        !require(movedCurve.revision() != moveSourceRevision,
+                 "move assignment must advance the source revision") ||
+        !require(moveAssignedCurve.size() == sourceCurve.size(),
+                 "move assignment must preserve all points")) {
         return 1;
     }
 

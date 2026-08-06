@@ -106,6 +106,8 @@ public:
 
     bool mergeMeasurementsEnabled() const;
     void setMergeMeasurementsEnabled(bool enabled);
+    bool measurementHiddenForDriver(int driverIndex) const;
+    void setMeasurementHiddenForDriver(int driverIndex, bool hidden);
 
     double xToFrequencyHz(double x) const;
     double frequencyHzToX(double frequencyHz) const;

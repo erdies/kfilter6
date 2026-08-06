@@ -16,6 +16,7 @@
 #include <QUrl>
 
 #include <array>
+#include <cstdint>
 
 #include "driver.h"
 #include "kfiltermeasurementcurve.h"
@@ -62,6 +63,9 @@ bool clearMeasurementCurve(int driverIndex);
 bool clearMeasurementCurves();
 bool measurementMergeEnabled() const;
 bool setMeasurementMergeEnabled(bool enabled);
+bool measurementHiddenForDriver(int driverIndex) const;
+bool setMeasurementHiddenForDriver(int driverIndex, bool hidden);
+bool splCorrectionActiveForDriver(int driverIndex) const;
 double splCorrectionDb(int driverIndex, int sampleIndex) const;
 double splCorrectionAmplitudeFactor(int driverIndex, int sampleIndex) const;
 
@@ -111,9 +115,26 @@ double splCorrectionAmplitudeFactor(int driverIndex, int sampleIndex) const;
     /** the modified flag of the current document */
     bool modified = false;
     QUrl doc_url;
-    std::array<KFilterMeasurementCurve, 4> m_splCorrectionCurves;
-    bool m_measurementMergeEnabled = false;
+    static constexpr int SplCorrectionSampleCount = 150;
 
+    struct SplCorrectionCache
+    {
+        std::array<double, SplCorrectionSampleCount> correctionDb{};
+        std::array<double, SplCorrectionSampleCount> amplitudeFactor{};
+        std::uint64_t curveRevision = 0;
+        bool mergeEnabled = false;
+        bool measurementHidden = false;
+        bool active = false;
+        bool valid = false;
+    };
+
+    std::array<KFilterMeasurementCurve, 4> m_splCorrectionCurves;
+    mutable std::array<SplCorrectionCache, 4> m_splCorrectionCaches;
+    bool m_measurementMergeEnabled = false;
+    std::array<bool, 4> m_measurementHiddenForDrivers{};
+
+    const SplCorrectionCache* ensureSplCorrectionCache(int driverIndex) const;
+    void invalidateSplCorrectionCaches();
     void markLoadedContentsReady();
 
   private slots:

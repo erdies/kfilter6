@@ -106,18 +106,18 @@ int main(int argc, char **argv)
                  "automatic offset is wrong") ||
         !require(importResult.correctionCurve.size() == 5,
                  "correction window did not retain expected points") ||
-        !require(nearlyEqual(importResult.correctionCurve.points.at(0).frequencyHz, 200.0),
+        !require(nearlyEqual(importResult.correctionCurve.points().at(0).frequencyHz, 200.0),
                  "lower boundary point is missing") ||
-        !require(nearlyEqual(importResult.correctionCurve.points.at(0).value, 0.0),
+        !require(nearlyEqual(importResult.correctionCurve.points().at(0).value, 0.0),
                  "lower fade does not start neutrally") ||
-        !require(importResult.correctionCurve.points.at(1).value > 0.0 &&
-                     importResult.correctionCurve.points.at(1).value < 4.0,
+        !require(importResult.correctionCurve.points().at(1).value > 0.0 &&
+                     importResult.correctionCurve.points().at(1).value < 4.0,
                  "lower fade did not partially weight an interior point") ||
-        !require(nearlyEqual(importResult.correctionCurve.points.at(2).value, 4.0),
+        !require(nearlyEqual(importResult.correctionCurve.points().at(2).value, 4.0),
                  "lower fade endpoint is not fully active") ||
-        !require(nearlyEqual(importResult.correctionCurve.points.at(3).value, 6.0),
+        !require(nearlyEqual(importResult.correctionCurve.points().at(3).value, 6.0),
                  "normalized in-window correction is wrong") ||
-        !require(nearlyEqual(importResult.correctionCurve.points.at(4).value, -6.0),
+        !require(nearlyEqual(importResult.correctionCurve.points().at(4).value, -6.0),
                  "upper in-window correction is wrong")) {
         return 1;
     }
@@ -129,7 +129,7 @@ int main(int argc, char **argv)
     if (!require(importResult.isValid(), "valid dual-fade settings were rejected") ||
         !require(nearlyEqual(importResult.effectiveOffsetDb, -78.5),
                  "manual offset was not added") ||
-        !require(nearlyEqual(importResult.correctionCurve.points.constLast().value, 0.0),
+        !require(nearlyEqual(importResult.correctionCurve.points().constLast().value, 0.0),
                  "upper fade does not end neutrally")) {
         return 1;
     }

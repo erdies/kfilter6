@@ -93,6 +93,10 @@ void driver::Berechneparameter(void)
 {
 	double pi = 3.141592654;
 
+	Parameter_flag = 1;
+	AkustikESB_flag = 1;
+	Phase_flag = 1;
+
 	if (F0!=0)
 	{
 		if (Dm==0)
@@ -672,22 +676,27 @@ void driver::SetTitle( const QString& a_qstringTitle )
 /** Sets Rdc value */
 void driver::setRdc(double rdc){
 Rdc = rdc;
+setmodified();
 }
 /** Sets Lsp value */
 void driver::setLsp(double lsp){
 Lsp = lsp;
+setmodified();
 }
 /** Sets F0 value*/
 void driver::setF0(double f0){
 F0 = f0;
+setmodified();
 }
 /** Sets Qtc value */
 void driver::setQtc(double qtc){
 Qtc = qtc;
+setmodified();
 }
 /** Sets Qes value */
 void driver::setQes(double qes){
 Qe = qes;
+setmodified();
 }
 /** Sets the full circuit flag */
 void driver::setFullCircuit(bool toggle){
@@ -695,6 +704,7 @@ if (toggle)
   Realschall_flag = 1;
     else
       Realschall_flag = 0;
+setmodified();
 }
 /** Gives the full circuit flag */
 bool driver::getFullCircuit() const{
@@ -703,18 +713,22 @@ return (Realschall_flag == 1);
 /** Sets Qms value */
 void driver::setQms(double qms){
 Qms = qms;
+setmodified();
 }
 /** Sets Vas value */
 void driver::setVas(double vas){
 Vas = vas;
+setmodified();
 }
 /** Sets Dm value */
 void driver::setDm(double dm){
 Dm = dm;
+setmodified();
 }
 /** Sets Ql value */
 void driver::setQl(double ql){
 Ql = ql;
+setmodified();
 }
 /** No descriptions */
 double driver::getRdc() const{
@@ -772,5 +786,6 @@ double driver::getUnit(int unit) const{
 void driver::cleanupNetwork(void){
 	for ( int intI = 0; intI < 49; intI++ )
 		Unit[intI] = 0;
+	setmodified();
 }
 

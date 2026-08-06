@@ -104,26 +104,38 @@ bool KFilterDoc::clearMeasurementCurve(int driverIndex)
     return false;
   }
 
-  KFilterMeasurementCurve& curve =
-      m_splCorrectionCurves[static_cast<std::size_t>(driverIndex)];
+  const std::size_t index = static_cast<std::size_t>(driverIndex);
+  KFilterMeasurementCurve& curve = m_splCorrectionCurves[index];
   const bool curveChanged = !curve.isEmpty();
+  const bool hiddenChanged = m_measurementHiddenForDrivers[index];
   curve.clear();
+  m_measurementHiddenForDrivers[index] = false;
 
   const bool mergeChanged = m_measurementMergeEnabled && !hasMergeableMeasurementCurves();
   if (mergeChanged) {
     m_measurementMergeEnabled = false;
   }
+  if (curveChanged || hiddenChanged || mergeChanged) {
+    invalidateSplCorrectionCaches();
+  }
 
-  return curveChanged || mergeChanged;
+  return curveChanged || hiddenChanged || mergeChanged;
 }
 
 bool KFilterDoc::clearMeasurementCurves()
 {
-  const bool changed = hasMeasurementCurves() || m_measurementMergeEnabled;
+  const bool hiddenChanged = std::any_of(m_measurementHiddenForDrivers.cbegin(),
+                                         m_measurementHiddenForDrivers.cend(),
+                                         [](bool hidden) { return hidden; });
+  const bool changed = hasMeasurementCurves() || m_measurementMergeEnabled || hiddenChanged;
   for (KFilterMeasurementCurve& curve : m_splCorrectionCurves) {
     curve.clear();
   }
   m_measurementMergeEnabled = false;
+  m_measurementHiddenForDrivers.fill(false);
+  if (changed) {
+    invalidateSplCorrectionCaches();
+  }
   return changed;
 }
 
@@ -140,40 +152,134 @@ bool KFilterDoc::setMeasurementMergeEnabled(bool enabled)
   }
 
   m_measurementMergeEnabled = effectiveEnabled;
+  invalidateSplCorrectionCaches();
   return true;
+}
+
+bool KFilterDoc::measurementHiddenForDriver(int driverIndex) const
+{
+  if (driverIndex < 0 || driverIndex >= static_cast<int>(m_measurementHiddenForDrivers.size())) {
+    return false;
+  }
+
+  return m_measurementHiddenForDrivers[static_cast<std::size_t>(driverIndex)];
+}
+
+bool KFilterDoc::setMeasurementHiddenForDriver(int driverIndex, bool hidden)
+{
+  if (driverIndex < 0 || driverIndex >= static_cast<int>(m_measurementHiddenForDrivers.size())) {
+    return false;
+  }
+
+  const std::size_t index = static_cast<std::size_t>(driverIndex);
+  const bool effectiveHidden = hidden && !m_splCorrectionCurves[index].isEmpty();
+  if (m_measurementHiddenForDrivers[index] == effectiveHidden) {
+    return false;
+  }
+
+  m_measurementHiddenForDrivers[index] = effectiveHidden;
+  m_splCorrectionCaches[index].valid = false;
+  return true;
+}
+
+const KFilterDoc::SplCorrectionCache* KFilterDoc::ensureSplCorrectionCache(int driverIndex) const
+{
+  if (driverIndex < 0 || driverIndex >= static_cast<int>(m_splCorrectionCurves.size())) {
+    return nullptr;
+  }
+
+  const std::size_t cacheIndex = static_cast<std::size_t>(driverIndex);
+  const KFilterMeasurementCurve& curve = m_splCorrectionCurves[cacheIndex];
+  SplCorrectionCache& cache = m_splCorrectionCaches[cacheIndex];
+  if (cache.valid &&
+      cache.curveRevision == curve.revision() &&
+      cache.mergeEnabled == m_measurementMergeEnabled &&
+      cache.measurementHidden == m_measurementHiddenForDrivers[cacheIndex]) {
+    return &cache;
+  }
+
+  cache.correctionDb.fill(0.0);
+  cache.amplitudeFactor.fill(1.0);
+  cache.curveRevision = curve.revision();
+  cache.mergeEnabled = m_measurementMergeEnabled;
+  cache.measurementHidden = m_measurementHiddenForDrivers[cacheIndex];
+  cache.active = false;
+  cache.valid = true;
+
+  if (!m_measurementMergeEnabled ||
+      m_measurementHiddenForDrivers[cacheIndex] ||
+      curve.size() < 2 ||
+      curve.isNeutral() ||
+      !curve.overlapsFrequencyRange(pressureSampleFrequenciesHz().front(),
+                                    pressureSampleFrequenciesHz().back())) {
+    return &cache;
+  }
+
+  bool haveEffectiveCorrection = false;
+  for (int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex) {
+    double correctionDb = 0.0;
+    const double frequencyHz =
+        pressureSampleFrequenciesHz()[static_cast<std::size_t>(sampleIndex)];
+    if (!curve.interpolatedValueAt(frequencyHz, correctionDb) ||
+        !std::isfinite(correctionDb)) {
+      continue;
+    }
+
+    cache.correctionDb[static_cast<std::size_t>(sampleIndex)] = correctionDb;
+    if (correctionDb == 0.0) {
+      continue;
+    }
+
+    const double amplitudeFactor = std::pow(10.0, correctionDb / 20.0);
+    if (std::isfinite(amplitudeFactor) && amplitudeFactor > 0.0) {
+      cache.amplitudeFactor[static_cast<std::size_t>(sampleIndex)] = amplitudeFactor;
+    }
+    haveEffectiveCorrection = true;
+  }
+
+  cache.active = haveEffectiveCorrection;
+  return &cache;
+}
+
+void KFilterDoc::invalidateSplCorrectionCaches()
+{
+  for (SplCorrectionCache& cache : m_splCorrectionCaches) {
+    cache.valid = false;
+  }
+}
+
+bool KFilterDoc::splCorrectionActiveForDriver(int driverIndex) const
+{
+  const SplCorrectionCache* cache = ensureSplCorrectionCache(driverIndex);
+  return cache != nullptr && cache->active;
 }
 
 double KFilterDoc::splCorrectionDb(int driverIndex, int sampleIndex) const
 {
-  if (!m_measurementMergeEnabled ||
-      driverIndex < 0 || driverIndex >= static_cast<int>(m_splCorrectionCurves.size()) ||
-      sampleIndex < 0 || sampleIndex >= PressureSampleCount) {
+  if (sampleIndex < 0 || sampleIndex >= PressureSampleCount) {
     return 0.0;
   }
 
-  const KFilterMeasurementCurve& curve = splCorrectionCurve(driverIndex);
-  if (curve.size() < 2) {
+  const SplCorrectionCache* cache = ensureSplCorrectionCache(driverIndex);
+  if (cache == nullptr) {
     return 0.0;
   }
 
-  double correctionDb = 0.0;
-  const double frequencyHz =
-      pressureSampleFrequenciesHz()[static_cast<std::size_t>(sampleIndex)];
-  if (!curve.interpolatedValueAt(frequencyHz, correctionDb) ||
-      !std::isfinite(correctionDb)) {
-    return 0.0;
-  }
-
-  return correctionDb;
+  return cache->correctionDb[static_cast<std::size_t>(sampleIndex)];
 }
 
 double KFilterDoc::splCorrectionAmplitudeFactor(int driverIndex, int sampleIndex) const
 {
-  const double amplitudeFactor =
-      std::pow(10.0, splCorrectionDb(driverIndex, sampleIndex) / 20.0);
-  return std::isfinite(amplitudeFactor) && amplitudeFactor > 0.0
-             ? amplitudeFactor
-             : 1.0;
+  if (sampleIndex < 0 || sampleIndex >= PressureSampleCount) {
+    return 1.0;
+  }
+
+  const SplCorrectionCache* cache = ensureSplCorrectionCache(driverIndex);
+  if (cache == nullptr) {
+    return 1.0;
+  }
+
+  return cache->amplitudeFactor[static_cast<std::size_t>(sampleIndex)];
 }
 
 void KFilterDoc::addView(KFilterView *view)
@@ -253,6 +359,7 @@ bool KFilterDoc::openDocument(const QUrl& url, const char *format /*=nullptr*/)
                                       m_driverDriver,
                                       m_splCorrectionCurves,
                                       m_measurementMergeEnabled,
+                                      m_measurementHiddenForDrivers,
                                       &errorMessage)) {
     qWarning().noquote() << errorMessage;
     return false;
@@ -278,6 +385,7 @@ bool KFilterDoc::saveDocument(const QUrl& url, const char *format /*=nullptr*/)
                                     m_driverDriver,
                                     m_splCorrectionCurves,
                                     m_measurementMergeEnabled,
+                                    m_measurementHiddenForDrivers,
                                     &errorMessage)) {
     qWarning().noquote() << errorMessage;
     return false;
@@ -296,11 +404,14 @@ void KFilterDoc::deleteContents()
     m_splCorrectionCurves[static_cast<std::size_t>(intI)].clear();
   }
   m_measurementMergeEnabled = false;
+  m_measurementHiddenForDrivers.fill(false);
+  invalidateSplCorrectionCaches();
   modified = false;
 }
 
 void KFilterDoc::markLoadedContentsReady()
 {
+  invalidateSplCorrectionCaches();
   for ( int intI = 0; intI < 4; intI++ )
   {
     m_driverDriver[ intI ].Berechneparameter();
@@ -387,11 +498,22 @@ bool KFilterDoc::PressureSummary()
 		if ( m_driverDriver[ intIndex ].SummaryisActive )
 		{
 			m_driverDriver[ intIndex ].Schall();
+			const SplCorrectionCache* correctionCache = ensureSplCorrectionCache(intIndex);
+			if (correctionCache == nullptr || !correctionCache->active)
+			{
+				for ( int resultIndex = 0; resultIndex < PressureSampleCount * 2; ++resultIndex )
+				{
+					doubleSum[ resultIndex ] +=
+						m_driverDriver[ intIndex ].ResultSchall[ resultIndex ];
+				}
+				continue;
+			}
+
 			for ( int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex )
 			{
 				const int resultIndex = sampleIndex * 2;
 				const double amplitudeFactor =
-					splCorrectionAmplitudeFactor(intIndex, sampleIndex);
+					correctionCache->amplitudeFactor[static_cast<std::size_t>(sampleIndex)];
 				doubleSum[ resultIndex ] +=
 					m_driverDriver[ intIndex ].ResultSchall[ resultIndex ] * amplitudeFactor;
 				doubleSum[ resultIndex + 1 ] +=
@@ -425,13 +547,26 @@ bool KFilterDoc::PressureScalarSummary()
 		if ( m_driverDriver[ intIndex ].ScalarSummaryisActive )
 		{
 			m_driverDriver[ intIndex ].Schall();
+			const SplCorrectionCache* correctionCache = ensureSplCorrectionCache(intIndex);
+			if (correctionCache == nullptr || !correctionCache->active)
+			{
+				for ( int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex )
+				{
+					const int resultIndex = sampleIndex * 2;
+					m_doubleXContainer[ 0 ][ sampleIndex ] +=
+						std::pow( m_driverDriver[ intIndex ].ResultSchall[ resultIndex ], 2.0 ) +
+						std::pow( m_driverDriver[ intIndex ].ResultSchall[ resultIndex + 1 ], 2.0 );
+				}
+				continue;
+			}
+
 			for ( int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex )
 			{
 				//		turbo pascal version			dB0-round(	ln(std::sqrt(sqr(qx1)+sqr(qy1)+sqr(qx2)+sqr(qy2)+sqr(qx3)+sqr(qy3))	)
 				//  	old C version 				m_doubleXContainer[0][j] = m_doubleXContainer[0][j] + std::sqrt(std::pow(m_driverDriver[index].ResultSchall[i],2.0)+std::pow(m_driverDriver[index].ResultSchall[i+1],2.0));
 				const int resultIndex = sampleIndex * 2;
 				const double amplitudeFactor =
-					splCorrectionAmplitudeFactor(intIndex, sampleIndex);
+					correctionCache->amplitudeFactor[static_cast<std::size_t>(sampleIndex)];
 				const double correctedReal =
 					m_driverDriver[ intIndex ].ResultSchall[ resultIndex ] * amplitudeFactor;
 				const double correctedImaginary =

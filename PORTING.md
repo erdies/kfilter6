@@ -648,3 +648,137 @@ changed.
 - The document smoke test now verifies the centralized dB and amplitude APIs,
   including merge-disabled, outside-range, invalid-index, and logarithmic
   interpolation cases.
+
+## Patch 166: Driver state consistency
+
+- All calculation-relevant `driver` setter methods now invalidate both the SPL
+  and impedance caches themselves. Callers no longer need an additional
+  `setmodified()` after using `setRdc()`, `setLsp()`, `setF0()`, `setQtc()`,
+  `setQes()`, `setQms()`, `setVas()`, `setDm()`, `setQl()`, or
+  `setFullCircuit()`.
+- `cleanupNetwork()` now invalidates the caches after clearing all network
+  elements.
+- `Berechneparameter()` initializes `Parameter_flag`, `AkustikESB_flag`, and
+  `Phase_flag` from a defined valid baseline on every run. This prevents a
+  previous invalid-F0 or bass-reflex state from leaking into a later valid
+  closed-box or free-air calculation.
+- The driver smoke test now covers every calculation setter, network cleanup,
+  phase-state recovery after an enclosure transition, and recovery after an
+  invalid `F0 == 0` state.
+- Public calculation fields such as `Vb`, `Fb`, `V2`, `GTypProposal`, `gain`,
+  and `InvertPhase` remain directly writable for compatibility. Existing
+  callers must still invoke `setmodified()` after changing those fields.
+
+## Patch 167: Neutral SPL-correction fast paths
+
+- Added `KFilterMeasurementCurve::isNeutral()` for exact all-zero correction
+  detection and `overlapsFrequencyRange()` for inexpensive simulation-raster
+  overlap checks. These methods do not cache state because measurement points
+  remain publicly accessible in the current model.
+- Added `KFilterDoc::splCorrectionActiveForDriver()` as the shared decision for
+  whether a driver needs correction processing on the fixed 150-point SPL
+  raster. Disabled merge state, invalid drivers, non-mergeable curves, exact
+  all-zero curves, and curves wholly outside the raster use the neutral path.
+- Individual SPL drawing and label-anchor calculation determine correction
+  activity once per driver. Without an effective correction they reuse the
+  unmodified simulation values and perform no per-sample interpolation.
+- Vector and energetic SPL sums now bypass correction lookup, dB-to-linear
+  conversion, and multiplication for neutral drivers. Non-neutral corrections
+  retain the existing multiplication order.
+- `splCorrectionAmplitudeFactor()` returns `1.0` immediately when the resolved
+  correction is exactly `0 dB`, avoiding an unnecessary `pow(10, 0)`.
+- Extended the measurement-curve and document smoke tests for neutral-curve
+  detection, frequency-range overlap, merge-disabled handling, out-of-raster
+  curves, and partly overlapping active curves.
+- This patch intentionally adds no persistent interpolation cache and does not
+  encapsulate or remove legacy `driver` APIs or legacy calculation states such
+  as `F0 == 0`.
+
+## Patch 168: Cached SPL-correction raster
+
+- `KFilterMeasurementCurve` now keeps its point vector private and exposes it as
+  a read-only reference through `points()`. All content changes use controlled
+  methods such as `appendPoint()`, `setPointValue()`, `removeLastPoint()`, and
+  `clear()`.
+- Every successful content mutation, copy assignment, or move assignment gives
+  the curve a new process-unique revision. Failed mutations and assignments of
+  an already stored point value do not change the revision.
+- `KFilterDoc` keeps one transient SPL-correction cache per driver. Each cache
+  contains the interpolated dB corrections and corresponding linear amplitude
+  factors for the fixed 150-point simulation raster.
+- Cache entries are keyed by the curve revision and merge state. They are also
+  explicitly invalidated after merge-state changes, project loading, document
+  clearing, and selective/global measurement clearing.
+- Neutral curves, non-mergeable curves, disabled merge state, and curves outside
+  the simulation raster produce cached neutral arrays (`0 dB` and factor `1`).
+- Vector and energetic SPL sums obtain the cache once per active driver and use
+  the prepared factor array directly. Individual curve drawing and label lookup
+  continue to use the centralized document API, which now serves cached values
+  instead of repeating interpolation and dB-to-linear conversion.
+- The cache is transient only. Patch 168 changes neither the JSON `.kfp` format
+  nor FRD import/export semantics, and it does not alter legacy `driver` APIs or
+  intentional legacy calculation states such as `F0 == 0`.
+
+## Patch 170: Hide Measurements state
+
+- Added an independent **Hide Measurements** switch directly below
+  **Merge Measurements** in the Measurements menu.
+- With Hide disabled, the existing behaviour is unchanged: unmerged correction
+  curves are visible, while Merge applies their scalar magnitude correction to
+  individual SPL curves and both SPL sums.
+- With Hide enabled, all stored measurement/correction curves are hidden and
+  their correction influence is neutralized. This also applies when Merge
+  remains enabled, so the plot and PDF output show a purely uncorrected
+  simulation without changing the stored Merge state.
+- Disabling Hide immediately restores the prior Merge behaviour. Merge and Hide
+  are therefore persisted and managed as independent project states.
+- During interactive drawing, only the currently edited correction curve is
+  shown temporarily even when Hide or Merge would otherwise suppress stored
+  measurement curves.
+- The print measurement-status box is omitted while Hide is active, and plot
+  legends do not label simulated curves as merged in that state.
+- The transient SPL-correction cache now includes Hide in its validity key and
+  returns neutral arrays (`0 dB` and factor `1`) whenever Hide is active.
+- The JSON project format is advanced to `formatVersion = 3` and persists
+  `project.measurementSettings.hideMeasurements`. Versions 1 and 2 remain
+  readable and load with Hide disabled; invalid version-3 hide values fail
+  transactionally.
+- Clearing the final measurement curve or all measurement curves resets both
+  Merge and Hide because neither state can remain effective without stored
+  measurements.
+- Document and project-I/O smoke tests cover cache invalidation, vector and
+  energetic sums, independent Merge/Hide restoration, selective clearing,
+  format-version compatibility, and transactional validation.
+
+## Patch 171: Per-driver Hide Measurement states
+
+- Replaced the global **Hide Measurements** action with the
+  **Hide Measurement for Driver** submenu. Each stored driver measurement has
+  an independent checkable hide state; drivers without a measurement cannot be
+  checked.
+- A hidden measurement is excluded from every effective correction path for
+  that driver. The individual SPL curve uses the uncorrected simulation, and
+  the vector and energetic SPL sums use that same uncorrected driver
+  contribution. Non-hidden drivers continue to use their merged corrections.
+- The centralized correction cache now includes the hide state of its own
+  driver only. Toggling one checkbox invalidates only that driver's cache, so
+  mixed corrected/uncorrected sums cannot diverge from the visible individual
+  curves.
+- With Merge disabled, non-hidden measurement curves remain visible references;
+  hidden measurement curves are omitted. During interactive drawing, the active
+  curve remains temporarily visible regardless of its stored hide state.
+- Plot legends and the PDF measurement-status box describe mixed states per
+  driver. If every stored measurement is hidden, the PDF is intentionally
+  rendered as a pure simulation without a measurement annotation.
+- The JSON project format is advanced to `formatVersion = 4`. The `hidden`
+  boolean is stored inside each driver's `measurements.splCorrection` object;
+  the global `measurementSettings.hideMeasurements` field is no longer written.
+- Version 3 projects migrate deterministically: a true global hide flag becomes
+  `hidden = true` for every driver containing a measurement. Versions 1 and 2
+  remain readable with all per-driver hide states disabled.
+- Selective clearing resets only the cleared driver's hide state. Clearing all
+  measurements resets all hide states and the merge switch.
+- Smoke tests cover selective cache invalidation, mixed vector and energetic
+  sums, per-driver persistence, version-3 migration, older-format compatibility,
+  and transactional rejection of invalid per-driver hide values.
+

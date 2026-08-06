@@ -90,6 +90,16 @@ bool checkCentralizedCorrectionCalculation()
         return false;
     }
 
+    document.setMeasurementHiddenForDriver(0, true);
+    if (document.measurementMergeEnabled() || !document.measurementHiddenForDriver(0) ||
+        !expectNear("Hidden correction with merge disabled",
+                    document.splCorrectionDb(0, InterpolationSampleIndex),
+                    0.0)) {
+        QTextStream(stderr) << "Hide state could not be enabled independently of merge\n";
+        return false;
+    }
+    document.setMeasurementHiddenForDriver(0, false);
+
     document.setMeasurementMergeEnabled(true);
     if (!expectNear("Central logarithmic correction interpolation",
                     document.splCorrectionDb(0, InterpolationSampleIndex),
@@ -114,6 +124,157 @@ bool checkCentralizedCorrectionCalculation()
         !expectNear("Correction factor for invalid sample",
                     document.splCorrectionAmplitudeFactor(0, -1),
                     1.0)) {
+        return false;
+    }
+
+    return true;
+}
+
+bool checkCorrectionFastPaths()
+{
+    KFilterDoc document;
+    KFilterMeasurementCurve& curve = document.splCorrectionCurve(0);
+
+    if (document.splCorrectionActiveForDriver(0) ||
+        document.splCorrectionActiveForDriver(-1) ||
+        document.splCorrectionActiveForDriver(KFilterProjectIo::DriverCount)) {
+        QTextStream(stderr) << "Correction fast path accepted an inactive or invalid driver\n";
+        return false;
+    }
+
+    curve.appendPoint(20.0, 0.0);
+    curve.appendPoint(20000.0, 0.0);
+    document.setMeasurementMergeEnabled(true);
+    if (document.splCorrectionActiveForDriver(0) ||
+        !expectNear("Neutral correction factor",
+                    document.splCorrectionAmplitudeFactor(0, 75),
+                    1.0)) {
+        QTextStream(stderr) << "Neutral correction curve did not use the fast path\n";
+        return false;
+    }
+
+    curve.setPointValue(1, 1.0);
+    if (!document.splCorrectionActiveForDriver(0)) {
+        QTextStream(stderr) << "Overlapping non-neutral correction was not activated\n";
+        return false;
+    }
+
+    document.setMeasurementMergeEnabled(false);
+    if (document.splCorrectionActiveForDriver(0)) {
+        QTextStream(stderr) << "Disabled merge state did not use the fast path\n";
+        return false;
+    }
+
+    curve.clear();
+    curve.appendPoint(1.0, 2.0);
+    curve.appendPoint(10.0, 2.0);
+    document.setMeasurementMergeEnabled(true);
+    if (document.splCorrectionActiveForDriver(0)) {
+        QTextStream(stderr) << "Correction below the simulation raster was activated\n";
+        return false;
+    }
+
+    curve.clear();
+    curve.appendPoint(30000.0, 2.0);
+    curve.appendPoint(40000.0, 2.0);
+    if (document.splCorrectionActiveForDriver(0)) {
+        QTextStream(stderr) << "Correction above the simulation raster was activated\n";
+        return false;
+    }
+
+    curve.clear();
+    curve.appendPoint(1000.0, 0.0);
+    curve.appendPoint(30000.0, 2.0);
+    if (!document.splCorrectionActiveForDriver(0)) {
+        QTextStream(stderr) << "Partly overlapping correction was not activated\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool checkCorrectionCacheInvalidation()
+{
+    constexpr int TestSampleIndex = 75;
+
+    KFilterDoc document;
+    KFilterMeasurementCurve& curve = document.splCorrectionCurve(0);
+    curve.appendPoint(20.0, 2.0);
+    curve.appendPoint(20000.0, 2.0);
+    document.setMeasurementMergeEnabled(true);
+
+    if (!expectNear("Initial cached correction",
+                    document.splCorrectionDb(0, TestSampleIndex),
+                    2.0) ||
+        !expectNear("Initial cached correction factor",
+                    document.splCorrectionAmplitudeFactor(0, TestSampleIndex),
+                    std::pow(10.0, 2.0 / 20.0))) {
+        return false;
+    }
+
+    if (!curve.setPointValue(0, 6.0) || !curve.setPointValue(1, 6.0) ||
+        !expectNear("Point mutation cache invalidation",
+                    document.splCorrectionDb(0, TestSampleIndex),
+                    6.0) ||
+        !expectNear("Point mutation factor cache invalidation",
+                    document.splCorrectionAmplitudeFactor(0, TestSampleIndex),
+                    std::pow(10.0, 6.0 / 20.0))) {
+        return false;
+    }
+
+    KFilterMeasurementCurve replacement;
+    replacement.appendPoint(20.0, -3.0);
+    replacement.appendPoint(20000.0, -3.0);
+    curve = replacement;
+    if (!expectNear("Curve assignment cache invalidation",
+                    document.splCorrectionDb(0, TestSampleIndex),
+                    -3.0)) {
+        return false;
+    }
+
+    document.setMeasurementMergeEnabled(false);
+    if (!expectNear("Merge disable cache invalidation",
+                    document.splCorrectionDb(0, TestSampleIndex),
+                    0.0) ||
+        !expectNear("Merge disable factor cache invalidation",
+                    document.splCorrectionAmplitudeFactor(0, TestSampleIndex),
+                    1.0)) {
+        return false;
+    }
+
+    document.setMeasurementMergeEnabled(true);
+    if (!expectNear("Merge re-enable cache rebuild",
+                    document.splCorrectionDb(0, TestSampleIndex),
+                    -3.0)) {
+        return false;
+    }
+
+    document.setMeasurementHiddenForDriver(0, true);
+    if (!document.measurementMergeEnabled() || !document.measurementHiddenForDriver(0) ||
+        document.splCorrectionActiveForDriver(0) ||
+        !expectNear("Hide cache invalidation",
+                    document.splCorrectionDb(0, TestSampleIndex),
+                    0.0) ||
+        !expectNear("Hide factor cache invalidation",
+                    document.splCorrectionAmplitudeFactor(0, TestSampleIndex),
+                    1.0)) {
+        QTextStream(stderr) << "Hide state did not preserve merge while neutralizing correction\n";
+        return false;
+    }
+
+    document.setMeasurementHiddenForDriver(0, false);
+    if (document.measurementHiddenForDriver(0) ||
+        !expectNear("Hide disable cache rebuild",
+                    document.splCorrectionDb(0, TestSampleIndex),
+                    -3.0)) {
+        return false;
+    }
+
+    curve.clear();
+    if (document.splCorrectionActiveForDriver(0) ||
+        !expectNear("Curve clear cache invalidation",
+                    document.splCorrectionDb(0, TestSampleIndex),
+                    0.0)) {
         return false;
     }
 
@@ -145,6 +306,27 @@ bool checkMeasurementSummaryMerge()
         return false;
     }
 
+    singleDriverDocument.setMeasurementHiddenForDriver(0, true);
+    singleDriverDocument.PressureSummary();
+    if (!singleDriverDocument.measurementMergeEnabled() ||
+        !expectNear("Hidden vector summary",
+                    singleDriverDocument.m_doubleXContainer[0][TestSampleIndex],
+                    vectorBaseline)) {
+        return false;
+    }
+    singleDriverDocument.setMeasurementHiddenForDriver(0, false);
+
+    singleDriverCurve.setPointValue(0, 0.0);
+    singleDriverCurve.setPointValue(1, 0.0);
+    singleDriverDocument.PressureSummary();
+    if (!expectNear("Neutral vector summary fast path",
+                    singleDriverDocument.m_doubleXContainer[0][TestSampleIndex],
+                    vectorBaseline)) {
+        return false;
+    }
+
+    singleDriverCurve.setPointValue(0, CorrectionDb);
+    singleDriverCurve.setPointValue(1, CorrectionDb);
     singleDriver.SummaryisActive = false;
     singleDriver.ScalarSummaryisActive = true;
     singleDriverDocument.setMeasurementMergeEnabled(false);
@@ -154,6 +336,25 @@ bool checkMeasurementSummaryMerge()
     singleDriverDocument.PressureScalarSummary();
     const double energeticCorrected = singleDriverDocument.m_doubleXContainer[0][TestSampleIndex];
     if (!expectNear("Energetic summary correction", energeticCorrected - energeticBaseline, CorrectionDb)) {
+        return false;
+    }
+
+    singleDriverDocument.setMeasurementHiddenForDriver(0, true);
+    singleDriverDocument.PressureScalarSummary();
+    if (!singleDriverDocument.measurementMergeEnabled() ||
+        !expectNear("Hidden energetic summary",
+                    singleDriverDocument.m_doubleXContainer[0][TestSampleIndex],
+                    energeticBaseline)) {
+        return false;
+    }
+    singleDriverDocument.setMeasurementHiddenForDriver(0, false);
+
+    singleDriverCurve.setPointValue(0, 0.0);
+    singleDriverCurve.setPointValue(1, 0.0);
+    singleDriverDocument.PressureScalarSummary();
+    if (!expectNear("Neutral energetic summary fast path",
+                    singleDriverDocument.m_doubleXContainer[0][TestSampleIndex],
+                    energeticBaseline)) {
         return false;
     }
 
@@ -214,8 +415,12 @@ bool checkSelectiveMeasurementClearing()
     secondCurve.appendPoint(2000.0, 2.0);
 
     document.setMeasurementMergeEnabled(true);
-    if (!document.measurementMergeEnabled()) {
-        QTextStream(stderr) << "Measurement merge could not be enabled for clearing test\n";
+    document.setMeasurementHiddenForDriver(0, true);
+    document.setMeasurementHiddenForDriver(1, true);
+    if (!document.measurementMergeEnabled() ||
+        !document.measurementHiddenForDriver(0) ||
+        !document.measurementHiddenForDriver(1)) {
+        QTextStream(stderr) << "Per-driver measurement hide could not be enabled for clearing test\n";
         return false;
     }
 
@@ -231,6 +436,11 @@ bool checkSelectiveMeasurementClearing()
         QTextStream(stderr) << "Measurement merge was disabled while a mergeable curve remained\n";
         return false;
     }
+    if (document.measurementHiddenForDriver(0) ||
+        !document.measurementHiddenForDriver(1)) {
+        QTextStream(stderr) << "Selective clearing did not reset only the cleared driver's hide state\n";
+        return false;
+    }
 
     if (!document.clearMeasurementCurve(1) || !secondCurve.isEmpty()) {
         QTextStream(stderr) << "Selective measurement clearing did not clear driver 2\n";
@@ -240,6 +450,10 @@ bool checkSelectiveMeasurementClearing()
         QTextStream(stderr) << "Measurement merge remained enabled without mergeable curves\n";
         return false;
     }
+    if (document.measurementHiddenForDriver(1)) {
+        QTextStream(stderr) << "Measurement hide remained enabled without its measurement curve\n";
+        return false;
+    }
     if (document.clearMeasurementCurve(1)) {
         QTextStream(stderr) << "Clearing an already empty measurement reported a change\n";
         return false;
@@ -247,6 +461,82 @@ bool checkSelectiveMeasurementClearing()
     if (document.clearMeasurementCurve(-1) ||
         document.clearMeasurementCurve(KFilterProjectIo::DriverCount)) {
         QTextStream(stderr) << "Invalid driver index was accepted for measurement clearing\n";
+        return false;
+    }
+    if (document.setMeasurementHiddenForDriver(0, true) ||
+        document.measurementHiddenForDriver(0)) {
+        QTextStream(stderr) << "Measurement hide was enabled without a stored measurement\n";
+        return false;
+    }
+    if (document.setMeasurementHiddenForDriver(-1, true) ||
+        document.setMeasurementHiddenForDriver(KFilterProjectIo::DriverCount, true) ||
+        document.measurementHiddenForDriver(-1) ||
+        document.measurementHiddenForDriver(KFilterProjectIo::DriverCount)) {
+        QTextStream(stderr) << "Invalid driver index was accepted for measurement hide\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool checkSelectiveMeasurementSums()
+{
+    constexpr int TestSampleIndex = 75;
+    constexpr double FirstCorrectionDb = 6.0;
+    constexpr double SecondCorrectionDb = -4.0;
+
+    KFilterDoc actual;
+    KFilterDoc expected;
+    for (int driverIndex = 0; driverIndex < 2; ++driverIndex) {
+        actual.m_driverDriver[driverIndex].SummaryisActive = true;
+        actual.m_driverDriver[driverIndex].ScalarSummaryisActive = true;
+        expected.m_driverDriver[driverIndex].SummaryisActive = true;
+        expected.m_driverDriver[driverIndex].ScalarSummaryisActive = true;
+    }
+
+    KFilterMeasurementCurve& actualFirstCurve = actual.splCorrectionCurve(0);
+    actualFirstCurve.appendPoint(20.0, FirstCorrectionDb);
+    actualFirstCurve.appendPoint(20000.0, FirstCorrectionDb);
+    KFilterMeasurementCurve& actualSecondCurve = actual.splCorrectionCurve(1);
+    actualSecondCurve.appendPoint(20.0, SecondCorrectionDb);
+    actualSecondCurve.appendPoint(20000.0, SecondCorrectionDb);
+
+    KFilterMeasurementCurve& expectedFirstCurve = expected.splCorrectionCurve(0);
+    expectedFirstCurve.appendPoint(20.0, FirstCorrectionDb);
+    expectedFirstCurve.appendPoint(20000.0, FirstCorrectionDb);
+
+    actual.setMeasurementMergeEnabled(true);
+    expected.setMeasurementMergeEnabled(true);
+    actual.setMeasurementHiddenForDriver(1, true);
+
+    if (!actual.splCorrectionActiveForDriver(0) ||
+        actual.splCorrectionActiveForDriver(1) ||
+        !actual.measurementHiddenForDriver(1)) {
+        QTextStream(stderr) << "Selective measurement activation state is inconsistent\n";
+        return false;
+    }
+
+    actual.PressureSummary();
+    expected.PressureSummary();
+    if (!expectNear("Selective vector summary",
+                    actual.m_doubleXContainer[0][TestSampleIndex],
+                    expected.m_doubleXContainer[0][TestSampleIndex],
+                    1.0e-5)) {
+        return false;
+    }
+
+    actual.PressureScalarSummary();
+    expected.PressureScalarSummary();
+    if (!expectNear("Selective energetic summary",
+                    actual.m_doubleXContainer[0][TestSampleIndex],
+                    expected.m_doubleXContainer[0][TestSampleIndex],
+                    1.0e-5)) {
+        return false;
+    }
+
+    actual.setMeasurementHiddenForDriver(1, false);
+    if (!actual.splCorrectionActiveForDriver(1)) {
+        QTextStream(stderr) << "Unhiding a driver did not restore its correction\n";
         return false;
     }
 
@@ -299,8 +589,11 @@ int main(int argc, char** argv)
     (void)app;
 
     if (!checkCentralizedCorrectionCalculation() ||
+        !checkCorrectionFastPaths() ||
+        !checkCorrectionCacheInvalidation() ||
         !checkMeasurementSummaryMerge() ||
-        !checkSelectiveMeasurementClearing()) {
+        !checkSelectiveMeasurementClearing() ||
+        !checkSelectiveMeasurementSums()) {
         return 1;
     }
 
@@ -318,6 +611,7 @@ int main(int argc, char** argv)
     original.splCorrectionCurve(3).appendPoint(200.0, 0.5);
     original.splCorrectionCurve(3).appendPoint(5000.0, -1.5);
     original.setMeasurementMergeEnabled(true);
+    original.setMeasurementHiddenForDriver(0, true);
 
     const QString filePath = QDir::temp().filePath(QStringLiteral("kfilter_doc_smoketest.kfp"));
     const QUrl fileUrl = QUrl::fromLocalFile(filePath);
@@ -357,10 +651,10 @@ int main(int argc, char** argv)
             return 1;
         }
         for (qsizetype pointIndex = 0; pointIndex < expectedCurve.size(); ++pointIndex) {
-            if (!fuzzyEqual(expectedCurve.points.at(pointIndex).frequencyHz,
-                            actualCurve.points.at(pointIndex).frequencyHz) ||
-                !fuzzyEqual(expectedCurve.points.at(pointIndex).value,
-                            actualCurve.points.at(pointIndex).value)) {
+            if (!fuzzyEqual(expectedCurve.points().at(pointIndex).frequencyHz,
+                            actualCurve.points().at(pointIndex).frequencyHz) ||
+                !fuzzyEqual(expectedCurve.points().at(pointIndex).value,
+                            actualCurve.points().at(pointIndex).value)) {
                 QTextStream(stderr) << "Document measurement point mismatch for driver "
                                     << (driverIndex + 1) << '\n';
                 return 1;
@@ -368,8 +662,10 @@ int main(int argc, char** argv)
         }
     }
 
-    if (!loaded.measurementMergeEnabled()) {
-        QTextStream(stderr) << "Document measurement merge state was not restored\n";
+    if (!loaded.measurementMergeEnabled() ||
+        !loaded.measurementHiddenForDriver(0) ||
+        loaded.measurementHiddenForDriver(3)) {
+        QTextStream(stderr) << "Document measurement merge/per-driver hide state was not restored\n";
         return 1;
     }
 
@@ -380,7 +676,8 @@ int main(int argc, char** argv)
     }
 
     loaded.newDocument();
-    if (loaded.hasMeasurementCurves() || loaded.measurementMergeEnabled()) {
+    if (loaded.hasMeasurementCurves() || loaded.measurementMergeEnabled() ||
+        loaded.measurementHiddenForDriver(0) || loaded.measurementHiddenForDriver(3)) {
         QTextStream(stderr) << "New document did not clear persisted measurement state\n";
         return 1;
     }

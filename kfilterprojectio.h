@@ -20,20 +20,23 @@ public:
     static constexpr int DriverCount = 4;
     static constexpr int NetworkUnitCount = 48;
     static constexpr int LegacyJsonFormatVersion = 1;
-    static constexpr int JsonFormatVersion = 2;
+    static constexpr int JsonFormatVersion = 4;
 
     using MeasurementCurves = std::array<KFilterMeasurementCurve, DriverCount>;
+    using MeasurementHiddenStates = std::array<bool, DriverCount>;
 
     static bool loadFromFile(const QString& filePath,
                              driver (&drivers)[DriverCount],
                              MeasurementCurves& splCorrectionCurves,
                              bool& mergeMeasurementsEnabled,
+                             MeasurementHiddenStates& measurementHiddenForDrivers,
                              QString* errorMessage = nullptr);
 
     static bool saveToFile(const QString& filePath,
                            driver (&drivers)[DriverCount],
                            const MeasurementCurves& splCorrectionCurves,
                            bool mergeMeasurementsEnabled,
+                           const MeasurementHiddenStates& measurementHiddenForDrivers,
                            QString* errorMessage = nullptr);
 };
 

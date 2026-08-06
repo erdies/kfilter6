@@ -96,7 +96,9 @@ Patch 164 centralizes the effective measurement correction in `KFilterDoc`. Indi
 
 With **Merge Measurement** enabled, the interpolated correction is applied to the corresponding simulated driver SPL curve; `0 dB` is neutral. For vector and energetic sums, the dB correction is converted to the linear pressure factor `10^(correctionDb / 20)`. The factor scales real and imaginary pressure components equally, so the simulated phase remains unchanged while the corrected magnitude enters both sum calculations.
 
-Only the resulting relative correction points are project data. The original measurement file, absolute raw levels, calibration range, offset settings, and fade settings are not persisted in Patch 158. Correction curves and the merge switch remain stored in `.kfp` JSON format version 2. PDF export continues to suppress both the correction curves and every merge effect.
+The **Hide Measurement for Driver** submenu controls each driver independently. A checked driver keeps its simulated SPL curve visible but suppresses both the stored correction curve and its correction influence. With Merge enabled, hidden drivers therefore contribute their uncorrected simulation to vector and energetic sums, while non-hidden drivers contribute their corrected simulation. The same effective contribution is used for the individual curve and both sum modes, so mixed hide states remain mathematically and visually consistent.
+
+Only the resulting relative correction points are project data. The original measurement file, absolute raw levels, calibration range, offset settings, and fade settings are not persisted. The current `.kfp` JSON format version 4 stores each correction curve together with its per-driver hide state, plus the project-wide merge switch. PDF rendering follows the same effective per-driver correction state as the plot.
 
 ### Network preview
 
@@ -315,7 +317,7 @@ File -> Save
 File -> Save As...
 ```
 
-Projects are saved as versioned, human-readable JSON while retaining the `.kfp` extension. Legacy text-based `.kfp` files and JSON format version 1 projects can still be opened; saving such a project rewrites it in the current JSON format. SPL correction curves and the `Merge Measurement` state are project data in format version 2.
+Projects are saved as versioned, human-readable JSON while retaining the `.kfp` extension. Legacy text-based `.kfp` files and JSON format versions 1 through 3 can still be opened; saving such a project rewrites it in the current version 4 format. SPL correction curves, their per-driver hide states, and the `Merge Measurements` state are project data.
 
 ## User settings
 
@@ -356,6 +358,12 @@ kfilterqt6app.cpp
 ## Development notes
 
 KFilter6 is being ported and improved incrementally. The preferred change style is small, reviewable patches that keep the application buildable after each step.
+
+Patch 166 hardens the internal driver state handling. Calculation-relevant setter methods and network cleanup now invalidate cached SPL and impedance results automatically. Parameter calculation also resets its validity and phase flags on every run, so a previous invalid resonance frequency or bass-reflex enclosure cannot contaminate a later valid driver state.
+
+Patch 167 adds neutral correction fast paths. Disabled merge state, all-zero correction curves, and curves outside the fixed SPL simulation raster now bypass per-sample interpolation when drawing individual curves and bypass interpolation, dB-to-linear conversion, and correction multiplication in SPL sums. A zero dB correction also returns amplitude factor 1 directly without evaluating `pow()`.
+
+Patch 168 caches SPL correction values and amplitude factors on the fixed 150-point simulation raster. Each correction curve now exposes its points read-only and advances a unique revision whenever controlled mutation changes its contents. The document cache is rebuilt only after curve replacement or mutation, merge-state changes, project loading, or document clearing; drawing, labels, and both SPL summary modes reuse the prepared values.
 
 Project-format compatibility rules:
 

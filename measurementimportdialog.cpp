@@ -122,7 +122,7 @@ protected:
             m_rawPoints.constFirst().levelDb);
 
         QVector<KFilterMeasurementPoint> relativePoints = m_importResult.calibratedMeasurement;
-        for (const KFilterMeasurementPoint& point : m_importResult.correctionCurve.points) {
+        for (const KFilterMeasurementPoint& point : m_importResult.correctionCurve.points()) {
             relativePoints.append(point);
         }
         const auto relativeRange = levelRange(
@@ -229,7 +229,7 @@ protected:
                  [](const KFilterMeasurementPoint& point) { return point.value; },
                  relativeRect, relativeRange, QPen(QColor(45, 105, 180), 1.5));
 
-        drawPath(m_importResult.correctionCurve.points,
+        drawPath(m_importResult.correctionCurve.points(),
                  [](const KFilterMeasurementPoint& point) { return point.frequencyHz; },
                  [](const KFilterMeasurementPoint& point) { return point.value; },
                  relativeRect, relativeRange, QPen(QColor(190, 65, 55), 2.2));

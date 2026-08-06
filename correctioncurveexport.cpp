@@ -53,12 +53,12 @@ KFilterCorrectionCurveExportResult exportKFilterCorrectionCurveAsFrd(
         return result;
     }
 
-    if (curve.points.isEmpty()) {
+    if (curve.points().isEmpty()) {
         result.errorMessage = QStringLiteral("The selected driver does not contain a correction curve.");
         return result;
     }
 
-    QVector<KFilterMeasurementPoint> sortedPoints = curve.points;
+    QVector<KFilterMeasurementPoint> sortedPoints = curve.points();
     std::sort(sortedPoints.begin(), sortedPoints.end(),
               [](const KFilterMeasurementPoint& lhs, const KFilterMeasurementPoint& rhs) {
                   return lhs.frequencyHz < rhs.frequencyHz;
