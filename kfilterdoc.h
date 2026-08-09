@@ -17,7 +17,10 @@
 
 #include <array>
 #include <cstdint>
+#include <complex>
 
+#include "activefiltermodel.h"
+#include "activefilterresponse.h"
 #include "driver.h"
 #include "kfiltermeasurementcurve.h"
 
@@ -33,6 +36,7 @@ class KFilterDoc : public QObject
 {
   Q_OBJECT
   public:
+    using ActiveFilterChains = std::array<ActiveFilterChain, 4>;
     /** Constructor for the document object of the application. */
     explicit KFilterDoc(QObject *parent = nullptr, const char *name = nullptr);
     /** Destructor for the document object of the application. */
@@ -68,6 +72,12 @@ bool setMeasurementHiddenForDriver(int driverIndex, bool hidden);
 bool splCorrectionActiveForDriver(int driverIndex) const;
 double splCorrectionDb(int driverIndex, int sampleIndex) const;
 double splCorrectionAmplitudeFactor(int driverIndex, int sampleIndex) const;
+
+ActiveFilterChain& activeFilterChain(int driverIndex);
+const ActiveFilterChain& activeFilterChain(int driverIndex) const;
+ActiveFilterChains& activeFilterChains();
+const ActiveFilterChains& activeFilterChains() const;
+const ActiveFilterResponse& activeFilterResponse(int driverIndex) const;
 
 //////////////////////////////////////////////////////////
     /** adds a view to the document which represents the document contents. Usually this is your main view. */
@@ -115,7 +125,7 @@ double splCorrectionAmplitudeFactor(int driverIndex, int sampleIndex) const;
     /** the modified flag of the current document */
     bool modified = false;
     QUrl doc_url;
-    static constexpr int SplCorrectionSampleCount = 150;
+    static constexpr int SplCorrectionSampleCount = static_cast<int>(KFilterFrequencyCount);
 
     struct SplCorrectionCache
     {
@@ -132,9 +142,17 @@ double splCorrectionAmplitudeFactor(int driverIndex, int sampleIndex) const;
     mutable std::array<SplCorrectionCache, 4> m_splCorrectionCaches;
     bool m_measurementMergeEnabled = false;
     std::array<bool, 4> m_measurementHiddenForDrivers{};
+    ActiveFilterChains m_activeFilterChains{};
+    mutable std::array<ActiveFilterResponseCache, 4> m_activeFilterResponseCaches{};
 
     const SplCorrectionCache* ensureSplCorrectionCache(int driverIndex) const;
+    std::complex<double> effectivePressureSample(
+        int driverIndex,
+        int sampleIndex,
+        const ActiveFilterResponse& activeFilter,
+        const SplCorrectionCache* correctionCache) const;
     void invalidateSplCorrectionCaches();
+    void resetActiveFilterChains();
     void markLoadedContentsReady();
 
   private slots:

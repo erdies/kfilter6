@@ -7,6 +7,7 @@
 #include "kfilterdoc.h"
 
 #include "kfilterprojectio.h"
+#include "kfilterfrequencygrid.h"
 
 #include <QDebug>
 #include <QString>
@@ -35,23 +36,7 @@ QString localFilePathFromUrl(const QUrl& url)
     return QString();
 }
 
-constexpr int PressureSampleCount = 150;
-constexpr double MinimumPressureFrequencyHz = 20.0;
-constexpr double PressureFrequencyStep = 1.047128548;
-
-const std::array<double, PressureSampleCount>& pressureSampleFrequenciesHz()
-{
-    static const std::array<double, PressureSampleCount> frequencies = []() {
-        std::array<double, PressureSampleCount> values{};
-        values[0] = MinimumPressureFrequencyHz;
-        for (int sampleIndex = 1; sampleIndex < PressureSampleCount; ++sampleIndex) {
-            values[static_cast<std::size_t>(sampleIndex)] =
-                values[static_cast<std::size_t>(sampleIndex - 1)] * PressureFrequencyStep;
-        }
-        return values;
-    }();
-    return frequencies;
-}
+constexpr int PressureSampleCount = static_cast<int>(KFilterFrequencyCount);
 }
 
 QList<KFilterView*> *KFilterDoc::pViewList = nullptr;
@@ -210,8 +195,8 @@ const KFilterDoc::SplCorrectionCache* KFilterDoc::ensureSplCorrectionCache(int d
       m_measurementHiddenForDrivers[cacheIndex] ||
       curve.size() < 2 ||
       curve.isNeutral() ||
-      !curve.overlapsFrequencyRange(pressureSampleFrequenciesHz().front(),
-                                    pressureSampleFrequenciesHz().back())) {
+      !curve.overlapsFrequencyRange(kfilterFrequencyGridHz().front(),
+                                    kfilterFrequencyGridHz().back())) {
     return &cache;
   }
 
@@ -219,7 +204,7 @@ const KFilterDoc::SplCorrectionCache* KFilterDoc::ensureSplCorrectionCache(int d
   for (int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex) {
     double correctionDb = 0.0;
     const double frequencyHz =
-        pressureSampleFrequenciesHz()[static_cast<std::size_t>(sampleIndex)];
+        kfilterFrequencyGridHz()[static_cast<std::size_t>(sampleIndex)];
     if (!curve.interpolatedValueAt(frequencyHz, correctionDb) ||
         !std::isfinite(correctionDb)) {
       continue;
@@ -280,6 +265,33 @@ double KFilterDoc::splCorrectionAmplitudeFactor(int driverIndex, int sampleIndex
   }
 
   return cache->amplitudeFactor[static_cast<std::size_t>(sampleIndex)];
+}
+
+
+ActiveFilterChain& KFilterDoc::activeFilterChain(int driverIndex)
+{
+  return m_activeFilterChains.at(static_cast<std::size_t>(driverIndex));
+}
+
+const ActiveFilterChain& KFilterDoc::activeFilterChain(int driverIndex) const
+{
+  return m_activeFilterChains.at(static_cast<std::size_t>(driverIndex));
+}
+
+KFilterDoc::ActiveFilterChains& KFilterDoc::activeFilterChains()
+{
+  return m_activeFilterChains;
+}
+
+const KFilterDoc::ActiveFilterChains& KFilterDoc::activeFilterChains() const
+{
+  return m_activeFilterChains;
+}
+
+const ActiveFilterResponse& KFilterDoc::activeFilterResponse(int driverIndex) const
+{
+  const std::size_t index = static_cast<std::size_t>(driverIndex);
+  return m_activeFilterResponseCaches.at(index).responseFor(m_activeFilterChains.at(index));
 }
 
 void KFilterDoc::addView(KFilterView *view)
@@ -366,6 +378,9 @@ bool KFilterDoc::openDocument(const QUrl& url, const char *format /*=nullptr*/)
   }
 
   setURL(url);
+  // Active-filter data is intentionally not part of the .kfp format yet.
+  // A freshly loaded project must therefore start with neutral/default chains.
+  resetActiveFilterChains();
   markLoadedContentsReady();
   return true;
 }
@@ -405,8 +420,16 @@ void KFilterDoc::deleteContents()
   }
   m_measurementMergeEnabled = false;
   m_measurementHiddenForDrivers.fill(false);
+  resetActiveFilterChains();
   invalidateSplCorrectionCaches();
   modified = false;
+}
+
+void KFilterDoc::resetActiveFilterChains()
+{
+  for (ActiveFilterChain& chain : m_activeFilterChains) {
+    chain = ActiveFilterChain{};
+  }
 }
 
 void KFilterDoc::markLoadedContentsReady()
@@ -450,18 +473,53 @@ void KFilterDoc::initToolsWizard()
   // Qt6/KF6 bring-up.
 }
 
+std::complex<double> KFilterDoc::effectivePressureSample(
+    int driverIndex,
+    int sampleIndex,
+    const ActiveFilterResponse& activeFilter,
+    const SplCorrectionCache* correctionCache) const
+{
+  if (driverIndex < 0 || driverIndex >= 4 ||
+      sampleIndex < 0 || sampleIndex >= PressureSampleCount) {
+    return {};
+  }
+
+  const int resultIndex = sampleIndex * 2;
+  std::complex<double> sample{
+      m_driverDriver[driverIndex].ResultSchall[resultIndex],
+      m_driverDriver[driverIndex].ResultSchall[resultIndex + 1]};
+
+  // Patch 179: the active-filter stage is the first complex post-driver stage.
+  // Unsupported/invalid chains deliberately bypass here; the response status is
+  // surfaced in the Active Filter dialog rather than silently applying a
+  // partial chain.
+  sample = applyActiveFilterResponseSample(activeFilter,
+                                           static_cast<std::size_t>(sampleIndex),
+                                           sample);
+
+  // Measurement correction remains a real amplitude factor and is applied to
+  // the same effective complex sample used by the individual and summary paths.
+  if (correctionCache != nullptr && correctionCache->active) {
+    sample *= correctionCache->amplitudeFactor[static_cast<std::size_t>(sampleIndex)];
+  }
+
+  return sample;
+}
+
 bool KFilterDoc::Sound( int a_intIndex )
 {
   if (m_driverDriver[ a_intIndex ].PressureisActive )
   {
     m_driverDriver[ a_intIndex ].Schall();
-    int intJ = 0;
-    for (int intI = 0; intI < 300; intI = intI + 2 )
+    const ActiveFilterResponse& activeFilter = activeFilterResponse(a_intIndex);
+    const SplCorrectionCache* correctionCache = ensureSplCorrectionCache(a_intIndex);
+    for (int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex)
     {
-      m_doubleXContainer[ a_intIndex ][ intJ ] = DB( std::sqrt( std::pow( \
-        m_driverDriver[ a_intIndex ].ResultSchall[ intI ], 2.0 ) + \
-        std::pow( m_driverDriver[ a_intIndex ].ResultSchall[ intI + 1 ], 2.0 ) ) );
-      intJ++;
+      m_doubleXContainer[ a_intIndex ][ sampleIndex ] =
+          DB(std::abs(effectivePressureSample(a_intIndex,
+                                             sampleIndex,
+                                             activeFilter,
+                                             correctionCache)));
     }
   }
   return m_driverDriver[ a_intIndex ].PressureisActive;
@@ -486,48 +544,32 @@ bool KFilterDoc::Impedance( int a_intIndex )
 
 bool KFilterDoc::PressureSummary()
 {
-	/////////////////////////////init temp variable
-	double doubleSum[ 300 ];
-	for( int intZ = 0; intZ < 300; intZ++ )
-	{
-		doubleSum[ intZ ] = 0.0;
-	}
+	std::array<std::complex<double>, PressureSampleCount> complexSum{};
+
 	////////////////////////////// calculate vector summary for active drivers
 	for( int intIndex = 0; intIndex < 4; intIndex++ )
 	{
 		if ( m_driverDriver[ intIndex ].SummaryisActive )
 		{
 			m_driverDriver[ intIndex ].Schall();
+			const ActiveFilterResponse& activeFilter = activeFilterResponse(intIndex);
 			const SplCorrectionCache* correctionCache = ensureSplCorrectionCache(intIndex);
-			if (correctionCache == nullptr || !correctionCache->active)
-			{
-				for ( int resultIndex = 0; resultIndex < PressureSampleCount * 2; ++resultIndex )
-				{
-					doubleSum[ resultIndex ] +=
-						m_driverDriver[ intIndex ].ResultSchall[ resultIndex ];
-				}
-				continue;
-			}
-
 			for ( int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex )
 			{
-				const int resultIndex = sampleIndex * 2;
-				const double amplitudeFactor =
-					correctionCache->amplitudeFactor[static_cast<std::size_t>(sampleIndex)];
-				doubleSum[ resultIndex ] +=
-					m_driverDriver[ intIndex ].ResultSchall[ resultIndex ] * amplitudeFactor;
-				doubleSum[ resultIndex + 1 ] +=
-					m_driverDriver[ intIndex ].ResultSchall[ resultIndex + 1 ] * amplitudeFactor;
+				complexSum[static_cast<std::size_t>(sampleIndex)] +=
+					effectivePressureSample(intIndex,
+					                        sampleIndex,
+					                        activeFilter,
+					                        correctionCache);
 			}
 		}
 	}
+
 	////////////////////////////// vector summary becomes real summary
-	int intZ = 0;
-	for (int intI = 0; intI < 300; intI = intI + 2 )
+	for (int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex )
 	{
-		m_doubleXContainer[ 0 ][ intZ ] = DB( std::sqrt( std::pow( doubleSum[ intI ], 2.0 ) + \
-			std::pow( doubleSum[ intI + 1 ], 2.0 ) ) );
-		intZ++;
+		m_doubleXContainer[ 0 ][ sampleIndex ] =
+			DB(std::abs(complexSum[static_cast<std::size_t>(sampleIndex)]));
 	}
 	///////////////////////////////
 	return ( m_driverDriver[ 0 ].SummaryisActive || m_driverDriver[ 1 ].SummaryisActive || \
@@ -547,32 +589,16 @@ bool KFilterDoc::PressureScalarSummary()
 		if ( m_driverDriver[ intIndex ].ScalarSummaryisActive )
 		{
 			m_driverDriver[ intIndex ].Schall();
+			const ActiveFilterResponse& activeFilter = activeFilterResponse(intIndex);
 			const SplCorrectionCache* correctionCache = ensureSplCorrectionCache(intIndex);
-			if (correctionCache == nullptr || !correctionCache->active)
-			{
-				for ( int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex )
-				{
-					const int resultIndex = sampleIndex * 2;
-					m_doubleXContainer[ 0 ][ sampleIndex ] +=
-						std::pow( m_driverDriver[ intIndex ].ResultSchall[ resultIndex ], 2.0 ) +
-						std::pow( m_driverDriver[ intIndex ].ResultSchall[ resultIndex + 1 ], 2.0 );
-				}
-				continue;
-			}
-
 			for ( int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex )
 			{
-				//		turbo pascal version			dB0-round(	ln(std::sqrt(sqr(qx1)+sqr(qy1)+sqr(qx2)+sqr(qy2)+sqr(qx3)+sqr(qy3))	)
-				//  	old C version 				m_doubleXContainer[0][j] = m_doubleXContainer[0][j] + std::sqrt(std::pow(m_driverDriver[index].ResultSchall[i],2.0)+std::pow(m_driverDriver[index].ResultSchall[i+1],2.0));
-				const int resultIndex = sampleIndex * 2;
-				const double amplitudeFactor =
-					correctionCache->amplitudeFactor[static_cast<std::size_t>(sampleIndex)];
-				const double correctedReal =
-					m_driverDriver[ intIndex ].ResultSchall[ resultIndex ] * amplitudeFactor;
-				const double correctedImaginary =
-					m_driverDriver[ intIndex ].ResultSchall[ resultIndex + 1 ] * amplitudeFactor;
-				m_doubleXContainer[ 0 ][ sampleIndex ] +=
-					std::pow( correctedReal, 2.0 ) + std::pow( correctedImaginary, 2.0 );
+				const std::complex<double> sample =
+					effectivePressureSample(intIndex,
+					                        sampleIndex,
+					                        activeFilter,
+					                        correctionCache);
+				m_doubleXContainer[ 0 ][ sampleIndex ] += std::norm(sample);
 			}
 		}
 	}

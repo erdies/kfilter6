@@ -14,6 +14,7 @@
 #include <QKeyEvent>
 #include <QKeySequence>
 #include <QLineF>
+#include <QList>
 #include <QMouseEvent>
 #include <QPaintEvent>
 #include <QPainter>
@@ -28,6 +29,20 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+
+
+namespace
+{
+QPen activeFilterResponsePen(const QColor& color)
+{
+    QPen pen(color);
+    pen.setWidth(2);
+    pen.setStyle(Qt::CustomDashLine);
+    pen.setDashPattern(QList<qreal>{9.0, 4.0});
+    pen.setCapStyle(Qt::FlatCap);
+    return pen;
+}
+}
 
 KFilterView::KFilterView(KFilterDoc *document, QWidget *parent)
     : QWidget(parent),
@@ -323,15 +338,6 @@ bool KFilterView::measurementMergeAppliedForDriver(int driverIndex) const
            m_document->splCorrectionCurve(driverIndex).size() >= 2;
 }
 
-double KFilterView::effectivePressureDb(int driverIndex, int sampleIndex, double simulatedDb) const
-{
-    if (m_document == nullptr || !std::isfinite(simulatedDb)) {
-        return simulatedDb;
-    }
-
-    return simulatedDb + m_document->splCorrectionDb(driverIndex, sampleIndex);
-}
-
 void KFilterView::initXvalue()
 {
     Xvalue[0] = Start;
@@ -368,7 +374,7 @@ int KFilterView::YScale(double value, int flag) const
     return static_cast<int>(h / 6.0 - value * h / 60.0);
 }
 
-KFilterView::CurveLabelAnchor KFilterView::findLastVisibleCurvePoint(const double values[200], int type, int driverIndex) const
+KFilterView::CurveLabelAnchor KFilterView::findLastVisibleCurvePoint(const double values[200], int type) const
 {
     const QRectF visibleRect = QRectF(rect()).adjusted(1.0, 1.0, -1.0, -1.0);
     if (!visibleRect.isValid()) {
@@ -377,18 +383,11 @@ KFilterView::CurveLabelAnchor KFilterView::findLastVisibleCurvePoint(const doubl
 
     QPointF points[150];
     bool valid[150] = {};
-    const bool applyCorrection =
-        type == 0 && driverIndex >= 0 && m_document != nullptr &&
-        m_document->splCorrectionActiveForDriver(driverIndex);
     for (int i = 0; i < 150; i++) {
         if (!std::isfinite(values[i])) {
             continue;
         }
-        double value = values[i];
-        if (applyCorrection) {
-            value = effectivePressureDb(driverIndex, i, value);
-        }
-        points[i] = QPointF(XK(Xvalue[i]), YScale(value, type));
+        points[i] = QPointF(XK(Xvalue[i]), YScale(values[i], type));
         valid[i] = true;
     }
 
@@ -452,23 +451,57 @@ void KFilterView::drawCurve(QPainter& painter, const double values[200], int typ
     }
 }
 
-void KFilterView::drawDriverPressureCurve(QPainter& painter, const double values[200], int driverIndex)
+void KFilterView::drawDriverPressureCurve(QPainter& painter, const double values[200])
 {
-    if (m_document == nullptr || !m_document->splCorrectionActiveForDriver(driverIndex)) {
-        drawCurve(painter, values, 0);
+    // KFilterDoc::Sound() already exposes the effective driver magnitude,
+    // including active-filter and measurement stages. The view must not apply
+    // either transfer function a second time.
+    drawCurve(painter, values, 0);
+}
+
+
+void KFilterView::drawActiveFilterResponses(QPainter& painter)
+{
+    if (m_document == nullptr) {
         return;
     }
 
-    QPoint lastPoint(
-        XK(Xvalue[0]),
-        YScale(effectivePressureDb(driverIndex, 0, values[0]), 0));
-    for (int i = 1; i < 150; i++) {
-        const QPoint nextPoint(
-            XK(Xvalue[i]),
-            YScale(effectivePressureDb(driverIndex, i, values[i]), 0));
-        painter.drawLine(lastPoint, nextPoint);
-        lastPoint = nextPoint;
+    const KFilterFrequencyGrid& frequencies = kfilterFrequencyGridHz();
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    for (int driverIndex = 0; driverIndex < 4; ++driverIndex) {
+        const ActiveFilterChain& chain = m_document->activeFilterChain(driverIndex);
+        if (!chain.enabled() || !chain.showResponseInPlot()) {
+            continue;
+        }
+
+        const ActiveFilterResponse& response = m_document->activeFilterResponse(driverIndex);
+        if (!response.plottable()) {
+            continue;
+        }
+
+        painter.setPen(activeFilterResponsePen(pressureCurveColor(driverIndex)));
+        bool haveLastPoint = false;
+        QPointF lastPoint;
+        for (std::size_t sampleIndex = 0; sampleIndex < KFilterFrequencyCount; ++sampleIndex) {
+            const double magnitude = std::abs(response.values[sampleIndex]);
+            if (!std::isfinite(magnitude) || magnitude <= 0.0) {
+                haveLastPoint = false;
+                continue;
+            }
+
+            const double valueDb = 20.0 * std::log10(magnitude);
+            const QPointF point(frequencyHzToX(frequencies[sampleIndex]), pressureDbToY(valueDb));
+            if (haveLastPoint) {
+                painter.drawLine(lastPoint, point);
+            }
+            lastPoint = point;
+            haveLastPoint = true;
+        }
     }
+
+    painter.restore();
 }
 
 void KFilterView::drawCurveLabel(QPainter& painter, const QPointF& point, const QString& label) const
@@ -514,7 +547,7 @@ void KFilterView::drawDriverCurveLabels(QPainter& painter)
             continue;
         }
 
-        CurveLabelAnchor anchor = findLastVisibleCurvePoint(mydoc->m_doubleXContainer[count], 0, count);
+        CurveLabelAnchor anchor = findLastVisibleCurvePoint(mydoc->m_doubleXContainer[count], 0);
         if (!anchor.valid) {
             continue;
         }
@@ -636,15 +669,19 @@ void KFilterView::drawLegend(QPainter& painter)
     const int lineWidth = 34;
     const int rowHeight = 16;
 
-    auto drawEntry = [&](const QColor& color, Qt::PenStyle style, int width, const QString& label) {
-        QPen pen(color);
-        pen.setStyle(style);
-        pen.setWidth(width);
-        painter.setPen(pen);
+    auto drawPenEntry = [&](const QPen& entryPen, const QString& label) {
+        painter.setPen(entryPen);
         painter.drawLine(left, y - 4, left + lineWidth, y - 4);
         painter.setPen(QPen(foregroundTextColor()));
         painter.drawText(left + lineWidth + 8, y, label);
         y += rowHeight;
+    };
+
+    auto drawEntry = [&](const QColor& color, Qt::PenStyle style, int width, const QString& label) {
+        QPen entryPen(color);
+        entryPen.setStyle(style);
+        entryPen.setWidth(width);
+        drawPenEntry(entryPen, label);
     };
 
     for (int driverIndex = 0; driverIndex < 4; ++driverIndex) {
@@ -676,6 +713,19 @@ void KFilterView::drawLegend(QPainter& painter)
                       Qt::DashLine,
                       2,
                       tr("Driver %1 SPL correction").arg(driverIndex + 1));
+        }
+    }
+
+
+    for (int driverIndex = 0; driverIndex < 4; ++driverIndex) {
+        const ActiveFilterChain& chain = m_document->activeFilterChain(driverIndex);
+        if (!chain.enabled() || !chain.showResponseInPlot()) {
+            continue;
+        }
+        const ActiveFilterResponse& response = m_document->activeFilterResponse(driverIndex);
+        if (response.plottable()) {
+            drawPenEntry(activeFilterResponsePen(pressureCurveColor(driverIndex)),
+                         tr("Driver %1 active filter").arg(driverIndex + 1));
         }
     }
 
@@ -838,7 +888,7 @@ void KFilterView::paintEvent(QPaintEvent *event)
                 pen.setStyle(Qt::SolidLine);
                 pen.setWidth(1);
                 mypainter.setPen(pen);
-                drawDriverPressureCurve(mypainter, mydoc->m_doubleXContainer[count], count);
+                drawDriverPressureCurve(mypainter, mydoc->m_doubleXContainer[count]);
             }
             if (mydoc->Impedance(count)) {
                 pen.setColor(impedanceCurveColor(count));
@@ -874,6 +924,7 @@ void KFilterView::paintEvent(QPaintEvent *event)
         }
     }
 
+    drawActiveFilterResponses(mypainter);
     drawMeasurementCurves(mypainter);
 
     pen.setColor(foregroundTextColor());

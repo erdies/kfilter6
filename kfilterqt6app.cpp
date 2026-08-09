@@ -6,6 +6,7 @@
 
 #include "kfilterqt6app.h"
 
+#include "activefilterparametersdialog.h"
 #include "circuitout.h"
 #include "correctioncurveexport.h"
 #include "driver.h"
@@ -593,6 +594,10 @@ void KFilterQt6App::createActions()
     m_networkParametersAction = new QAction(tr("&Network / Filter Parameters..."), this);
     connect(m_networkParametersAction, &QAction::triggered, this, &KFilterQt6App::editNetworkParameters);
 
+    m_activeFilterParametersAction = new QAction(tr("&Active Filter Parameters..."), this);
+    connect(m_activeFilterParametersAction, &QAction::triggered,
+            this, &KFilterQt6App::editActiveFilterParameters);
+
     m_showFileToolBarAction = new QAction(tr("Show &File Toolbar"), this);
     m_showFileToolBarAction->setCheckable(true);
     m_showFileToolBarAction->setChecked(true);
@@ -726,6 +731,7 @@ void KFilterQt6App::createMenusAndToolBar()
     QMenu *editMenu = menuBar()->addMenu(tr("&Edit"));
     editMenu->addAction(m_driverParametersAction);
     editMenu->addAction(m_networkParametersAction);
+    editMenu->addAction(m_activeFilterParametersAction);
 
     QMenu *measurementMenu = menuBar()->addMenu(tr("&Measurements"));
     QMenu *importMeasurementMenu = measurementMenu->addMenu(tr("&Import Measurement for Driver"));
@@ -811,6 +817,7 @@ void KFilterQt6App::createMenusAndToolBar()
     m_editToolBar->setObjectName(QStringLiteral("editToolBar"));
     m_editToolBar->addAction(m_driverParametersAction);
     m_editToolBar->addAction(m_networkParametersAction);
+    m_editToolBar->addAction(m_activeFilterParametersAction);
 }
 
 
@@ -2360,6 +2367,9 @@ void KFilterQt6App::updateActionState()
     if (m_networkParametersAction != nullptr) {
         m_networkParametersAction->setEnabled(!locked);
     }
+    if (m_activeFilterParametersAction != nullptr) {
+        m_activeFilterParametersAction->setEnabled(!locked);
+    }
     if (m_quitAction != nullptr) {
         m_quitAction->setEnabled(!locked);
     }
@@ -2576,4 +2586,26 @@ void KFilterQt6App::editNetworkParameters()
 
     dialog.exec();
     m_lastNetworkParametersDriverIndex = dialog.currentDriverIndex();
+}
+
+void KFilterQt6App::editActiveFilterParameters()
+{
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
+    ActiveFilterParametersDialog dialog(m_doc->activeFilterChains(),
+                                        this,
+                                        m_lastActiveFilterDriverIndex);
+    connect(&dialog, &ActiveFilterParametersDialog::parametersPreviewChanged, this, [this]() {
+        m_doc->viewrefresh();
+    });
+    connect(&dialog, &ActiveFilterParametersDialog::parametersApplied, this, [this]() {
+        m_doc->viewrefresh();
+        statusBar()->showMessage(
+            tr("Active-filter model applied in memory; supported Butterworth filters now affect the simulation (.kfp persistence is still unchanged)."),
+            4000);
+    });
+    dialog.exec();
+    m_lastActiveFilterDriverIndex = dialog.currentDriverIndex();
 }

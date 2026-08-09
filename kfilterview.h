@@ -167,9 +167,10 @@ private:
         bool valid = false;
     };
 
-    CurveLabelAnchor findLastVisibleCurvePoint(const double values[200], int type, int driverIndex = -1) const;
+    CurveLabelAnchor findLastVisibleCurvePoint(const double values[200], int type) const;
     void drawCurve(QPainter& painter, const double values[200], int type);
-    void drawDriverPressureCurve(QPainter& painter, const double values[200], int driverIndex);
+    void drawDriverPressureCurve(QPainter& painter, const double values[200]);
+    void drawActiveFilterResponses(QPainter& painter);
     void drawCurveLabel(QPainter& painter, const QPointF& point, const QString& label) const;
     void drawDriverCurveLabels(QPainter& painter);
     void drawMeasurementCurves(QPainter& painter);
@@ -178,7 +179,6 @@ private:
     QString measurementDriverLabel(int driverIndex) const;
     QString measurementPointerText(const QPointF& position) const;
     bool measurementMergeAppliedForDriver(int driverIndex) const;
-    double effectivePressureDb(int driverIndex, int sampleIndex, double simulatedDb) const;
     void endMeasurementDrawing();
 };
 

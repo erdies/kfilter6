@@ -14,6 +14,7 @@
 #include <QUrl>
 
 #include <cmath>
+#include <complex>
 #include <cstddef>
 
 namespace
@@ -403,6 +404,151 @@ bool checkMeasurementSummaryMerge()
     return true;
 }
 
+bool checkActiveFilterSimulationIntegration()
+{
+    constexpr std::size_t TestSampleIndex = 75;
+    const double cutoffHz = kfilterFrequencyGridHz()[TestSampleIndex];
+    const double cutoffDb = 20.0 * std::log10(1.0 / std::sqrt(2.0));
+
+    KFilterDoc document;
+    driver& d = document.m_driverDriver[0];
+    d.PressureisActive = true;
+
+    if (!document.Sound(0)) {
+        QTextStream(stderr) << "Active-filter single-driver baseline could not be calculated\n";
+        return false;
+    }
+    const double baselineDb = document.m_doubleXContainer[0][TestSampleIndex];
+
+    ActiveFilterChain& chain = document.activeFilterChain(0);
+    chain.setEnabled(true);
+    chain.setShowResponseInPlot(false); // visualization must not gate simulation
+    chain.addSection(ActiveFilterType::LowPass);
+    auto& lowPass = std::get<ActiveFilterLowPassParameters>(chain.section(0).parameters());
+    lowPass.characteristic = ActiveFilterCharacteristic::Butterworth;
+    lowPass.order = 1;
+    lowPass.frequencyHz = cutoffHz;
+
+    if (document.activeFilterResponse(0).status != ActiveFilterResponseStatus::Valid ||
+        !document.Sound(0) ||
+        !expectNear("Single-driver active-filter magnitude",
+                    document.m_doubleXContainer[0][TestSampleIndex] - baselineDb,
+                    cutoffDb,
+                    1.0e-5)) {
+        return false;
+    }
+    const double filteredDb = document.m_doubleXContainer[0][TestSampleIndex];
+
+    constexpr double MeasurementCorrectionDb = 6.0;
+    KFilterMeasurementCurve& curve = document.splCorrectionCurve(0);
+    curve.appendPoint(20.0, MeasurementCorrectionDb);
+    curve.appendPoint(20000.0, MeasurementCorrectionDb);
+    document.setMeasurementMergeEnabled(true);
+    document.Sound(0);
+    if (!expectNear("Active-filter plus measurement single-driver path",
+                    document.m_doubleXContainer[0][TestSampleIndex] - filteredDb,
+                    MeasurementCorrectionDb,
+                    1.0e-5)) {
+        return false;
+    }
+    const double effectiveSingleDb = document.m_doubleXContainer[0][TestSampleIndex];
+
+    document.setMeasurementHiddenForDriver(0, true);
+    document.Sound(0);
+    if (!expectNear("Hide Measurement preserves active-filter effect",
+                    document.m_doubleXContainer[0][TestSampleIndex],
+                    filteredDb,
+                    1.0e-5)) {
+        return false;
+    }
+    document.setMeasurementHiddenForDriver(0, false);
+    document.Sound(0);
+
+    d.SummaryisActive = true;
+    d.ScalarSummaryisActive = true;
+    document.PressureSummary();
+    if (!expectNear("Single-driver vector summary uses effective response",
+                    document.m_doubleXContainer[0][TestSampleIndex],
+                    effectiveSingleDb,
+                    1.0e-5)) {
+        return false;
+    }
+    document.PressureScalarSummary();
+    if (!expectNear("Single-driver energy summary uses effective response",
+                    document.m_doubleXContainer[0][TestSampleIndex],
+                    effectiveSingleDb,
+                    1.0e-5)) {
+        return false;
+    }
+
+    // Two identical drivers make the filter phase observable in the vector sum.
+    // At fc an LP1 is 0.5 - 0.5j. Together with an unfiltered identical driver
+    // the vector magnitude is sqrt(2.5) times one raw driver, while the energy
+    // sum is sqrt(1.5) times one raw driver.
+    KFilterDoc phaseDocument;
+    driver& filteredDriver = phaseDocument.m_driverDriver[0];
+    driver& rawDriver = phaseDocument.m_driverDriver[1];
+    filteredDriver.SummaryisActive = true;
+    rawDriver.SummaryisActive = true;
+    filteredDriver.ScalarSummaryisActive = true;
+    rawDriver.ScalarSummaryisActive = true;
+
+    rawDriver.Schall();
+    const int resultIndex = static_cast<int>(TestSampleIndex) * 2;
+    const double rawMagnitude = std::hypot(rawDriver.ResultSchall[resultIndex],
+                                           rawDriver.ResultSchall[resultIndex + 1]);
+
+    ActiveFilterChain& phaseChain = phaseDocument.activeFilterChain(0);
+    phaseChain.setEnabled(true);
+    phaseChain.addSection(ActiveFilterType::LowPass);
+    auto& phaseLowPass = std::get<ActiveFilterLowPassParameters>(phaseChain.section(0).parameters());
+    phaseLowPass.order = 1;
+    phaseLowPass.frequencyHz = cutoffHz;
+
+    phaseDocument.PressureSummary();
+    if (!expectNear("Active-filter phase in vector summary",
+                    phaseDocument.m_doubleXContainer[0][TestSampleIndex],
+                    phaseDocument.DB(rawMagnitude * std::sqrt(2.5)),
+                    1.0e-5)) {
+        return false;
+    }
+
+    phaseDocument.PressureScalarSummary();
+    if (!expectNear("Active-filter magnitude in energy summary",
+                    phaseDocument.m_doubleXContainer[0][TestSampleIndex],
+                    phaseDocument.DB(rawMagnitude * std::sqrt(1.5)),
+                    1.0e-5)) {
+        return false;
+    }
+
+    // Unsupported chains must bypass the complete active-filter stage instead
+    // of applying only the supported prefix or propagating NaNs into the plot.
+    KFilterDoc unsupportedDocument;
+    unsupportedDocument.m_driverDriver[0].PressureisActive = true;
+    unsupportedDocument.Sound(0);
+    const double unsupportedBaseline =
+        unsupportedDocument.m_doubleXContainer[0][TestSampleIndex];
+    ActiveFilterChain& unsupportedChain = unsupportedDocument.activeFilterChain(0);
+    unsupportedChain.setEnabled(true);
+    unsupportedChain.addSection(ActiveFilterType::LowPass);
+    std::get<ActiveFilterLowPassParameters>(unsupportedChain.section(0).parameters()).characteristic =
+        ActiveFilterCharacteristic::Bessel;
+    if (unsupportedDocument.activeFilterResponse(0).status !=
+            ActiveFilterResponseStatus::Unsupported) {
+        QTextStream(stderr) << "Unsupported active-filter chain was not reported\n";
+        return false;
+    }
+    unsupportedDocument.Sound(0);
+    if (!expectNear("Unsupported active-filter chain bypass",
+                    unsupportedDocument.m_doubleXContainer[0][TestSampleIndex],
+                    unsupportedBaseline,
+                    1.0e-6)) {
+        return false;
+    }
+
+    return true;
+}
+
 bool checkSelectiveMeasurementClearing()
 {
     KFilterDoc document;
@@ -592,6 +738,7 @@ int main(int argc, char** argv)
         !checkCorrectionFastPaths() ||
         !checkCorrectionCacheInvalidation() ||
         !checkMeasurementSummaryMerge() ||
+        !checkActiveFilterSimulationIntegration() ||
         !checkSelectiveMeasurementClearing() ||
         !checkSelectiveMeasurementSums()) {
         return 1;
@@ -613,6 +760,30 @@ int main(int argc, char** argv)
     original.setMeasurementMergeEnabled(true);
     original.setMeasurementHiddenForDriver(0, true);
 
+    // Patch 175: active filters are document-resident in memory, but intentionally
+    // not part of the .kfp format yet.
+    original.activeFilterChain(1).setEnabled(true);
+    original.activeFilterChain(1).addSection(ActiveFilterType::Gain);
+    std::get<ActiveFilterGainParameters>(original.activeFilterChain(1).section(0).parameters()).gainDb = -3.0;
+
+
+    // The document exposes the same cached complex response for diagnostic
+    // plotting and for the supported simulation path.
+    original.activeFilterChain(2).setEnabled(true);
+    original.activeFilterChain(2).setShowResponseInPlot(true);
+    original.activeFilterChain(2).addSection(ActiveFilterType::LowPass);
+    auto& diagnosticLowPass = std::get<ActiveFilterLowPassParameters>(
+        original.activeFilterChain(2).section(0).parameters());
+    diagnosticLowPass.characteristic = ActiveFilterCharacteristic::Butterworth;
+    diagnosticLowPass.order = 2;
+    diagnosticLowPass.frequencyHz = kfilterFrequencyGridHz()[75];
+    const ActiveFilterResponse& diagnosticResponse = original.activeFilterResponse(2);
+    if (!diagnosticResponse.plottable() ||
+        !fuzzyEqual(std::abs(diagnosticResponse.values[75]), 1.0 / std::sqrt(2.0))) {
+        QTextStream(stderr) << "Document active-filter diagnostic response is invalid\n";
+        return 1;
+    }
+
     const QString filePath = QDir::temp().filePath(QStringLiteral("kfilter_doc_smoketest.kfp"));
     const QUrl fileUrl = QUrl::fromLocalFile(filePath);
 
@@ -625,8 +796,16 @@ int main(int argc, char** argv)
         QTextStream(stderr) << "KFilterDoc should not be modified after saveDocument\n";
         return 1;
     }
+    if (!original.activeFilterChain(1).enabled() || original.activeFilterChain(1).sectionCount() != 1 ||
+        !original.activeFilterChain(2).enabled() || original.activeFilterChain(2).sectionCount() != 1 ||
+        !original.activeFilterChain(2).showResponseInPlot()) {
+        QTextStream(stderr) << "saveDocument unexpectedly changed the in-memory active-filter model\n";
+        return 1;
+    }
 
     KFilterDoc loaded;
+    loaded.activeFilterChain(0).setEnabled(true);
+    loaded.activeFilterChain(0).addSection(ActiveFilterType::Delay);
     QObject::connect(&loaded, &KFilterDoc::forceviewrefresh, [&refreshCount]() {
         ++refreshCount;
     });
@@ -662,6 +841,15 @@ int main(int argc, char** argv)
         }
     }
 
+    for (int driverIndex = 0; driverIndex < KFilterProjectIo::DriverCount; ++driverIndex) {
+        if (loaded.activeFilterChain(driverIndex).enabled() ||
+            !loaded.activeFilterChain(driverIndex).empty()) {
+            QTextStream(stderr) << "Loading .kfp did not reset non-persisted active-filter state for driver "
+                                << (driverIndex + 1) << '\n';
+            return 1;
+        }
+    }
+
     if (!loaded.measurementMergeEnabled() ||
         !loaded.measurementHiddenForDriver(0) ||
         loaded.measurementHiddenForDriver(3)) {
@@ -675,14 +863,17 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    loaded.activeFilterChain(3).setEnabled(true);
+    loaded.activeFilterChain(3).addSection(ActiveFilterType::Notch);
     loaded.newDocument();
     if (loaded.hasMeasurementCurves() || loaded.measurementMergeEnabled() ||
-        loaded.measurementHiddenForDriver(0) || loaded.measurementHiddenForDriver(3)) {
-        QTextStream(stderr) << "New document did not clear persisted measurement state\n";
+        loaded.measurementHiddenForDriver(0) || loaded.measurementHiddenForDriver(3) ||
+        loaded.activeFilterChain(3).enabled() || !loaded.activeFilterChain(3).empty()) {
+        QTextStream(stderr) << "New document did not clear measurement/active-filter state\n";
         return 1;
     }
 
     QFile::remove(filePath);
-    QTextStream(stdout) << "KFilterDoc document and measurement persistence smoke test passed\n";
+    QTextStream(stdout) << "KFilterDoc document, measurement persistence, and active-filter reset smoke test passed\n";
     return 0;
 }

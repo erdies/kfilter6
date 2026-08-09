@@ -65,6 +65,7 @@ private slots:
     void editDriverParameters();
     void editDriverParametersFromPreview(int driverIndex);
     void editNetworkParameters();
+    void editActiveFilterParameters();
     void refreshCircuitPreview();
     void showAboutDialog();
     void resetWindowLayout();
@@ -139,6 +140,7 @@ private:
     int m_circuitPreviewDriverIndex = CircuitPreviewDriverActionCount;
     int m_lastDriverParametersDriverIndex = 0;
     int m_lastNetworkParametersDriverIndex = 0;
+    int m_lastActiveFilterDriverIndex = 0;
     QSplitter *m_mainSplitter = nullptr;
     QToolBar *m_fileToolBar = nullptr;
     QToolBar *m_editToolBar = nullptr;
@@ -154,6 +156,7 @@ private:
     QAction *m_quitAction = nullptr;
     QAction *m_driverParametersAction = nullptr;
     QAction *m_networkParametersAction = nullptr;
+    QAction *m_activeFilterParametersAction = nullptr;
     QAction *m_showFileToolBarAction = nullptr;
     QAction *m_showEditToolBarAction = nullptr;
     QAction *m_showStatusBarAction = nullptr;
