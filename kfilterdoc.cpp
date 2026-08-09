@@ -372,15 +372,13 @@ bool KFilterDoc::openDocument(const QUrl& url, const char *format /*=nullptr*/)
                                       m_splCorrectionCurves,
                                       m_measurementMergeEnabled,
                                       m_measurementHiddenForDrivers,
+                                      m_activeFilterChains,
                                       &errorMessage)) {
     qWarning().noquote() << errorMessage;
     return false;
   }
 
   setURL(url);
-  // Active-filter data is intentionally not part of the .kfp format yet.
-  // A freshly loaded project must therefore start with neutral/default chains.
-  resetActiveFilterChains();
   markLoadedContentsReady();
   return true;
 }
@@ -401,6 +399,7 @@ bool KFilterDoc::saveDocument(const QUrl& url, const char *format /*=nullptr*/)
                                     m_splCorrectionCurves,
                                     m_measurementMergeEnabled,
                                     m_measurementHiddenForDrivers,
+                                    m_activeFilterChains,
                                     &errorMessage)) {
     qWarning().noquote() << errorMessage;
     return false;

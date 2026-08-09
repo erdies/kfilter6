@@ -163,6 +163,154 @@ bool compareMeasurementHiddenStates(
     return true;
 }
 
+void populateActiveFilters(KFilterProjectIo::ActiveFilterChains& chains)
+{
+    ActiveFilterChain& first = chains[0];
+    first.setEnabled(true);
+    first.setShowResponseInPlot(true);
+    first.addSection(ActiveFilterType::LowPass);
+    auto& lowPass = std::get<ActiveFilterLowPassParameters>(first.section(0).parameters());
+    lowPass.characteristic = ActiveFilterCharacteristic::LinkwitzRiley;
+    lowPass.order = 4;
+    lowPass.frequencyHz = 2350.5;
+    lowPass.q = 0.8123;
+    first.addSection(ActiveFilterType::BandPass);
+    first.section(1).setEnabled(false);
+    auto& bandPass = std::get<ActiveFilterBandPassParameters>(first.section(1).parameters());
+    bandPass.characteristic = ActiveFilterCharacteristic::Bessel;
+    bandPass.order = 3;
+    bandPass.lowerFrequencyHz = 450.25;
+    bandPass.upperFrequencyHz = 3450.75;
+    bandPass.q = 1.2345;
+
+    ActiveFilterChain& second = chains[1];
+    second.setEnabled(true);
+    second.addSection(ActiveFilterType::HighPass);
+    auto& highPass = std::get<ActiveFilterHighPassParameters>(second.section(0).parameters());
+    highPass.characteristic = ActiveFilterCharacteristic::Butterworth;
+    highPass.order = 7;
+    highPass.frequencyHz = 87.125;
+    highPass.q = 0.6543;
+    second.addSection(ActiveFilterType::Notch);
+    auto& notch = std::get<ActiveFilterNotchParameters>(second.section(1).parameters());
+    notch.centerFrequencyHz = 1234.5;
+    notch.q = 4.25;
+    notch.gainDb = -8.75;
+
+    ActiveFilterChain& third = chains[2];
+    third.setShowResponseInPlot(true);
+    third.addSection(ActiveFilterType::AllPass);
+    auto& allPass = std::get<ActiveFilterAllPassParameters>(third.section(0).parameters());
+    allPass.order = 2;
+    allPass.frequencyHz = 765.5;
+    allPass.q = 0.5432;
+    third.addSection(ActiveFilterType::Gain);
+    std::get<ActiveFilterGainParameters>(third.section(1).parameters()).gainDb = -3.125;
+    third.addSection(ActiveFilterType::Delay);
+    std::get<ActiveFilterDelayParameters>(third.section(2).parameters()).delayMs = 0.375;
+    third.addSection(ActiveFilterType::Polarity);
+    std::get<ActiveFilterPolarityParameters>(third.section(3).parameters()).inverted = true;
+
+    ActiveFilterChain& fourth = chains[3];
+    fourth.setEnabled(true);
+    fourth.addSection(ActiveFilterType::HighPass);
+    auto& genericHighPass = std::get<ActiveFilterHighPassParameters>(fourth.section(0).parameters());
+    genericHighPass.characteristic = ActiveFilterCharacteristic::GenericQ;
+    genericHighPass.order = 2;
+    genericHighPass.frequencyHz = 31.75;
+    genericHighPass.q = 0.91;
+}
+
+bool compareActiveFilterSections(const ActiveFilterSection& expected,
+                                 const ActiveFilterSection& actual)
+{
+    if (expected.enabled() != actual.enabled() || expected.type() != actual.type()) {
+        return false;
+    }
+
+    switch (expected.type()) {
+    case ActiveFilterType::LowPass: {
+        const auto& left = std::get<ActiveFilterLowPassParameters>(expected.parameters());
+        const auto& right = std::get<ActiveFilterLowPassParameters>(actual.parameters());
+        return left.characteristic == right.characteristic && left.order == right.order &&
+               fuzzyEqual(left.frequencyHz, right.frequencyHz) && fuzzyEqual(left.q, right.q);
+    }
+    case ActiveFilterType::HighPass: {
+        const auto& left = std::get<ActiveFilterHighPassParameters>(expected.parameters());
+        const auto& right = std::get<ActiveFilterHighPassParameters>(actual.parameters());
+        return left.characteristic == right.characteristic && left.order == right.order &&
+               fuzzyEqual(left.frequencyHz, right.frequencyHz) && fuzzyEqual(left.q, right.q);
+    }
+    case ActiveFilterType::BandPass: {
+        const auto& left = std::get<ActiveFilterBandPassParameters>(expected.parameters());
+        const auto& right = std::get<ActiveFilterBandPassParameters>(actual.parameters());
+        return left.characteristic == right.characteristic && left.order == right.order &&
+               fuzzyEqual(left.lowerFrequencyHz, right.lowerFrequencyHz) &&
+               fuzzyEqual(left.upperFrequencyHz, right.upperFrequencyHz) &&
+               fuzzyEqual(left.q, right.q);
+    }
+    case ActiveFilterType::Notch: {
+        const auto& left = std::get<ActiveFilterNotchParameters>(expected.parameters());
+        const auto& right = std::get<ActiveFilterNotchParameters>(actual.parameters());
+        return fuzzyEqual(left.centerFrequencyHz, right.centerFrequencyHz) &&
+               fuzzyEqual(left.q, right.q) && fuzzyEqual(left.gainDb, right.gainDb);
+    }
+    case ActiveFilterType::AllPass: {
+        const auto& left = std::get<ActiveFilterAllPassParameters>(expected.parameters());
+        const auto& right = std::get<ActiveFilterAllPassParameters>(actual.parameters());
+        return left.order == right.order && fuzzyEqual(left.frequencyHz, right.frequencyHz) &&
+               fuzzyEqual(left.q, right.q);
+    }
+    case ActiveFilterType::Gain:
+        return fuzzyEqual(std::get<ActiveFilterGainParameters>(expected.parameters()).gainDb,
+                          std::get<ActiveFilterGainParameters>(actual.parameters()).gainDb);
+    case ActiveFilterType::Delay:
+        return fuzzyEqual(std::get<ActiveFilterDelayParameters>(expected.parameters()).delayMs,
+                          std::get<ActiveFilterDelayParameters>(actual.parameters()).delayMs);
+    case ActiveFilterType::Polarity:
+        return std::get<ActiveFilterPolarityParameters>(expected.parameters()).inverted ==
+               std::get<ActiveFilterPolarityParameters>(actual.parameters()).inverted;
+    }
+
+    return false;
+}
+
+bool compareActiveFilters(const KFilterProjectIo::ActiveFilterChains& expected,
+                          const KFilterProjectIo::ActiveFilterChains& actual,
+                          QString& error)
+{
+    for (int driverIndex = 0; driverIndex < KFilterProjectIo::DriverCount; ++driverIndex) {
+        const std::size_t index = static_cast<std::size_t>(driverIndex);
+        const ActiveFilterChain& expectedChain = expected[index];
+        const ActiveFilterChain& actualChain = actual[index];
+        if (expectedChain.enabled() != actualChain.enabled() ||
+            expectedChain.showResponseInPlot() != actualChain.showResponseInPlot() ||
+            expectedChain.sectionCount() != actualChain.sectionCount()) {
+            error = QStringLiteral("Active-filter chain metadata mismatch for driver %1")
+                        .arg(driverIndex + 1);
+            return false;
+        }
+
+        for (std::size_t sectionIndex = 0; sectionIndex < expectedChain.sectionCount(); ++sectionIndex) {
+            if (!compareActiveFilterSections(expectedChain.section(sectionIndex),
+                                             actualChain.section(sectionIndex))) {
+                error = QStringLiteral("Active-filter section mismatch for driver %1, section %2")
+                            .arg(driverIndex + 1)
+                            .arg(static_cast<qulonglong>(sectionIndex + 1));
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool activeFiltersAreDefault(const KFilterProjectIo::ActiveFilterChains& chains)
+{
+    return std::all_of(chains.cbegin(), chains.cend(), [](const ActiveFilterChain& chain) {
+        return !chain.enabled() && !chain.showResponseInPlot() && chain.empty();
+    });
+}
+
 QString createLegacyProject(driver (&drivers)[KFilterProjectIo::DriverCount], bool includeQlSection)
 {
     QString content;
@@ -271,12 +419,15 @@ int main(int argc, char** argv)
     populateMeasurements(originalMeasurements);
     KFilterProjectIo::MeasurementHiddenStates originalHiddenStates{};
     originalHiddenStates[0] = true;
+    KFilterProjectIo::ActiveFilterChains originalActiveFilters{};
+    populateActiveFilters(originalActiveFilters);
 
     if (!KFilterProjectIo::saveToFile(jsonFilePath,
                                       original,
                                       originalMeasurements,
                                       true,
                                       originalHiddenStates,
+                                      originalActiveFilters,
                                       &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -300,14 +451,30 @@ int main(int argc, char** argv)
         jsonDrivers.at(2).toObject()
             .value(QStringLiteral("measurements")).toObject()
             .value(QStringLiteral("splCorrection")).toObject();
+    const QJsonObject firstActiveFilter =
+        jsonDrivers.at(0).toObject().value(QStringLiteral("activeFilter")).toObject();
+    const QJsonArray firstActiveSections =
+        firstActiveFilter.value(QStringLiteral("sections")).toArray();
+    const QJsonObject firstLowPass = firstActiveSections.at(0).toObject();
+    const QJsonObject firstLowPassParameters =
+        firstLowPass.value(QStringLiteral("parameters")).toObject();
     if (validRoot.value(QStringLiteral("format")).toString() != QStringLiteral("KFilter project") ||
         validRoot.value(QStringLiteral("formatVersion")).toInt(-1) != KFilterProjectIo::JsonFormatVersion ||
         jsonDrivers.size() != KFilterProjectIo::DriverCount ||
         !measurementSettings.value(QStringLiteral("mergeCorrectionCurves")).toBool(false) ||
         measurementSettings.contains(QStringLiteral("hideMeasurements")) ||
         firstCorrection.value(QStringLiteral("hidden")).toBool(false) != true ||
-        thirdCorrection.value(QStringLiteral("hidden")).toBool(true) != false) {
-        QTextStream(stderr) << "Saved JSON project metadata, measurements or driver count is invalid\n";
+        thirdCorrection.value(QStringLiteral("hidden")).toBool(true) != false ||
+        !firstActiveFilter.value(QStringLiteral("enabled")).toBool(false) ||
+        !firstActiveFilter.value(QStringLiteral("showResponseInPlot")).toBool(false) ||
+        firstActiveSections.size() != 2 ||
+        firstLowPass.value(QStringLiteral("type")).toString() != QStringLiteral("lowPass") ||
+        firstLowPassParameters.value(QStringLiteral("characteristic")).toString() !=
+            QStringLiteral("linkwitzRiley") ||
+        firstLowPassParameters.value(QStringLiteral("order")).toInt() != 4 ||
+        !fuzzyEqual(firstLowPassParameters.value(QStringLiteral("frequencyHz")).toDouble(), 2350.5) ||
+        !fuzzyEqual(firstLowPassParameters.value(QStringLiteral("q")).toDouble(), 0.8123)) {
+        QTextStream(stderr) << "Saved JSON project metadata, measurements, active filters or driver count is invalid\n";
         return 1;
     }
 
@@ -315,11 +482,13 @@ int main(int argc, char** argv)
     KFilterProjectIo::MeasurementCurves jsonLoadedMeasurements;
     bool jsonLoadedMergeEnabled = false;
     KFilterProjectIo::MeasurementHiddenStates jsonLoadedHiddenStates{};
+    KFilterProjectIo::ActiveFilterChains jsonLoadedActiveFilters{};
     if (!KFilterProjectIo::loadFromFile(jsonFilePath,
                                         jsonLoaded,
                                         jsonLoadedMeasurements,
                                         jsonLoadedMergeEnabled,
                                         jsonLoadedHiddenStates,
+                                        jsonLoadedActiveFilters,
                                         &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -328,6 +497,7 @@ int main(int argc, char** argv)
     if (!compareDrivers(original, jsonLoaded, true, errorMessage) ||
         !compareMeasurements(originalMeasurements, jsonLoadedMeasurements, errorMessage) ||
         !compareMeasurementHiddenStates(originalHiddenStates, jsonLoadedHiddenStates, errorMessage) ||
+        !compareActiveFilters(originalActiveFilters, jsonLoadedActiveFilters, errorMessage) ||
         !jsonLoadedMergeEnabled) {
         QTextStream(stderr) << (errorMessage.isEmpty()
                                     ? QStringLiteral("Measurement merge/per-driver hide state was not restored")
@@ -349,11 +519,14 @@ int main(int argc, char** argv)
     bool legacyMergeEnabled = true;
     KFilterProjectIo::MeasurementHiddenStates legacyHiddenStates{};
     legacyHiddenStates.fill(true);
+    KFilterProjectIo::ActiveFilterChains legacyActiveFilters{};
+    populateActiveFilters(legacyActiveFilters);
     if (!KFilterProjectIo::loadFromFile(legacyFilePath,
                                         legacyLoaded,
                                         legacyMeasurements,
                                         legacyMergeEnabled,
                                         legacyHiddenStates,
+                                        legacyActiveFilters,
                                         &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -365,7 +538,8 @@ int main(int argc, char** argv)
                      [](const KFilterMeasurementCurve& curve) { return curve.isEmpty(); }) ||
         legacyMergeEnabled ||
         std::any_of(legacyHiddenStates.cbegin(), legacyHiddenStates.cend(),
-                    [](bool hidden) { return hidden; })) {
+                    [](bool hidden) { return hidden; }) ||
+        !activeFiltersAreDefault(legacyActiveFilters)) {
         QTextStream(stderr) << (errorMessage.isEmpty()
                                     ? QStringLiteral("Legacy load did not reset measurement state")
                                     : errorMessage)
@@ -378,6 +552,7 @@ int main(int argc, char** argv)
                                       legacyMeasurements,
                                       legacyMergeEnabled,
                                       legacyHiddenStates,
+                                      legacyActiveFilters,
                                       &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -401,11 +576,13 @@ int main(int argc, char** argv)
     KFilterProjectIo::MeasurementCurves oldLegacyMeasurements;
     bool oldLegacyMergeEnabled = false;
     KFilterProjectIo::MeasurementHiddenStates oldLegacyHiddenStates{};
+    KFilterProjectIo::ActiveFilterChains oldLegacyActiveFilters{};
     if (!KFilterProjectIo::loadFromFile(oldLegacyFilePath,
                                         oldLegacyLoaded,
                                         oldLegacyMeasurements,
                                         oldLegacyMergeEnabled,
                                         oldLegacyHiddenStates,
+                                        oldLegacyActiveFilters,
                                         &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -444,11 +621,14 @@ int main(int argc, char** argv)
     bool patch155MergeEnabled = true;
     KFilterProjectIo::MeasurementHiddenStates patch155HiddenStates{};
     patch155HiddenStates.fill(true);
+    KFilterProjectIo::ActiveFilterChains patch155ActiveFilters{};
+    populateActiveFilters(patch155ActiveFilters);
     if (!KFilterProjectIo::loadFromFile(invalidFilePath,
                                         patch155Loaded,
                                         patch155Measurements,
                                         patch155MergeEnabled,
                                         patch155HiddenStates,
+                                        patch155ActiveFilters,
                                         &errorMessage) ||
         !compareDrivers(original, patch155Loaded, true, errorMessage) ||
         !std::all_of(patch155Measurements.cbegin(),
@@ -456,8 +636,53 @@ int main(int argc, char** argv)
                      [](const KFilterMeasurementCurve& curve) { return curve.isEmpty(); }) ||
         patch155MergeEnabled ||
         std::any_of(patch155HiddenStates.cbegin(), patch155HiddenStates.cend(),
-                    [](bool hidden) { return hidden; })) {
+                    [](bool hidden) { return hidden; }) ||
+        !activeFiltersAreDefault(patch155ActiveFilters)) {
         QTextStream(stderr) << "Patch 155 JSON compatibility failed: " << errorMessage << '\n';
+        return 1;
+    }
+
+    // Format version 4 predates active-filter persistence. Existing driver,
+    // measurement and per-driver hide data must load unchanged while every
+    // ActiveFilterChain is reset to its default state.
+    QJsonObject version4Root = validRoot;
+    version4Root.insert(QStringLiteral("formatVersion"), 4);
+    QJsonObject version4Project = version4Root.value(QStringLiteral("project")).toObject();
+    QJsonArray version4Drivers = version4Project.value(QStringLiteral("drivers")).toArray();
+    for (int index = 0; index < version4Drivers.size(); ++index) {
+        QJsonObject driverObject = version4Drivers.at(index).toObject();
+        driverObject.remove(QStringLiteral("activeFilter"));
+        version4Drivers[index] = driverObject;
+    }
+    version4Project.insert(QStringLiteral("drivers"), version4Drivers);
+    version4Root.insert(QStringLiteral("project"), version4Project);
+    if (!writeTextFile(invalidFilePath,
+                       QString::fromUtf8(QJsonDocument(version4Root).toJson(QJsonDocument::Indented)),
+                       errorMessage)) {
+        QTextStream(stderr) << errorMessage << '\n';
+        return 1;
+    }
+
+    driver version4Loaded[KFilterProjectIo::DriverCount];
+    KFilterProjectIo::MeasurementCurves version4Measurements;
+    bool version4MergeEnabled = false;
+    KFilterProjectIo::MeasurementHiddenStates version4HiddenStates{};
+    KFilterProjectIo::ActiveFilterChains version4ActiveFilters{};
+    populateActiveFilters(version4ActiveFilters);
+    if (!KFilterProjectIo::loadFromFile(invalidFilePath,
+                                        version4Loaded,
+                                        version4Measurements,
+                                        version4MergeEnabled,
+                                        version4HiddenStates,
+                                        version4ActiveFilters,
+                                        &errorMessage) ||
+        !compareDrivers(original, version4Loaded, true, errorMessage) ||
+        !compareMeasurements(originalMeasurements, version4Measurements, errorMessage) ||
+        !compareMeasurementHiddenStates(originalHiddenStates, version4HiddenStates, errorMessage) ||
+        !version4MergeEnabled ||
+        !activeFiltersAreDefault(version4ActiveFilters)) {
+        QTextStream(stderr) << "Format version 4 active-filter compatibility failed: "
+                            << errorMessage << '\n';
         return 1;
     }
 
@@ -482,17 +707,21 @@ int main(int argc, char** argv)
     KFilterProjectIo::MeasurementCurves version3Measurements;
     bool version3MergeEnabled = false;
     KFilterProjectIo::MeasurementHiddenStates version3HiddenStates{};
+    KFilterProjectIo::ActiveFilterChains version3ActiveFilters{};
+    populateActiveFilters(version3ActiveFilters);
     if (!KFilterProjectIo::loadFromFile(invalidFilePath,
                                         version3Loaded,
                                         version3Measurements,
                                         version3MergeEnabled,
                                         version3HiddenStates,
+                                        version3ActiveFilters,
                                         &errorMessage) ||
         !compareDrivers(original, version3Loaded, true, errorMessage) ||
         !compareMeasurements(originalMeasurements, version3Measurements, errorMessage) ||
         !version3MergeEnabled ||
         !version3HiddenStates[0] || version3HiddenStates[1] ||
-        !version3HiddenStates[2] || version3HiddenStates[3]) {
+        !version3HiddenStates[2] || version3HiddenStates[3] ||
+        !activeFiltersAreDefault(version3ActiveFilters)) {
         QTextStream(stderr) << "Format version 3 global-hide migration failed: "
                             << errorMessage << '\n';
         return 1;
@@ -519,17 +748,21 @@ int main(int argc, char** argv)
     bool version2MergeEnabled = false;
     KFilterProjectIo::MeasurementHiddenStates version2HiddenStates{};
     version2HiddenStates.fill(true);
+    KFilterProjectIo::ActiveFilterChains version2ActiveFilters{};
+    populateActiveFilters(version2ActiveFilters);
     if (!KFilterProjectIo::loadFromFile(invalidFilePath,
                                         version2Loaded,
                                         version2Measurements,
                                         version2MergeEnabled,
                                         version2HiddenStates,
+                                        version2ActiveFilters,
                                         &errorMessage) ||
         !compareDrivers(original, version2Loaded, true, errorMessage) ||
         !compareMeasurements(originalMeasurements, version2Measurements, errorMessage) ||
         !version2MergeEnabled ||
         std::any_of(version2HiddenStates.cbegin(), version2HiddenStates.cend(),
-                    [](bool hidden) { return hidden; })) {
+                    [](bool hidden) { return hidden; }) ||
+        !activeFiltersAreDefault(version2ActiveFilters)) {
         QTextStream(stderr) << "Format version 2 compatibility failed: " << errorMessage << '\n';
         return 1;
     }
@@ -568,11 +801,15 @@ int main(int argc, char** argv)
     bool unchangedMergeEnabled = true;
     KFilterProjectIo::MeasurementHiddenStates unchangedHiddenStates{};
     unchangedHiddenStates.fill(true);
+    KFilterProjectIo::ActiveFilterChains unchangedActiveFilters{};
+    populateActiveFilters(unchangedActiveFilters);
+    const KFilterProjectIo::ActiveFilterChains unchangedActiveFiltersExpected = unchangedActiveFilters;
     if (KFilterProjectIo::loadFromFile(invalidFilePath,
                                        unchanged,
                                        unchangedMeasurements,
                                        unchangedMergeEnabled,
                                        unchangedHiddenStates,
+                                       unchangedActiveFilters,
                                        &errorMessage)) {
         QTextStream(stderr) << "Invalid measurement point ordering was accepted\n";
         return 1;
@@ -582,7 +819,8 @@ int main(int argc, char** argv)
         !fuzzyEqual(unchangedMeasurements[0].points().constFirst().frequencyHz, 123.0) ||
         !unchangedMergeEnabled ||
         !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
-                     [](bool hidden) { return hidden; })) {
+                     [](bool hidden) { return hidden; }) ||
+        !compareActiveFilters(unchangedActiveFiltersExpected, unchangedActiveFilters, errorMessage)) {
         QTextStream(stderr) << "Failed measurement load modified the destination project state\n";
         return 1;
     }
@@ -615,6 +853,7 @@ int main(int argc, char** argv)
                                        unchangedMeasurements,
                                        unchangedMergeEnabled,
                                        unchangedHiddenStates,
+                                       unchangedActiveFilters,
                                        &errorMessage)) {
         QTextStream(stderr) << "Invalid per-driver hidden value was accepted\n";
         return 1;
@@ -623,8 +862,54 @@ int main(int argc, char** argv)
         unchangedMeasurements[0].size() != 1 ||
         !unchangedMergeEnabled ||
         !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
-                     [](bool hidden) { return hidden; })) {
+                     [](bool hidden) { return hidden; }) ||
+        !compareActiveFilters(unchangedActiveFiltersExpected, unchangedActiveFilters, errorMessage)) {
         QTextStream(stderr) << "Failed hide-state load modified the destination project state\n";
+        return 1;
+    }
+
+    // Unknown active-filter metadata in format 5 must fail transactionally.
+    QJsonObject invalidActiveFilterRoot = validRoot;
+    QJsonObject invalidActiveFilterProject =
+        invalidActiveFilterRoot.value(QStringLiteral("project")).toObject();
+    QJsonArray invalidActiveFilterDrivers =
+        invalidActiveFilterProject.value(QStringLiteral("drivers")).toArray();
+    QJsonObject invalidActiveFilterDriver = invalidActiveFilterDrivers.at(0).toObject();
+    QJsonObject invalidActiveFilter =
+        invalidActiveFilterDriver.value(QStringLiteral("activeFilter")).toObject();
+    QJsonArray invalidActiveFilterSections =
+        invalidActiveFilter.value(QStringLiteral("sections")).toArray();
+    QJsonObject invalidActiveFilterSection = invalidActiveFilterSections.at(0).toObject();
+    invalidActiveFilterSection.insert(QStringLiteral("type"), QStringLiteral("futureFilter"));
+    invalidActiveFilterSections[0] = invalidActiveFilterSection;
+    invalidActiveFilter.insert(QStringLiteral("sections"), invalidActiveFilterSections);
+    invalidActiveFilterDriver.insert(QStringLiteral("activeFilter"), invalidActiveFilter);
+    invalidActiveFilterDrivers[0] = invalidActiveFilterDriver;
+    invalidActiveFilterProject.insert(QStringLiteral("drivers"), invalidActiveFilterDrivers);
+    invalidActiveFilterRoot.insert(QStringLiteral("project"), invalidActiveFilterProject);
+    if (!writeTextFile(invalidFilePath,
+                       QString::fromUtf8(QJsonDocument(invalidActiveFilterRoot).toJson(QJsonDocument::Indented)),
+                       errorMessage)) {
+        QTextStream(stderr) << errorMessage << '\n';
+        return 1;
+    }
+
+    if (KFilterProjectIo::loadFromFile(invalidFilePath,
+                                       unchanged,
+                                       unchangedMeasurements,
+                                       unchangedMergeEnabled,
+                                       unchangedHiddenStates,
+                                       unchangedActiveFilters,
+                                       &errorMessage)) {
+        QTextStream(stderr) << "Unknown active-filter type was accepted\n";
+        return 1;
+    }
+    if (unchanged[0].GetTitle() != QStringLiteral("unchanged sentinel") ||
+        unchangedMeasurements[0].size() != 1 || !unchangedMergeEnabled ||
+        !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
+                     [](bool hidden) { return hidden; }) ||
+        !compareActiveFilters(unchangedActiveFiltersExpected, unchangedActiveFilters, errorMessage)) {
+        QTextStream(stderr) << "Failed active-filter load modified the destination project state\n";
         return 1;
     }
 
@@ -642,6 +927,7 @@ int main(int argc, char** argv)
                                        unchangedMeasurements,
                                        unchangedMergeEnabled,
                                        unchangedHiddenStates,
+                                       unchangedActiveFilters,
                                        &errorMessage)) {
         QTextStream(stderr) << "Unsupported JSON project version was accepted\n";
         return 1;
@@ -650,7 +936,8 @@ int main(int argc, char** argv)
         unchangedMeasurements[0].size() != 1 ||
         !unchangedMergeEnabled ||
         !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
-                     [](bool hidden) { return hidden; })) {
+                     [](bool hidden) { return hidden; }) ||
+        !compareActiveFilters(unchangedActiveFiltersExpected, unchangedActiveFilters, errorMessage)) {
         QTextStream(stderr) << "Failed JSON load modified the destination project state\n";
         return 1;
     }
@@ -659,6 +946,6 @@ int main(int argc, char** argv)
     QFile::remove(oldLegacyFilePath);
     QFile::remove(legacyFilePath);
     QFile::remove(jsonFilePath);
-    QTextStream(stdout) << "KFilterProjectIo JSON measurement and legacy compatibility smoke test passed\n";
+    QTextStream(stdout) << "KFilterProjectIo JSON measurement, active-filter, and legacy compatibility smoke test passed\n";
     return 0;
 }

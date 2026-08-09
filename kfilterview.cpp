@@ -486,13 +486,22 @@ void KFilterView::drawActiveFilterResponses(QPainter& painter)
         QPointF lastPoint;
         for (std::size_t sampleIndex = 0; sampleIndex < KFilterFrequencyCount; ++sampleIndex) {
             const double magnitude = std::abs(response.values[sampleIndex]);
-            if (!std::isfinite(magnitude) || magnitude <= 0.0) {
+            if (!std::isfinite(magnitude)) {
                 haveLastPoint = false;
                 continue;
             }
 
-            const double valueDb = 20.0 * std::log10(magnitude);
+            // A full-depth Notch can produce exactly H=0 at one raster point.
+            // Render that valid null at the visible SPL floor instead of breaking
+            // the diagnostic curve at the most interesting point.
+            const double valueDb = magnitude > 0.0
+                ? 20.0 * std::log10(magnitude)
+                : yToPressureDb(static_cast<double>(height()));
             const QPointF point(frequencyHzToX(frequencies[sampleIndex]), pressureDbToY(valueDb));
+            if (!std::isfinite(point.x()) || !std::isfinite(point.y())) {
+                haveLastPoint = false;
+                continue;
+            }
             if (haveLastPoint) {
                 painter.drawLine(lastPoint, point);
             }

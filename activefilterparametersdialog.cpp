@@ -80,10 +80,10 @@ ActiveFilterParametersDialog::ActiveFilterParametersDialog(ActiveFilterChains& c
     auto *mainLayout = new QVBoxLayout(this);
 
     auto *prototypeNotice = new QLabel(
-        tr("Active-filter prototype: changes are previewed live in the diagnostic plot and, "
-           "for supported Butterworth low-pass/high-pass sections, in the driver simulation. "
-           "Apply/OK keeps the edited in-memory state; Cancel restores the last applied state. "
-           "Active filters are still not saved to .kfp files."),
+        tr("Active-filter changes are previewed live in the diagnostic plot and, for supported "
+           "Butterworth low-pass/high-pass/band-pass and second-order Notch sections, in the driver simulation. "
+           "Apply/OK commits the edited project state; Cancel restores the last applied state. "
+           "Active-filter metadata is saved in .kfp projects."),
         this);
     prototypeNotice->setWordWrap(true);
     prototypeNotice->setObjectName(QStringLiteral("activeFilterPrototypeNotice"));
@@ -108,7 +108,7 @@ ActiveFilterParametersDialog::ActiveFilterParametersDialog(ActiveFilterChains& c
                                            this);
     buttonBox->setObjectName(QStringLiteral("activeFilterDialogButtons"));
     buttonBox->button(QDialogButtonBox::Apply)->setToolTip(
-        tr("Keep the current live-preview state as the new in-memory active-filter state. Supported active filters affect the simulation; the .kfp format remains unchanged."));
+        tr("Commit the current live-preview state to the project. Supported active filters affect the simulation and their metadata is persisted with the project."));
     buttonBox->button(QDialogButtonBox::Ok)->setToolTip(
         tr("Keep the current live-preview state and close the dialog."));
     connect(buttonBox, &QDialogButtonBox::accepted, this, &ActiveFilterParametersDialog::accept);
@@ -257,10 +257,10 @@ QWidget *ActiveFilterParametersDialog::createDriverPage(int driverIndex)
 
     page.frequency1->setValue(2000.0);
     page.frequency1->setToolTip(
-        tr("Primary frequency. Depending on filter type this is cutoff, center, or lower frequency."));
+        tr("Primary frequency. Depending on filter type this is cutoff, center, or the lower band-pass cutoff."));
     page.frequency2->setValue(4000.0);
     page.frequency2->setToolTip(
-        tr("Upper frequency for filter types that require two frequency limits."));
+        tr("Upper cutoff frequency for Band-pass sections."));
 
     page.q->setRange(0.01, 100.0);
     page.q->setDecimals(3);
@@ -320,8 +320,9 @@ QWidget *ActiveFilterParametersDialog::createDriverPage(int driverIndex)
     page.showResponse->setObjectName(
         QStringLiteral("activeFilterShowResponse%1").arg(driverIndex + 1));
     page.showResponse->setToolTip(
-        tr("Show the combined transfer magnitude of enabled Butterworth low-pass/high-pass sections. "
-           "If an enabled section is not implemented yet, no active-filter overlay is drawn for this driver."));
+        tr("Show the combined transfer magnitude of all enabled supported sections, including "
+           "Butterworth low-pass/high-pass and second-order Notch. If any enabled section is not "
+           "implemented yet, no active-filter overlay is drawn for this driver."));
     visualizationLayout->addWidget(page.showResponse);
 
     page.responseStatus = new QLabel(visualizationGroup);
@@ -714,7 +715,7 @@ void ActiveFilterParametersDialog::updatePageState(int driverIndex)
     page.editorGroup->setEnabled(haveSelection);
 
     const QString bypassHint = page.activeProcessing->isChecked()
-        ? tr("The active-filter chain is enabled. Fully supported Butterworth low-pass/high-pass chains are applied to the driver simulation.")
+        ? tr("The active-filter chain is enabled. Fully supported Butterworth low-pass/high-pass/band-pass and second-order Notch chains are applied to the driver simulation.")
         : tr("The active-filter chain is bypassed. Sections remain editable while bypassed.");
     page.activeProcessing->setToolTip(bypassHint);
     updateResponseStatus(driverIndex);
@@ -787,7 +788,9 @@ void ActiveFilterParametersDialog::updateEditorControlState(int driverIndex)
     page.frequency1->setEnabled(frequencyBased);
     page.frequency2->setEnabled(twoFrequencies);
     page.q->setEnabled(qBased);
-    page.gain->setEnabled(type == ActiveFilterType::Gain || type == ActiveFilterType::Notch);
+    // The canonical Patch-182 notch is always full-depth; gainDb is retained only
+    // as persisted forward-compatible metadata and is intentionally not editable here.
+    page.gain->setEnabled(type == ActiveFilterType::Gain);
     page.delay->setEnabled(type == ActiveFilterType::Delay);
     page.polarity->setEnabled(type == ActiveFilterType::Polarity);
 }
@@ -940,9 +943,7 @@ QString ActiveFilterParametersDialog::extraSummary(const ActiveFilterSection& se
     }
     case ActiveFilterType::Notch: {
         const auto& parameters = std::get<ActiveFilterNotchParameters>(section.parameters());
-        return tr("Q %1, %2 dB")
-            .arg(parameters.q, 0, 'f', 3)
-            .arg(parameters.gainDb, 0, 'f', 2);
+        return tr("Q %1").arg(parameters.q, 0, 'f', 3);
     }
     case ActiveFilterType::AllPass:
         return tr("Q %1").arg(std::get<ActiveFilterAllPassParameters>(section.parameters()).q, 0, 'f', 3);

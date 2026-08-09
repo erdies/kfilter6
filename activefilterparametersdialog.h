@@ -26,13 +26,12 @@ class QTabWidget;
 class QWidget;
 
 /**
- * Editor for the in-memory active-filter data model.
+ * Editor for the project active-filter data model.
  *
  * Changes are mirrored temporarily into the current KFilterDoc model so the
- * diagnostic Butterworth transfer plot and the supported driver simulation can
- * update live. Apply/OK define the new committed in-memory state; Cancel
- * restores the last committed state. Active filters still do not enter .kfp
- * files yet.
+ * diagnostic transfer plot and supported driver simulation can update live.
+ * Apply/OK define the new committed project state; Cancel restores the last
+ * committed state. Active-filter metadata is persisted by project format v5.
  */
 class ActiveFilterParametersDialog : public QDialog
 {

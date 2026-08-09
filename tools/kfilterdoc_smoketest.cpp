@@ -521,6 +521,66 @@ bool checkActiveFilterSimulationIntegration()
         return false;
     }
 
+    // Patch 182 Notch integration: use the grid point immediately below f0 so
+    // the expected attenuation is finite and can be compared in dB directly.
+    constexpr std::size_t NotchSampleIndex = TestSampleIndex - 1;
+    KFilterDoc notchDocument;
+    notchDocument.m_driverDriver[0].PressureisActive = true;
+    notchDocument.Sound(0);
+    const double notchBaselineDb = notchDocument.m_doubleXContainer[0][NotchSampleIndex];
+    ActiveFilterChain& notchChain = notchDocument.activeFilterChain(0);
+    notchChain.setEnabled(true);
+    notchChain.addSection(ActiveFilterType::Notch);
+    auto& notchParameters =
+        std::get<ActiveFilterNotchParameters>(notchChain.section(0).parameters());
+    notchParameters.centerFrequencyHz = cutoffHz;
+    notchParameters.q = 4.0;
+    const ActiveFilterResponse& notchResponse = notchDocument.activeFilterResponse(0);
+    if (notchResponse.status != ActiveFilterResponseStatus::Valid) {
+        QTextStream(stderr) << "Notch active-filter chain was not reported as valid\n";
+        return false;
+    }
+    const double notchDeltaDb =
+        20.0 * std::log10(std::abs(notchResponse.values[NotchSampleIndex]));
+    notchDocument.Sound(0);
+    if (!expectNear("Notch single-driver active-filter magnitude",
+                    notchDocument.m_doubleXContainer[0][NotchSampleIndex] - notchBaselineDb,
+                    notchDeltaDb,
+                    1.0e-5)) {
+        return false;
+    }
+
+    // Patch 183 Band-pass integration: the crossover-style Band-pass is applied
+    // through the same centralized complex driver path as LP/HP and Notch.
+    KFilterDoc bandPassDocument;
+    bandPassDocument.m_driverDriver[0].PressureisActive = true;
+    bandPassDocument.Sound(0);
+    const double bandPassBaselineDb =
+        bandPassDocument.m_doubleXContainer[0][TestSampleIndex];
+    ActiveFilterChain& bandPassChain = bandPassDocument.activeFilterChain(0);
+    bandPassChain.setEnabled(true);
+    bandPassChain.addSection(ActiveFilterType::BandPass);
+    auto& bandPassParameters =
+        std::get<ActiveFilterBandPassParameters>(bandPassChain.section(0).parameters());
+    bandPassParameters.characteristic = ActiveFilterCharacteristic::Butterworth;
+    bandPassParameters.order = 2;
+    bandPassParameters.lowerFrequencyHz = kfilterFrequencyGridHz()[45];
+    bandPassParameters.upperFrequencyHz = kfilterFrequencyGridHz()[105];
+    const ActiveFilterResponse& bandPassResponse = bandPassDocument.activeFilterResponse(0);
+    if (bandPassResponse.status != ActiveFilterResponseStatus::Valid) {
+        QTextStream(stderr) << "Band-pass active-filter chain was not reported as valid\n";
+        return false;
+    }
+    const double bandPassDeltaDb =
+        20.0 * std::log10(std::abs(bandPassResponse.values[TestSampleIndex]));
+    bandPassDocument.Sound(0);
+    if (!expectNear("Band-pass single-driver active-filter magnitude",
+                    bandPassDocument.m_doubleXContainer[0][TestSampleIndex] - bandPassBaselineDb,
+                    bandPassDeltaDb,
+                    1.0e-5)) {
+        return false;
+    }
+
     // Unsupported chains must bypass the complete active-filter stage instead
     // of applying only the supported prefix or propagating NaNs into the plot.
     KFilterDoc unsupportedDocument;
@@ -760,8 +820,9 @@ int main(int argc, char** argv)
     original.setMeasurementMergeEnabled(true);
     original.setMeasurementHiddenForDriver(0, true);
 
-    // Patch 175: active filters are document-resident in memory, but intentionally
-    // not part of the .kfp format yet.
+    // Patch 181: active-filter metadata is part of the .kfp project format.
+    // Gain is intentionally still DSP-unsupported here; persistence must not
+    // depend on current transfer-engine support.
     original.activeFilterChain(1).setEnabled(true);
     original.activeFilterChain(1).addSection(ActiveFilterType::Gain);
     std::get<ActiveFilterGainParameters>(original.activeFilterChain(1).section(0).parameters()).gainDb = -3.0;
@@ -841,13 +902,40 @@ int main(int argc, char** argv)
         }
     }
 
-    for (int driverIndex = 0; driverIndex < KFilterProjectIo::DriverCount; ++driverIndex) {
-        if (loaded.activeFilterChain(driverIndex).enabled() ||
-            !loaded.activeFilterChain(driverIndex).empty()) {
-            QTextStream(stderr) << "Loading .kfp did not reset non-persisted active-filter state for driver "
-                                << (driverIndex + 1) << '\n';
-            return 1;
-        }
+    if (loaded.activeFilterChain(0).enabled() || !loaded.activeFilterChain(0).empty()) {
+        QTextStream(stderr) << "Loading .kfp did not replace stale active-filter state for driver 1\n";
+        return 1;
+    }
+
+    const ActiveFilterChain& loadedGainChain = loaded.activeFilterChain(1);
+    if (!loadedGainChain.enabled() || loadedGainChain.showResponseInPlot() ||
+        loadedGainChain.sectionCount() != 1 ||
+        loadedGainChain.section(0).type() != ActiveFilterType::Gain ||
+        !fuzzyEqual(std::get<ActiveFilterGainParameters>(loadedGainChain.section(0).parameters()).gainDb,
+                    -3.0)) {
+        QTextStream(stderr) << "Unsupported active-filter metadata was not restored for driver 2\n";
+        return 1;
+    }
+
+    const ActiveFilterChain& loadedDiagnosticChain = loaded.activeFilterChain(2);
+    if (!loadedDiagnosticChain.enabled() || !loadedDiagnosticChain.showResponseInPlot() ||
+        loadedDiagnosticChain.sectionCount() != 1 ||
+        loadedDiagnosticChain.section(0).type() != ActiveFilterType::LowPass) {
+        QTextStream(stderr) << "Active-filter chain metadata was not restored for driver 3\n";
+        return 1;
+    }
+    const auto& loadedLowPass = std::get<ActiveFilterLowPassParameters>(
+        loadedDiagnosticChain.section(0).parameters());
+    if (loadedLowPass.characteristic != ActiveFilterCharacteristic::Butterworth ||
+        loadedLowPass.order != 2 ||
+        !fuzzyEqual(loadedLowPass.frequencyHz, kfilterFrequencyGridHz()[75])) {
+        QTextStream(stderr) << "Active-filter section parameters were not restored for driver 3\n";
+        return 1;
+    }
+
+    if (loaded.activeFilterChain(3).enabled() || !loaded.activeFilterChain(3).empty()) {
+        QTextStream(stderr) << "Unexpected active-filter state restored for driver 4\n";
+        return 1;
     }
 
     if (!loaded.measurementMergeEnabled() ||
@@ -874,6 +962,6 @@ int main(int argc, char** argv)
     }
 
     QFile::remove(filePath);
-    QTextStream(stdout) << "KFilterDoc document, measurement persistence, and active-filter reset smoke test passed\n";
+    QTextStream(stdout) << "KFilterDoc document, measurement, and active-filter persistence smoke test passed\n";
     return 0;
 }

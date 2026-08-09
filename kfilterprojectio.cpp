@@ -392,6 +392,342 @@ bool readRequiredBool(const QJsonObject& object,
     return true;
 }
 
+QString activeFilterTypeToString(ActiveFilterType type)
+{
+    switch (type) {
+    case ActiveFilterType::LowPass:
+        return QStringLiteral("lowPass");
+    case ActiveFilterType::HighPass:
+        return QStringLiteral("highPass");
+    case ActiveFilterType::BandPass:
+        return QStringLiteral("bandPass");
+    case ActiveFilterType::Notch:
+        return QStringLiteral("notch");
+    case ActiveFilterType::AllPass:
+        return QStringLiteral("allPass");
+    case ActiveFilterType::Gain:
+        return QStringLiteral("gain");
+    case ActiveFilterType::Delay:
+        return QStringLiteral("delay");
+    case ActiveFilterType::Polarity:
+        return QStringLiteral("polarity");
+    }
+
+    return {};
+}
+
+bool activeFilterTypeFromString(const QString& value, ActiveFilterType& type)
+{
+    if (value == QStringLiteral("lowPass")) {
+        type = ActiveFilterType::LowPass;
+    } else if (value == QStringLiteral("highPass")) {
+        type = ActiveFilterType::HighPass;
+    } else if (value == QStringLiteral("bandPass")) {
+        type = ActiveFilterType::BandPass;
+    } else if (value == QStringLiteral("notch")) {
+        type = ActiveFilterType::Notch;
+    } else if (value == QStringLiteral("allPass")) {
+        type = ActiveFilterType::AllPass;
+    } else if (value == QStringLiteral("gain")) {
+        type = ActiveFilterType::Gain;
+    } else if (value == QStringLiteral("delay")) {
+        type = ActiveFilterType::Delay;
+    } else if (value == QStringLiteral("polarity")) {
+        type = ActiveFilterType::Polarity;
+    } else {
+        return false;
+    }
+
+    return true;
+}
+
+QString activeFilterCharacteristicToString(ActiveFilterCharacteristic characteristic)
+{
+    switch (characteristic) {
+    case ActiveFilterCharacteristic::Butterworth:
+        return QStringLiteral("butterworth");
+    case ActiveFilterCharacteristic::Bessel:
+        return QStringLiteral("bessel");
+    case ActiveFilterCharacteristic::LinkwitzRiley:
+        return QStringLiteral("linkwitzRiley");
+    case ActiveFilterCharacteristic::GenericQ:
+        return QStringLiteral("genericQ");
+    }
+
+    return {};
+}
+
+bool activeFilterCharacteristicFromString(const QString& value,
+                                          ActiveFilterCharacteristic& characteristic)
+{
+    if (value == QStringLiteral("butterworth")) {
+        characteristic = ActiveFilterCharacteristic::Butterworth;
+    } else if (value == QStringLiteral("bessel")) {
+        characteristic = ActiveFilterCharacteristic::Bessel;
+    } else if (value == QStringLiteral("linkwitzRiley")) {
+        characteristic = ActiveFilterCharacteristic::LinkwitzRiley;
+    } else if (value == QStringLiteral("genericQ")) {
+        characteristic = ActiveFilterCharacteristic::GenericQ;
+    } else {
+        return false;
+    }
+
+    return true;
+}
+
+bool readActiveFilterCharacteristic(const QJsonObject& parameters,
+                                    ActiveFilterCharacteristic& characteristic,
+                                    const QString& context,
+                                    QString* errorMessage)
+{
+    QString value;
+    if (!readRequiredString(parameters,
+                            QStringLiteral("characteristic"),
+                            value,
+                            context,
+                            errorMessage)) {
+        return false;
+    }
+
+    if (!activeFilterCharacteristicFromString(value, characteristic)) {
+        setError(errorMessage,
+                 QStringLiteral("Unsupported active-filter characteristic '%1' in '%2.characteristic'.")
+                     .arg(value, context));
+        return false;
+    }
+
+    return true;
+}
+
+bool jsonToActiveFilterParameters(const QJsonObject& parameters,
+                                  ActiveFilterType type,
+                                  ActiveFilterParameters& target,
+                                  const QString& context,
+                                  QString* errorMessage)
+{
+    switch (type) {
+    case ActiveFilterType::LowPass: {
+        ActiveFilterLowPassParameters parsed;
+        if (!readActiveFilterCharacteristic(parameters, parsed.characteristic, context, errorMessage) ||
+            !readRequiredInt(parameters, QStringLiteral("order"), parsed.order, context, errorMessage) ||
+            !readRequiredDouble(parameters,
+                                QStringLiteral("frequencyHz"),
+                                parsed.frequencyHz,
+                                context,
+                                errorMessage) ||
+            !readRequiredDouble(parameters, QStringLiteral("q"), parsed.q, context, errorMessage)) {
+            return false;
+        }
+        target = parsed;
+        return true;
+    }
+    case ActiveFilterType::HighPass: {
+        ActiveFilterHighPassParameters parsed;
+        if (!readActiveFilterCharacteristic(parameters, parsed.characteristic, context, errorMessage) ||
+            !readRequiredInt(parameters, QStringLiteral("order"), parsed.order, context, errorMessage) ||
+            !readRequiredDouble(parameters,
+                                QStringLiteral("frequencyHz"),
+                                parsed.frequencyHz,
+                                context,
+                                errorMessage) ||
+            !readRequiredDouble(parameters, QStringLiteral("q"), parsed.q, context, errorMessage)) {
+            return false;
+        }
+        target = parsed;
+        return true;
+    }
+    case ActiveFilterType::BandPass: {
+        ActiveFilterBandPassParameters parsed;
+        if (!readActiveFilterCharacteristic(parameters, parsed.characteristic, context, errorMessage) ||
+            !readRequiredInt(parameters, QStringLiteral("order"), parsed.order, context, errorMessage) ||
+            !readRequiredDouble(parameters,
+                                QStringLiteral("lowerFrequencyHz"),
+                                parsed.lowerFrequencyHz,
+                                context,
+                                errorMessage) ||
+            !readRequiredDouble(parameters,
+                                QStringLiteral("upperFrequencyHz"),
+                                parsed.upperFrequencyHz,
+                                context,
+                                errorMessage) ||
+            !readRequiredDouble(parameters, QStringLiteral("q"), parsed.q, context, errorMessage)) {
+            return false;
+        }
+        target = parsed;
+        return true;
+    }
+    case ActiveFilterType::Notch: {
+        ActiveFilterNotchParameters parsed;
+        if (!readRequiredDouble(parameters,
+                                QStringLiteral("centerFrequencyHz"),
+                                parsed.centerFrequencyHz,
+                                context,
+                                errorMessage) ||
+            !readRequiredDouble(parameters, QStringLiteral("q"), parsed.q, context, errorMessage) ||
+            !readRequiredDouble(parameters,
+                                QStringLiteral("gainDb"),
+                                parsed.gainDb,
+                                context,
+                                errorMessage)) {
+            return false;
+        }
+        target = parsed;
+        return true;
+    }
+    case ActiveFilterType::AllPass: {
+        ActiveFilterAllPassParameters parsed;
+        if (!readRequiredInt(parameters, QStringLiteral("order"), parsed.order, context, errorMessage) ||
+            !readRequiredDouble(parameters,
+                                QStringLiteral("frequencyHz"),
+                                parsed.frequencyHz,
+                                context,
+                                errorMessage) ||
+            !readRequiredDouble(parameters, QStringLiteral("q"), parsed.q, context, errorMessage)) {
+            return false;
+        }
+        target = parsed;
+        return true;
+    }
+    case ActiveFilterType::Gain: {
+        ActiveFilterGainParameters parsed;
+        if (!readRequiredDouble(parameters,
+                                QStringLiteral("gainDb"),
+                                parsed.gainDb,
+                                context,
+                                errorMessage)) {
+            return false;
+        }
+        target = parsed;
+        return true;
+    }
+    case ActiveFilterType::Delay: {
+        ActiveFilterDelayParameters parsed;
+        if (!readRequiredDouble(parameters,
+                                QStringLiteral("delayMs"),
+                                parsed.delayMs,
+                                context,
+                                errorMessage)) {
+            return false;
+        }
+        target = parsed;
+        return true;
+    }
+    case ActiveFilterType::Polarity: {
+        ActiveFilterPolarityParameters parsed;
+        if (!readRequiredBool(parameters,
+                              QStringLiteral("inverted"),
+                              parsed.inverted,
+                              context,
+                              errorMessage)) {
+            return false;
+        }
+        target = parsed;
+        return true;
+    }
+    }
+
+    return false;
+}
+
+bool jsonToActiveFilterChain(const QJsonObject& driverObject,
+                             ActiveFilterChain& chain,
+                             const QString& driverContext,
+                             QString* errorMessage)
+{
+    QJsonObject activeFilterObject;
+    if (!readObject(driverObject,
+                    QStringLiteral("activeFilter"),
+                    activeFilterObject,
+                    driverContext,
+                    errorMessage)) {
+        return false;
+    }
+
+    bool enabled = false;
+    bool showResponseInPlot = false;
+    const QString activeFilterContext = driverContext + QStringLiteral(".activeFilter");
+    if (!readRequiredBool(activeFilterObject,
+                          QStringLiteral("enabled"),
+                          enabled,
+                          activeFilterContext,
+                          errorMessage) ||
+        !readRequiredBool(activeFilterObject,
+                          QStringLiteral("showResponseInPlot"),
+                          showResponseInPlot,
+                          activeFilterContext,
+                          errorMessage)) {
+        return false;
+    }
+
+    const QJsonValue sectionsValue = activeFilterObject.value(QStringLiteral("sections"));
+    if (!sectionsValue.isArray()) {
+        setError(errorMessage,
+                 QStringLiteral("Missing or invalid array '%1.sections'.").arg(activeFilterContext));
+        return false;
+    }
+
+    ActiveFilterChain parsedChain;
+    parsedChain.setEnabled(enabled);
+    parsedChain.setShowResponseInPlot(showResponseInPlot);
+
+    const QJsonArray sections = sectionsValue.toArray();
+    for (int sectionIndex = 0; sectionIndex < sections.size(); ++sectionIndex) {
+        const QJsonValue sectionValue = sections.at(sectionIndex);
+        const QString sectionContext =
+            QStringLiteral("%1.sections[%2]").arg(activeFilterContext).arg(sectionIndex);
+        if (!sectionValue.isObject()) {
+            setError(errorMessage, QStringLiteral("Entry '%1' must be an object.").arg(sectionContext));
+            return false;
+        }
+
+        const QJsonObject sectionObject = sectionValue.toObject();
+        bool sectionEnabled = true;
+        QString typeString;
+        QJsonObject parameters;
+        if (!readRequiredBool(sectionObject,
+                              QStringLiteral("enabled"),
+                              sectionEnabled,
+                              sectionContext,
+                              errorMessage) ||
+            !readRequiredString(sectionObject,
+                                QStringLiteral("type"),
+                                typeString,
+                                sectionContext,
+                                errorMessage) ||
+            !readObject(sectionObject,
+                        QStringLiteral("parameters"),
+                        parameters,
+                        sectionContext,
+                        errorMessage)) {
+            return false;
+        }
+
+        ActiveFilterType type = ActiveFilterType::LowPass;
+        if (!activeFilterTypeFromString(typeString, type)) {
+            setError(errorMessage,
+                     QStringLiteral("Unsupported active-filter type '%1' in '%2.type'.")
+                         .arg(typeString, sectionContext));
+            return false;
+        }
+
+        ActiveFilterSection section(type);
+        section.setEnabled(sectionEnabled);
+        if (!jsonToActiveFilterParameters(parameters,
+                                          type,
+                                          section.parameters(),
+                                          sectionContext + QStringLiteral(".parameters"),
+                                          errorMessage)) {
+            return false;
+        }
+
+        const std::size_t insertedIndex = parsedChain.addSection(type);
+        parsedChain.section(insertedIndex) = section;
+    }
+
+    chain = parsedChain;
+    return true;
+}
+
 bool jsonToDriverParameters(const QJsonObject& parameters,
                             driver& currentDriver,
                             const QString& context,
@@ -706,10 +1042,12 @@ bool loadJsonProject(const QByteArray& data,
                      KFilterProjectIo::MeasurementCurves& splCorrectionCurves,
                      bool& mergeMeasurementsEnabled,
                      KFilterProjectIo::MeasurementHiddenStates& measurementHiddenForDrivers,
+                     KFilterProjectIo::ActiveFilterChains& activeFilterChains,
                      QString* errorMessage)
 {
     mergeMeasurementsEnabled = false;
     measurementHiddenForDrivers.fill(false);
+    activeFilterChains = KFilterProjectIo::ActiveFilterChains{};
 
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(data, &parseError);
@@ -832,6 +1170,15 @@ bool loadJsonProject(const QByteArray& data,
                 errorMessage)) {
             return false;
         }
+
+        if (formatVersion >= 5 &&
+            !jsonToActiveFilterChain(
+                entry,
+                activeFilterChains[static_cast<std::size_t>(driverIndex)],
+                driverContext,
+                errorMessage)) {
+            return false;
+        }
     }
 
     if (formatVersion == 3 && legacyMeasurementsHidden) {
@@ -910,6 +1257,179 @@ QJsonObject driverMeasurementsToJson(const KFilterMeasurementCurve& curve, bool 
                             splCorrectionCurveToJson(curve, measurementHidden));
     }
     return measurements;
+}
+
+QJsonObject activeFilterParametersToJson(const ActiveFilterSection& section)
+{
+    QJsonObject parameters;
+    switch (section.type()) {
+    case ActiveFilterType::LowPass: {
+        const auto& value = std::get<ActiveFilterLowPassParameters>(section.parameters());
+        parameters.insert(QStringLiteral("characteristic"),
+                          activeFilterCharacteristicToString(value.characteristic));
+        parameters.insert(QStringLiteral("order"), value.order);
+        parameters.insert(QStringLiteral("frequencyHz"), value.frequencyHz);
+        parameters.insert(QStringLiteral("q"), value.q);
+        break;
+    }
+    case ActiveFilterType::HighPass: {
+        const auto& value = std::get<ActiveFilterHighPassParameters>(section.parameters());
+        parameters.insert(QStringLiteral("characteristic"),
+                          activeFilterCharacteristicToString(value.characteristic));
+        parameters.insert(QStringLiteral("order"), value.order);
+        parameters.insert(QStringLiteral("frequencyHz"), value.frequencyHz);
+        parameters.insert(QStringLiteral("q"), value.q);
+        break;
+    }
+    case ActiveFilterType::BandPass: {
+        const auto& value = std::get<ActiveFilterBandPassParameters>(section.parameters());
+        parameters.insert(QStringLiteral("characteristic"),
+                          activeFilterCharacteristicToString(value.characteristic));
+        parameters.insert(QStringLiteral("order"), value.order);
+        parameters.insert(QStringLiteral("lowerFrequencyHz"), value.lowerFrequencyHz);
+        parameters.insert(QStringLiteral("upperFrequencyHz"), value.upperFrequencyHz);
+        parameters.insert(QStringLiteral("q"), value.q);
+        break;
+    }
+    case ActiveFilterType::Notch: {
+        const auto& value = std::get<ActiveFilterNotchParameters>(section.parameters());
+        parameters.insert(QStringLiteral("centerFrequencyHz"), value.centerFrequencyHz);
+        parameters.insert(QStringLiteral("q"), value.q);
+        parameters.insert(QStringLiteral("gainDb"), value.gainDb);
+        break;
+    }
+    case ActiveFilterType::AllPass: {
+        const auto& value = std::get<ActiveFilterAllPassParameters>(section.parameters());
+        parameters.insert(QStringLiteral("order"), value.order);
+        parameters.insert(QStringLiteral("frequencyHz"), value.frequencyHz);
+        parameters.insert(QStringLiteral("q"), value.q);
+        break;
+    }
+    case ActiveFilterType::Gain: {
+        const auto& value = std::get<ActiveFilterGainParameters>(section.parameters());
+        parameters.insert(QStringLiteral("gainDb"), value.gainDb);
+        break;
+    }
+    case ActiveFilterType::Delay: {
+        const auto& value = std::get<ActiveFilterDelayParameters>(section.parameters());
+        parameters.insert(QStringLiteral("delayMs"), value.delayMs);
+        break;
+    }
+    case ActiveFilterType::Polarity: {
+        const auto& value = std::get<ActiveFilterPolarityParameters>(section.parameters());
+        parameters.insert(QStringLiteral("inverted"), value.inverted);
+        break;
+    }
+    }
+
+    return parameters;
+}
+
+QJsonObject activeFilterChainToJson(const ActiveFilterChain& chain)
+{
+    QJsonArray sections;
+    for (std::size_t sectionIndex = 0; sectionIndex < chain.sectionCount(); ++sectionIndex) {
+        const ActiveFilterSection& section = chain.section(sectionIndex);
+        QJsonObject sectionObject;
+        sectionObject.insert(QStringLiteral("enabled"), section.enabled());
+        sectionObject.insert(QStringLiteral("type"), activeFilterTypeToString(section.type()));
+        sectionObject.insert(QStringLiteral("parameters"), activeFilterParametersToJson(section));
+        sections.append(sectionObject);
+    }
+
+    QJsonObject activeFilter;
+    activeFilter.insert(QStringLiteral("enabled"), chain.enabled());
+    activeFilter.insert(QStringLiteral("showResponseInPlot"), chain.showResponseInPlot());
+    activeFilter.insert(QStringLiteral("sections"), sections);
+    return activeFilter;
+}
+
+bool validateActiveFilterSection(const ActiveFilterSection& section,
+                                 int driverIndex,
+                                 std::size_t sectionIndex,
+                                 QString* errorMessage)
+{
+    auto requireFinite = [driverIndex, sectionIndex, errorMessage](double value,
+                                                                   const QString& fieldName) {
+        if (std::isfinite(value)) {
+            return true;
+        }
+        setError(errorMessage,
+                 QStringLiteral("Driver %1 active-filter section %2 contains a non-finite '%3' value.")
+                     .arg(driverIndex + 1)
+                     .arg(static_cast<qulonglong>(sectionIndex + 1))
+                     .arg(fieldName));
+        return false;
+    };
+    auto requireCharacteristic = [driverIndex, sectionIndex, errorMessage](
+                                     ActiveFilterCharacteristic characteristic) {
+        if (!activeFilterCharacteristicToString(characteristic).isEmpty()) {
+            return true;
+        }
+        setError(errorMessage,
+                 QStringLiteral("Driver %1 active-filter section %2 contains an invalid characteristic.")
+                     .arg(driverIndex + 1)
+                     .arg(static_cast<qulonglong>(sectionIndex + 1)));
+        return false;
+    };
+
+    switch (section.type()) {
+    case ActiveFilterType::LowPass: {
+        const auto& value = std::get<ActiveFilterLowPassParameters>(section.parameters());
+        return requireCharacteristic(value.characteristic) &&
+               requireFinite(value.frequencyHz, QStringLiteral("frequencyHz")) &&
+               requireFinite(value.q, QStringLiteral("q"));
+    }
+    case ActiveFilterType::HighPass: {
+        const auto& value = std::get<ActiveFilterHighPassParameters>(section.parameters());
+        return requireCharacteristic(value.characteristic) &&
+               requireFinite(value.frequencyHz, QStringLiteral("frequencyHz")) &&
+               requireFinite(value.q, QStringLiteral("q"));
+    }
+    case ActiveFilterType::BandPass: {
+        const auto& value = std::get<ActiveFilterBandPassParameters>(section.parameters());
+        return requireCharacteristic(value.characteristic) &&
+               requireFinite(value.lowerFrequencyHz, QStringLiteral("lowerFrequencyHz")) &&
+               requireFinite(value.upperFrequencyHz, QStringLiteral("upperFrequencyHz")) &&
+               requireFinite(value.q, QStringLiteral("q"));
+    }
+    case ActiveFilterType::Notch: {
+        const auto& value = std::get<ActiveFilterNotchParameters>(section.parameters());
+        return requireFinite(value.centerFrequencyHz, QStringLiteral("centerFrequencyHz")) &&
+               requireFinite(value.q, QStringLiteral("q")) &&
+               requireFinite(value.gainDb, QStringLiteral("gainDb"));
+    }
+    case ActiveFilterType::AllPass: {
+        const auto& value = std::get<ActiveFilterAllPassParameters>(section.parameters());
+        return requireFinite(value.frequencyHz, QStringLiteral("frequencyHz")) &&
+               requireFinite(value.q, QStringLiteral("q"));
+    }
+    case ActiveFilterType::Gain:
+        return requireFinite(std::get<ActiveFilterGainParameters>(section.parameters()).gainDb,
+                             QStringLiteral("gainDb"));
+    case ActiveFilterType::Delay:
+        return requireFinite(std::get<ActiveFilterDelayParameters>(section.parameters()).delayMs,
+                             QStringLiteral("delayMs"));
+    case ActiveFilterType::Polarity:
+        return true;
+    }
+
+    return false;
+}
+
+bool validateActiveFilterChain(const ActiveFilterChain& chain,
+                               int driverIndex,
+                               QString* errorMessage)
+{
+    for (std::size_t sectionIndex = 0; sectionIndex < chain.sectionCount(); ++sectionIndex) {
+        if (!validateActiveFilterSection(chain.section(sectionIndex),
+                                         driverIndex,
+                                         sectionIndex,
+                                         errorMessage)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool validateMeasurementCurve(const KFilterMeasurementCurve& curve,
@@ -1023,6 +1543,7 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
                                     MeasurementCurves& splCorrectionCurves,
                                     bool& mergeMeasurementsEnabled,
                                     MeasurementHiddenStates& measurementHiddenForDrivers,
+                                    ActiveFilterChains& activeFilterChains,
                                     QString* errorMessage)
 {
     QFile file(filePath);
@@ -1044,6 +1565,7 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
     MeasurementCurves parsedSplCorrectionCurves;
     bool parsedMergeMeasurementsEnabled = false;
     MeasurementHiddenStates parsedMeasurementHiddenForDrivers{};
+    ActiveFilterChains parsedActiveFilterChains{};
     const char firstByte = data.at(firstByteIndex);
     const bool isJson = firstByte == '{' || firstByte == '[';
     const QByteArray significantData = data.mid(firstByteIndex);
@@ -1053,6 +1575,7 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
                           parsedSplCorrectionCurves,
                           parsedMergeMeasurementsEnabled,
                           parsedMeasurementHiddenForDrivers,
+                          parsedActiveFilterChains,
                           errorMessage)
         : loadLegacyProject(significantData, parsedDrivers, errorMessage);
     if (!loaded) {
@@ -1071,6 +1594,7 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
         std::any_of(splCorrectionCurves.cbegin(),
                     splCorrectionCurves.cend(),
                     [](const KFilterMeasurementCurve& curve) { return curve.size() >= 2; });
+    activeFilterChains = parsedActiveFilterChains;
 
     return true;
 }
@@ -1080,6 +1604,7 @@ bool KFilterProjectIo::saveToFile(const QString& filePath,
                                   const MeasurementCurves& splCorrectionCurves,
                                   bool mergeMeasurementsEnabled,
                                   const MeasurementHiddenStates& measurementHiddenForDrivers,
+                                  const ActiveFilterChains& activeFilterChains,
                                   QString* errorMessage)
 {
     QJsonArray driverArray;
@@ -1088,7 +1613,11 @@ bool KFilterProjectIo::saveToFile(const QString& filePath,
         const KFilterMeasurementCurve& correctionCurve =
             splCorrectionCurves[static_cast<std::size_t>(driverIndex)];
         if (!validateFiniteDriverData(currentDriver, driverIndex, errorMessage) ||
-            !validateMeasurementCurve(correctionCurve, driverIndex, errorMessage)) {
+            !validateMeasurementCurve(correctionCurve, driverIndex, errorMessage) ||
+            !validateActiveFilterChain(
+                activeFilterChains[static_cast<std::size_t>(driverIndex)],
+                driverIndex,
+                errorMessage)) {
             return false;
         }
 
@@ -1101,6 +1630,9 @@ bool KFilterProjectIo::saveToFile(const QString& filePath,
                 correctionCurve,
                 measurementHiddenForDrivers[static_cast<std::size_t>(driverIndex)] &&
                     !correctionCurve.isEmpty()));
+        driverObject.insert(
+            QStringLiteral("activeFilter"),
+            activeFilterChainToJson(activeFilterChains[static_cast<std::size_t>(driverIndex)]));
         driverArray.append(driverObject);
     }
 

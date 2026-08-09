@@ -7,6 +7,7 @@
 #ifndef KFILTERPROJECTIO_H
 #define KFILTERPROJECTIO_H
 
+#include "activefiltermodel.h"
 #include "driver.h"
 #include "kfiltermeasurementcurve.h"
 
@@ -20,8 +21,9 @@ public:
     static constexpr int DriverCount = 4;
     static constexpr int NetworkUnitCount = 48;
     static constexpr int LegacyJsonFormatVersion = 1;
-    static constexpr int JsonFormatVersion = 4;
+    static constexpr int JsonFormatVersion = 5;
 
+    using ActiveFilterChains = std::array<ActiveFilterChain, DriverCount>;
     using MeasurementCurves = std::array<KFilterMeasurementCurve, DriverCount>;
     using MeasurementHiddenStates = std::array<bool, DriverCount>;
 
@@ -30,6 +32,7 @@ public:
                              MeasurementCurves& splCorrectionCurves,
                              bool& mergeMeasurementsEnabled,
                              MeasurementHiddenStates& measurementHiddenForDrivers,
+                             ActiveFilterChains& activeFilterChains,
                              QString* errorMessage = nullptr);
 
     static bool saveToFile(const QString& filePath,
@@ -37,6 +40,7 @@ public:
                            const MeasurementCurves& splCorrectionCurves,
                            bool mergeMeasurementsEnabled,
                            const MeasurementHiddenStates& measurementHiddenForDrivers,
+                           const ActiveFilterChains& activeFilterChains,
                            QString* errorMessage = nullptr);
 };
 

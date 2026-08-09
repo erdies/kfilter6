@@ -62,9 +62,11 @@ bool parametersEquivalent(const ActiveFilterParameters& first,
                    (firstParameters.characteristic != ActiveFilterCharacteristic::GenericQ ||
                     firstParameters.q == secondParameters.q);
         } else if constexpr (std::is_same_v<First, ActiveFilterNotchParameters>) {
+            // Patch 182 implements the canonical full-depth second-order notch.
+            // gainDb remains persisted model metadata for possible future finite-depth
+            // variants, but it does not affect the current transfer function/cache.
             return firstParameters.centerFrequencyHz == secondParameters.centerFrequencyHz &&
-                   firstParameters.q == secondParameters.q &&
-                   firstParameters.gainDb == secondParameters.gainDb;
+                   firstParameters.q == secondParameters.q;
         } else if constexpr (std::is_same_v<First, ActiveFilterAllPassParameters>) {
             return firstParameters.order == secondParameters.order &&
                    firstParameters.frequencyHz == secondParameters.frequencyHz &&

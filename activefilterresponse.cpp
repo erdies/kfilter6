@@ -39,6 +39,33 @@ bool validButterworthParameters(int order, double cutoffHz)
     return order >= 1 && order <= 8 && std::isfinite(cutoffHz) && cutoffHz > 0.0;
 }
 
+bool validBandPassParameters(int order, double lowerFrequencyHz, double upperFrequencyHz)
+{
+    return order >= 1 && order <= 8 &&
+           std::isfinite(lowerFrequencyHz) && lowerFrequencyHz > 0.0 &&
+           std::isfinite(upperFrequencyHz) && upperFrequencyHz > lowerFrequencyHz;
+}
+
+bool validNotchParameters(double centerFrequencyHz, double q)
+{
+    return std::isfinite(centerFrequencyHz) && centerFrequencyHz > 0.0 &&
+           std::isfinite(q) && q > 0.0;
+}
+
+std::complex<double> notchTransfer(double frequencyHz,
+                                   double centerFrequencyHz,
+                                   double q)
+{
+    // Normalized form of
+    // H(s) = (s^2 + w0^2) / (s^2 + (w0/Q)s + w0^2), with s = j*w.
+    // Using r = f/f0 keeps the computation well-scaled and yields exactly 0+0j
+    // when a frequency-grid point is exactly equal to the notch center.
+    const double ratio = frequencyHz / centerFrequencyHz;
+    const double numerator = 1.0 - ratio * ratio;
+    const std::complex<double> denominator{numerator, ratio / q};
+    return numerator / denominator;
+}
+
 std::complex<double> butterworthTransfer(int order,
                                          double frequencyHz,
                                          double cutoffHz,
@@ -78,6 +105,56 @@ SectionSupport evaluateSection(const ActiveFilterSection& section,
         return SectionSupport::Supported;
     }
 
+    if (section.type() == ActiveFilterType::BandPass) {
+        const auto& parameters = std::get<ActiveFilterBandPassParameters>(section.parameters());
+        if (parameters.characteristic != ActiveFilterCharacteristic::Butterworth) {
+            return SectionSupport::Unsupported;
+        }
+        if (!validBandPassParameters(parameters.order,
+                                     parameters.lowerFrequencyHz,
+                                     parameters.upperFrequencyHz)) {
+            return SectionSupport::Invalid;
+        }
+
+        // KFilter defines a crossover-style band-pass as one Butterworth high-pass
+        // at the lower cutoff multiplied by one Butterworth low-pass at the upper
+        // cutoff. `order` therefore applies independently to both flanks.
+        for (std::size_t sampleIndex = 0; sampleIndex < KFilterFrequencyCount; ++sampleIndex) {
+            const double frequencyHz = frequencies[sampleIndex];
+            if (!std::isfinite(frequencyHz) || frequencyHz <= 0.0) {
+                return SectionSupport::Invalid;
+            }
+            response[sampleIndex] =
+                butterworthTransfer(parameters.order,
+                                    frequencyHz,
+                                    parameters.lowerFrequencyHz,
+                                    true) *
+                butterworthTransfer(parameters.order,
+                                    frequencyHz,
+                                    parameters.upperFrequencyHz,
+                                    false);
+        }
+        return SectionSupport::Supported;
+    }
+
+    if (section.type() == ActiveFilterType::Notch) {
+        const auto& parameters = std::get<ActiveFilterNotchParameters>(section.parameters());
+        if (!validNotchParameters(parameters.centerFrequencyHz, parameters.q)) {
+            return SectionSupport::Invalid;
+        }
+
+        for (std::size_t sampleIndex = 0; sampleIndex < KFilterFrequencyCount; ++sampleIndex) {
+            const double frequencyHz = frequencies[sampleIndex];
+            if (!std::isfinite(frequencyHz) || frequencyHz <= 0.0) {
+                return SectionSupport::Invalid;
+            }
+            response[sampleIndex] = notchTransfer(frequencyHz,
+                                                  parameters.centerFrequencyHz,
+                                                  parameters.q);
+        }
+        return SectionSupport::Supported;
+    }
+
     int order = 0;
     double cutoffHz = 0.0;
     bool highPass = false;
@@ -102,8 +179,8 @@ SectionSupport evaluateSection(const ActiveFilterSection& section,
         highPass = true;
         break;
     }
-    case ActiveFilterType::BandPass:
-    case ActiveFilterType::Notch:
+    case ActiveFilterType::BandPass: // handled above; retained for exhaustive enum handling
+    case ActiveFilterType::Notch: // handled above; retained for exhaustive enum handling
     case ActiveFilterType::AllPass:
     case ActiveFilterType::Gain:
     case ActiveFilterType::Delay:

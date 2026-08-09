@@ -2601,9 +2601,10 @@ void KFilterQt6App::editActiveFilterParameters()
         m_doc->viewrefresh();
     });
     connect(&dialog, &ActiveFilterParametersDialog::parametersApplied, this, [this]() {
+        m_doc->setModified(true);
         m_doc->viewrefresh();
         statusBar()->showMessage(
-            tr("Active-filter model applied in memory; supported Butterworth filters now affect the simulation (.kfp persistence is still unchanged)."),
+            tr("Active-filter parameters applied; supported Butterworth and Notch filters affect the simulation and are stored with the project."),
             4000);
     });
     dialog.exec();

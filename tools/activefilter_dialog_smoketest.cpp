@@ -48,7 +48,24 @@ int main(int argc, char **argv)
     auto& notch = std::get<ActiveFilterNotchParameters>(driver3.section(1).parameters());
     notch.centerFrequencyHz = 4200.0;
     notch.q = 3.5;
-    notch.gainDb = -6.0;
+    notch.gainDb = -6.0; // persisted reserved metadata; not used by Patch-182 transfer
+
+    ActiveFilterChain& driver4 = chains.at(3);
+    driver4.setEnabled(true);
+    driver4.setShowResponseInPlot(true);
+    driver4.addSection(ActiveFilterType::BandPass);
+    auto& driver4BandPass =
+        std::get<ActiveFilterBandPassParameters>(driver4.section(0).parameters());
+    driver4BandPass.characteristic = ActiveFilterCharacteristic::Butterworth;
+    driver4BandPass.order = 3;
+    driver4BandPass.lowerFrequencyHz = 300.0;
+    driver4BandPass.upperFrequencyHz = 3200.0;
+
+    driver4.addSection(ActiveFilterType::Notch);
+    auto& driver4Notch =
+        std::get<ActiveFilterNotchParameters>(driver4.section(1).parameters());
+    driver4Notch.centerFrequencyHz = 2500.0;
+    driver4Notch.q = 5.0;
 
     ActiveFilterParametersDialog dialog(chains, nullptr, 2);
 
@@ -72,6 +89,36 @@ int main(int argc, char **argv)
         return 2;
     }
 
+    auto *driver4Status = dialog.findChild<QLabel *>(QStringLiteral("activeFilterResponseStatus4"));
+    if (driver4Status == nullptr || !driver4Status->text().contains(QStringLiteral("valid and applied"))) {
+        std::cerr << "supported Band-pass/Notch chain was not reported as valid\n";
+        return 2;
+    }
+
+    auto *driver4Table = dialog.findChild<QTableWidget *>(QStringLiteral("activeFilterSectionTable4"));
+    auto *driver4Characteristic = dialog.findChild<QComboBox *>(QStringLiteral("activeFilterCharacteristicCombo4"));
+    auto *driver4Order = dialog.findChild<QSpinBox *>(QStringLiteral("activeFilterOrderSpin4"));
+    auto *driver4Frequency1 = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterFrequency1Spin4"));
+    auto *driver4Frequency2 = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterFrequency2Spin4"));
+    auto *driver4Q = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterQSpin4"));
+    if (driver4Table == nullptr || driver4Table->rowCount() != 2 ||
+        driver4Characteristic == nullptr || driver4Order == nullptr ||
+        driver4Frequency1 == nullptr || driver4Frequency2 == nullptr || driver4Q == nullptr) {
+        std::cerr << "Band-pass dialog controls are missing\n";
+        return 3;
+    }
+    driver4Table->selectRow(0);
+    driver4Table->setCurrentCell(0, 1);
+    QApplication::processEvents();
+    if (!driver4Characteristic->isEnabled() || !driver4Order->isEnabled() ||
+        !driver4Frequency1->isEnabled() || !driver4Frequency2->isEnabled() ||
+        driver4Q->isEnabled() || driver4Order->value() != 3 ||
+        !near(driver4Frequency1->value(), 300.0) ||
+        !near(driver4Frequency2->value(), 3200.0)) {
+        std::cerr << "Butterworth Band-pass editor does not expose lower/upper cutoff and order correctly\n";
+        return 3;
+    }
+
     table->selectRow(0);
     table->setCurrentCell(0, 1);
     QApplication::processEvents();
@@ -79,10 +126,22 @@ int main(int argc, char **argv)
     auto *characteristic = dialog.findChild<QComboBox *>(QStringLiteral("activeFilterCharacteristicCombo3"));
     auto *order = dialog.findChild<QSpinBox *>(QStringLiteral("activeFilterOrderSpin3"));
     auto *frequency1 = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterFrequency1Spin3"));
-    if (characteristic == nullptr || order == nullptr || frequency1 == nullptr ||
+    auto *q = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterQSpin3"));
+    auto *gain = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterGainSpin3"));
+    if (characteristic == nullptr || order == nullptr || frequency1 == nullptr || q == nullptr || gain == nullptr ||
         characteristic->currentData().toInt() != static_cast<int>(ActiveFilterCharacteristic::LinkwitzRiley) ||
         order->value() != 4 || !near(frequency1->value(), 80.0)) {
         std::cerr << "typed model parameters were not loaded into the editor\n";
+        return 3;
+    }
+
+    table->selectRow(1);
+    table->setCurrentCell(1, 1);
+    QApplication::processEvents();
+    if (!near(frequency1->value(), 4200.0) || !near(q->value(), 3.5) ||
+        characteristic->isEnabled() || order->isEnabled() || gain->isEnabled() ||
+        !frequency1->isEnabled() || !q->isEnabled()) {
+        std::cerr << "Notch editor does not expose exactly center frequency and Q\n";
         return 3;
     }
 
@@ -90,7 +149,6 @@ int main(int argc, char **argv)
     auto *moveUpButton = dialog.findChild<QPushButton *>(QStringLiteral("activeFilterMoveUpButton3"));
     auto *removeButton = dialog.findChild<QPushButton *>(QStringLiteral("activeFilterRemoveButton3"));
     auto *type = dialog.findChild<QComboBox *>(QStringLiteral("activeFilterTypeCombo3"));
-    auto *gain = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterGainSpin3"));
     if (addButton == nullptr || moveUpButton == nullptr || removeButton == nullptr ||
         type == nullptr || gain == nullptr) {
         std::cerr << "active-filter editing controls are missing\n";

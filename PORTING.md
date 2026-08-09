@@ -782,3 +782,79 @@ changed.
   sums, per-driver persistence, version-3 migration, older-format compatibility,
   and transactional rejection of invalid per-driver hide values.
 
+## Patch 181: Active-filter project persistence
+
+- Advanced the JSON `.kfp` project format to `formatVersion = 5`.
+- Each driver now stores an `activeFilter` object containing chain enable state,
+  diagnostic-plot visibility, and the complete ordered section list.
+- Every section persists its own enable state, filter type, and all parameters
+  currently represented by `ActiveFilterSection`, including metadata for
+  DSP-unsupported types and characteristics. Persistence is therefore independent
+  of transfer-engine support.
+- Complex 150-point transfer-response arrays and response-cache state are not
+  serialized. They remain derived transient data and are rebuilt from the loaded
+  metadata.
+- JSON versions 1 through 4 and the legacy text format remain readable. Because
+  those formats predate active-filter persistence, they load with default empty
+  active-filter chains.
+- Version-5 active-filter parsing is transactional: malformed or unknown current
+  metadata rejects the project without modifying the destination document state.
+- `KFilterDoc::openDocument()` now restores active-filter chains instead of
+  resetting them after project load. `newDocument()` and `deleteContents()` still
+  reset all chains.
+- Project-I/O smoke coverage now round-trips all modeled active-filter section
+  types and all four current crossover characteristics, including unsupported
+  DSP metadata. Document smoke coverage verifies that stale in-memory chains are
+  replaced by persisted state.
+
+## Patch 182: Second-order active Notch filter
+
+- Added DSP support for the existing `ActiveFilterType::Notch` model section.
+- The implementation is the canonical analog full-depth second-order notch
+  `H(s) = (s^2 + w0^2) / (s^2 + (w0/Q)s + w0^2)`, evaluated in normalized form
+  on the shared 150-point KFilter frequency grid.
+- Notch parameters are center frequency `f0 > 0` and quality factor `Q > 0`.
+  A grid point exactly at `f0` produces the valid complex multiplier `0+0j`;
+  increasing Q narrows the stop band.
+- The existing Notch `gainDb` model field remains persisted for forward
+  compatibility but is intentionally not transfer-relevant in Patch 182. It no
+  longer invalidates the transfer cache and is disabled in the Notch editor.
+- Diagnostic plotting and the centralized driver/vector/energy signal path use
+  the new Notch response automatically. An exact `H=0` diagnostic point is drawn
+  at the visible SPL floor instead of creating a gap in the dashed transfer curve.
+  A chain containing another unsupported enabled section still bypasses the
+  complete active-filter stage.
+- Updated active-filter dialog/status text to reflect `.kfp` version-5
+  persistence and current Notch support. Applying active-filter parameters now
+  marks the document modified so persisted edits participate in normal project
+  save handling.
+- Extended the response smoke test for exact notch null, analytical magnitude,
+  phase sign around `f0`, Q-dependent bandwidth, invalid parameters, transfer
+  cache behavior, sample application, and mixed unsupported-chain bypass.
+  Document/dialog smoke tests additionally cover Notch integration and editor
+  control semantics.
+- `.kfp` remains `formatVersion = 5`; no project-format change is required.
+
+## Patch 183: Butterworth active Band-pass filter
+
+- Added DSP support for the existing `ActiveFilterType::BandPass` model section
+  when its characteristic is Butterworth.
+- KFilter defines this as a loudspeaker/crossover-style band-pass: a Butterworth
+  high-pass at `lowerFrequencyHz` multiplied by a Butterworth low-pass at
+  `upperFrequencyHz`. The selected `order` applies independently to each flank.
+- Valid parameters are order 1 through 8, finite positive cutoffs, and
+  `lowerFrequencyHz < upperFrequencyHz`. Other characteristics remain explicitly
+  unsupported, preserving the complete-chain bypass rule.
+- The complex HP and LP responses are multiplied point-by-point on the shared
+  150-point frequency grid, so both magnitude and phase enter the centralized
+  driver/vector/energy signal path.
+- The Active Filter dialog now reports Band-pass as supported and exposes both
+  cutoff controls for Butterworth Band-pass. Q remains disabled because it is not
+  transfer-relevant for this characteristic.
+- Response smoke coverage verifies orders 1 through 8 against an independent
+  HP*LP cascade, low/high-frequency attenuation, invalid cutoff ordering,
+  unsupported characteristics, and cache invalidation. Dialog/document smoke
+  tests cover editor semantics and centralized simulation integration.
+- `.kfp` remains `formatVersion = 5`; Band-pass metadata was already persisted by
+  Patch 181, so no project-format migration is required.
+

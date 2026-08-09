@@ -15,9 +15,11 @@
 #include <cstddef>
 #include <cstdint>
 
-// The current transfer engine deliberately supports only analog Butterworth low-pass/high-pass
-// sections. Other section types remain representable by the data model but are
-// reported explicitly instead of being silently treated as neutral filters.
+// The current transfer engine supports analog Butterworth low-pass, high-pass and
+// crossover-style band-pass sections (orders 1..8 per flank), plus the full-depth
+// second-order notch section. Other section types remain
+// representable by the data model but are reported explicitly instead of being silently
+// treated as neutral filters.
 enum class ActiveFilterResponseStatus
 {
     Neutral = 0,

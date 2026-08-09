@@ -55,6 +55,32 @@ ActiveFilterChain singleButterworth(ActiveFilterType type, int order, double cut
     }
     return chain;
 }
+
+
+ActiveFilterChain singleBandPass(int order, double lowerFrequencyHz, double upperFrequencyHz)
+{
+    ActiveFilterChain chain;
+    chain.setEnabled(true);
+    const std::size_t index = chain.addSection(ActiveFilterType::BandPass);
+    auto& parameters =
+        std::get<ActiveFilterBandPassParameters>(chain.section(index).parameters());
+    parameters.characteristic = ActiveFilterCharacteristic::Butterworth;
+    parameters.order = order;
+    parameters.lowerFrequencyHz = lowerFrequencyHz;
+    parameters.upperFrequencyHz = upperFrequencyHz;
+    return chain;
+}
+
+ActiveFilterChain singleNotch(double centerFrequencyHz, double q)
+{
+    ActiveFilterChain chain;
+    chain.setEnabled(true);
+    const std::size_t index = chain.addSection(ActiveFilterType::Notch);
+    auto& parameters = std::get<ActiveFilterNotchParameters>(chain.section(index).parameters());
+    parameters.centerFrequencyHz = centerFrequencyHz;
+    parameters.q = q;
+    return chain;
+}
 }
 
 int main()
@@ -139,6 +165,95 @@ int main()
         return 1;
     }
 
+    // Patch 182: canonical full-depth second-order notch. The center is chosen
+    // directly from the shared 150-point grid so H(f0) must be exactly 0+0j.
+    constexpr double notchQ = 4.0;
+    response = calculateActiveFilterResponse(singleNotch(cutoffHz, notchQ));
+    if (!require(response.status == ActiveFilterResponseStatus::Valid,
+                 "second-order notch must be supported") ||
+        !require(response.hasActiveSections,
+                 "enabled notch must report an active section") ||
+        !require(nearComplex(response.values[CutoffIndex], {0.0, 0.0}, 1.0e-15),
+                 "notch center must be a full null")) {
+        return 1;
+    }
+
+    for (std::size_t index = 0; index < KFilterFrequencyCount; ++index) {
+        const double ratio = frequencies[index] / cutoffHz;
+        const double numerator = 1.0 - ratio * ratio;
+        const double expectedMagnitude =
+            std::abs(numerator) / std::hypot(numerator, ratio / notchQ);
+        if (!require(near(std::abs(response.values[index]), expectedMagnitude, 3.0e-10),
+                     "notch magnitude does not match second-order reference")) {
+            return 1;
+        }
+    }
+
+    if (!require(response.values[CutoffIndex - 1].imag() < 0.0,
+                 "notch phase must be negative immediately below the center") ||
+        !require(response.values[CutoffIndex + 1].imag() > 0.0,
+                 "notch phase must be positive immediately above the center") ||
+        !require(std::abs(response.values.front()) > 0.99,
+                 "notch must approach neutral transfer far below the center") ||
+        !require(std::abs(response.values.back()) > 0.99,
+                 "notch must approach neutral transfer far above the center")) {
+        return 1;
+    }
+
+    const ActiveFilterResponse broadNotch = calculateActiveFilterResponse(singleNotch(cutoffHz, 0.7));
+    const ActiveFilterResponse narrowNotch = calculateActiveFilterResponse(singleNotch(cutoffHz, 8.0));
+    if (!require(std::abs(narrowNotch.values[CutoffIndex - 1]) >
+                     std::abs(broadNotch.values[CutoffIndex - 1]),
+                 "higher notch Q must produce a narrower stop band")) {
+        return 1;
+    }
+
+    // Patch 183: crossover-style Butterworth band-pass = HP(lower) * LP(upper).
+    // Order applies to each flank independently.
+    constexpr std::size_t BandLowerIndex = 45;
+    constexpr std::size_t BandUpperIndex = 105;
+    constexpr std::size_t BandMiddleIndex = 75;
+    const double bandLowerHz = frequencies[BandLowerIndex];
+    const double bandUpperHz = frequencies[BandUpperIndex];
+    for (int order = 1; order <= 8; ++order) {
+        const ActiveFilterResponse bandPass =
+            calculateActiveFilterResponse(singleBandPass(order, bandLowerHz, bandUpperHz));
+        const ActiveFilterResponse referenceHighPass = calculateActiveFilterResponse(
+            singleButterworth(ActiveFilterType::HighPass, order, bandLowerHz));
+        const ActiveFilterResponse referenceLowPass = calculateActiveFilterResponse(
+            singleButterworth(ActiveFilterType::LowPass, order, bandUpperHz));
+
+        if (!require(bandPass.status == ActiveFilterResponseStatus::Valid,
+                     "Butterworth band-pass must be supported") ||
+            !require(bandPass.hasActiveSections,
+                     "enabled band-pass must report an active section")) {
+            return 1;
+        }
+
+        for (std::size_t index = 0; index < KFilterFrequencyCount; ++index) {
+            const std::complex<double> expected =
+                referenceHighPass.values[index] * referenceLowPass.values[index];
+            if (!require(nearComplex(bandPass.values[index], expected, 5.0e-10),
+                         "band-pass complex response must equal HP(lower) * LP(upper)")) {
+                return 1;
+            }
+        }
+
+        if (!require(std::abs(bandPass.values.front()) <
+                         std::abs(bandPass.values[BandMiddleIndex]),
+                     "band-pass must attenuate below the lower cutoff") ||
+            !require(std::abs(bandPass.values.back()) <
+                         std::abs(bandPass.values[BandMiddleIndex]),
+                     "band-pass must attenuate above the upper cutoff")) {
+            return 1;
+        }
+
+        if (!require(std::abs(bandPass.values[BandMiddleIndex].imag()) < 2.0e-9,
+                     "log-symmetric Butterworth band-pass flanks must cancel phase at geometric center")) {
+            return 1;
+        }
+    }
+
     ActiveFilterChain cascade;
     cascade.setEnabled(true);
     cascade.addSection(ActiveFilterType::HighPass);
@@ -183,9 +298,59 @@ int main()
         return 1;
     }
 
+    ActiveFilterChain invalidBandPass = singleBandPass(2, bandLowerHz, bandUpperHz);
+    auto& invalidBandPassParameters =
+        std::get<ActiveFilterBandPassParameters>(invalidBandPass.section(0).parameters());
+    invalidBandPassParameters.lowerFrequencyHz = bandUpperHz;
+    response = calculateActiveFilterResponse(invalidBandPass);
+    if (!require(response.status == ActiveFilterResponseStatus::InvalidParameters,
+                 "band-pass lower cutoff must be below upper cutoff")) {
+        return 1;
+    }
+    invalidBandPassParameters.lowerFrequencyHz = bandLowerHz;
+    invalidBandPassParameters.upperFrequencyHz = bandUpperHz;
+    invalidBandPassParameters.order = 0;
+    response = calculateActiveFilterResponse(invalidBandPass);
+    if (!require(response.status == ActiveFilterResponseStatus::InvalidParameters,
+                 "band-pass order below one must be invalid")) {
+        return 1;
+    }
+    invalidBandPassParameters.order = 2;
+    invalidBandPassParameters.upperFrequencyHz = 0.0;
+    response = calculateActiveFilterResponse(invalidBandPass);
+    if (!require(response.status == ActiveFilterResponseStatus::InvalidParameters,
+                 "band-pass upper cutoff must be positive")) {
+        return 1;
+    }
+
+    ActiveFilterChain unsupportedBandPass = singleBandPass(2, bandLowerHz, bandUpperHz);
+    std::get<ActiveFilterBandPassParameters>(unsupportedBandPass.section(0).parameters()).characteristic =
+        ActiveFilterCharacteristic::LinkwitzRiley;
+    response = calculateActiveFilterResponse(unsupportedBandPass);
+    if (!require(response.status == ActiveFilterResponseStatus::Unsupported,
+                 "non-Butterworth band-pass must remain unsupported")) {
+        return 1;
+    }
+
+    ActiveFilterChain invalidNotch = singleNotch(cutoffHz, 0.0);
+    response = calculateActiveFilterResponse(invalidNotch);
+    if (!require(response.status == ActiveFilterResponseStatus::InvalidParameters,
+                 "zero notch Q must be invalid")) {
+        return 1;
+    }
+    auto& invalidNotchParameters =
+        std::get<ActiveFilterNotchParameters>(invalidNotch.section(0).parameters());
+    invalidNotchParameters.q = 1.0;
+    invalidNotchParameters.centerFrequencyHz = 0.0;
+    response = calculateActiveFilterResponse(invalidNotch);
+    if (!require(response.status == ActiveFilterResponseStatus::InvalidParameters,
+                 "zero notch center frequency must be invalid")) {
+        return 1;
+    }
+
     ActiveFilterChain ignoredUnsupported = singleButterworth(ActiveFilterType::LowPass, 2, cutoffHz);
-    const std::size_t notchIndex = ignoredUnsupported.addSection(ActiveFilterType::Notch);
-    ignoredUnsupported.section(notchIndex).setEnabled(false);
+    const std::size_t gainIndex = ignoredUnsupported.addSection(ActiveFilterType::Gain);
+    ignoredUnsupported.section(gainIndex).setEnabled(false);
     response = calculateActiveFilterResponse(ignoredUnsupported);
     if (!require(response.status == ActiveFilterResponseStatus::Valid,
                  "disabled unsupported section must be neutral")) {
@@ -223,6 +388,40 @@ int main()
         return 1;
     }
 
+    ActiveFilterResponseCache bandPassCache;
+    ActiveFilterChain cachedBandPass = singleBandPass(2, bandLowerHz, bandUpperHz);
+    bandPassCache.responseFor(cachedBandPass);
+    const std::uint64_t bandPassGeneration = bandPassCache.generation();
+    std::get<ActiveFilterBandPassParameters>(cachedBandPass.section(0).parameters()).q = 9.0;
+    bandPassCache.responseFor(cachedBandPass);
+    if (!require(bandPassCache.generation() == bandPassGeneration,
+                 "unused Butterworth band-pass Q must not invalidate transfer cache")) {
+        return 1;
+    }
+    std::get<ActiveFilterBandPassParameters>(cachedBandPass.section(0).parameters()).upperFrequencyHz *= 1.1;
+    bandPassCache.responseFor(cachedBandPass);
+    if (!require(bandPassCache.generation() == bandPassGeneration + 1,
+                 "band-pass cutoff change must invalidate transfer cache")) {
+        return 1;
+    }
+
+    ActiveFilterResponseCache notchCache;
+    ActiveFilterChain cachedNotch = singleNotch(cutoffHz, 3.0);
+    notchCache.responseFor(cachedNotch);
+    const std::uint64_t notchGeneration = notchCache.generation();
+    std::get<ActiveFilterNotchParameters>(cachedNotch.section(0).parameters()).gainDb = -12.0;
+    notchCache.responseFor(cachedNotch);
+    if (!require(notchCache.generation() == notchGeneration,
+                 "reserved notch gain metadata must not invalidate transfer cache")) {
+        return 1;
+    }
+    std::get<ActiveFilterNotchParameters>(cachedNotch.section(0).parameters()).q = 6.0;
+    notchCache.responseFor(cachedNotch);
+    if (!require(notchCache.generation() == notchGeneration + 1,
+                 "notch Q change must invalidate transfer cache")) {
+        return 1;
+    }
+
     const std::complex<double> inputSignal{2.0, 0.0};
     response = calculateActiveFilterResponse(
         singleButterworth(ActiveFilterType::LowPass, 1, cutoffHz));
@@ -231,6 +430,15 @@ int main()
                      {1.0, -1.0},
                      2.0e-10),
                  "valid response must be multiplied into the complex driver sample")) {
+        return 1;
+    }
+
+    response = calculateActiveFilterResponse(singleNotch(cutoffHz, 4.0));
+    if (!require(nearComplex(
+                     applyActiveFilterResponseSample(response, CutoffIndex, inputSignal),
+                     {0.0, 0.0},
+                     1.0e-15),
+                 "notch center must null the complex driver sample")) {
         return 1;
     }
 
@@ -252,7 +460,7 @@ int main()
 
     ActiveFilterChain mixedUnsupported =
         singleButterworth(ActiveFilterType::LowPass, 1, cutoffHz);
-    mixedUnsupported.addSection(ActiveFilterType::Notch);
+    mixedUnsupported.addSection(ActiveFilterType::Gain);
     response = calculateActiveFilterResponse(mixedUnsupported);
     if (!require(response.status == ActiveFilterResponseStatus::Unsupported,
                  "mixed supported/unsupported chain must be reported as unsupported") ||

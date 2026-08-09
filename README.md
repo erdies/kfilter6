@@ -98,7 +98,51 @@ With **Merge Measurement** enabled, the interpolated correction is applied to th
 
 The **Hide Measurement for Driver** submenu controls each driver independently. A checked driver keeps its simulated SPL curve visible but suppresses both the stored correction curve and its correction influence. With Merge enabled, hidden drivers therefore contribute their uncorrected simulation to vector and energetic sums, while non-hidden drivers contribute their corrected simulation. The same effective contribution is used for the individual curve and both sum modes, so mixed hide states remain mathematically and visually consistent.
 
-Only the resulting relative correction points are project data. The original measurement file, absolute raw levels, calibration range, offset settings, and fade settings are not persisted. The current `.kfp` JSON format version 4 stores each correction curve together with its per-driver hide state, plus the project-wide merge switch. PDF rendering follows the same effective per-driver correction state as the plot.
+Only the resulting relative correction points are project data. The original measurement file, absolute raw levels, calibration range, offset settings, and fade settings are not persisted. The current `.kfp` JSON format version 5 stores each correction curve together with its per-driver hide state, plus the project-wide merge switch. It also persists every driver's complete active-filter metadata (chain enable state, diagnostic-plot visibility, ordered sections, section enable state, type, characteristic, and all type-specific parameters). The calculated complex transfer-response arrays remain transient and are rebuilt from this metadata after loading. PDF rendering follows the same effective per-driver correction state as the plot.
+
+### Active filters
+
+The **Edit -> Active Filter Parameters...** dialog maintains one ordered active-filter
+chain per driver. Supported sections are multiplied into the complex driver response
+before the measurement-amplitude correction, so both magnitude and phase affect the
+individual SPL curve, vector sum, and energetic sum through the same centralized
+signal path. The optional diagnostic overlay shows `20 * log10(|H_active(f)|)` and
+does not control whether the filter itself is active.
+
+Patch 183 supports these analog transfer sections:
+
+- Butterworth low-pass, orders 1 through 8;
+- Butterworth high-pass, orders 1 through 8;
+- Butterworth band-pass, defined as high-pass at the lower cutoff multiplied by
+  low-pass at the upper cutoff, with the selected order applied independently
+  to both flanks;
+- full-depth second-order Notch with center frequency `f0` and quality factor `Q`.
+
+For a Butterworth Band-pass, `Frequency 1` is the lower cutoff and `Frequency 2`
+is the upper cutoff. The lower cutoff must be strictly below the upper cutoff.
+This is a crossover-style loudspeaker band-pass rather than a resonant `f0/Q`
+band-pass section. Its complex transfer is
+
+```text
+H_band(f) = H_highpass(f, f_lower) * H_lowpass(f, f_upper)
+```
+
+so magnitude and phase from both flanks are preserved.
+
+The Notch response is
+
+```text
+H(jw) = (1 - r^2) / (1 - r^2 + j*r/Q),  r = f/f0
+```
+
+so a raster point exactly at `f0` is nulled (`H = 0+0j`). Increasing `Q` narrows
+the rejected band. The currently persisted `gainDb` field of a Notch section is
+reserved metadata for a possible future finite-depth variant and does not affect
+the current DSP; the dialog therefore exposes only center frequency and Q for Notch.
+If any enabled section in a chain is unsupported or invalid, the complete active
+filter stage for that driver is bypassed rather than applying a supported prefix.
+Active-filter metadata is stored in `.kfp` format version 5; calculated 150-point
+complex responses remain transient cache data.
 
 ### Network preview
 
