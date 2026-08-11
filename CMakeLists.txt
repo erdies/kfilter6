@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(kfilter VERSION 0.1.0 LANGUAGES CXX)
 
-set(KFILTER_PATCH_LEVEL "197")
+set(KFILTER_PATCH_LEVEL "202")
 set(KFILTER_LICENSE_STRING "GPL-3.0-or-later")
 
 set(CMAKE_CXX_STANDARD 17)
@@ -89,6 +89,8 @@ if(KFILTER_BUILD_QT6_APP)
         activefilterparametersdialog.h
         baffleparametersdialog.cpp
         baffleparametersdialog.h
+        bafflegeometrypreview.cpp
+        bafflegeometrypreview.h
         networkparametersdialog.cpp
         networkparametersdialog.h
         networksectioneditdialog.cpp
@@ -141,6 +143,8 @@ if(KFILTER_BUILD_QT6_APP)
             tools/baffle_dialog_smoketest.cpp
             baffleparametersdialog.cpp
             baffleparametersdialog.h
+            bafflegeometrypreview.cpp
+            bafflegeometrypreview.h
             networkvalueutils.cpp
             networkvalueutils.h
         )

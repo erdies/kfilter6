@@ -5,6 +5,7 @@
  */
 
 #include "baffleparametersdialog.h"
+#include "bafflegeometrypreview.h"
 #include "networkvalueutils.h"
 
 #include <QApplication>
@@ -52,11 +53,14 @@ int main(int argc, char **argv)
     auto *driverX = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("baffleDriverXSpin1"));
     auto *driverY = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("baffleDriverYSpin1"));
     auto *midpoint = dialog.findChild<QLabel *>(QStringLiteral("baffleMidpointLabel1"));
+    auto *geometryPreviewWidget = dialog.findChild<QWidget *>(
+        QStringLiteral("baffleGeometryPreview1"));
+    auto *geometryPreview = dynamic_cast<BaffleGeometryPreview *>(geometryPreviewWidget);
     auto *showResponse = dialog.findChild<QCheckBox *>(QStringLiteral("baffleShowResponseDriver1"));
     auto *status = dialog.findChild<QLabel *>(QStringLiteral("baffleResponseStatus1"));
     if (enabled == nullptr || model == nullptr || width == nullptr || height == nullptr ||
         driverX == nullptr || driverY == nullptr || midpoint == nullptr ||
-        showResponse == nullptr || status == nullptr) {
+        geometryPreview == nullptr || showResponse == nullptr || status == nullptr) {
         std::cerr << "Baffle controls are missing\n";
         return 2;
     }
@@ -64,11 +68,33 @@ int main(int argc, char **argv)
     if (!enabled->isChecked() || model->count() != 2 ||
         model->currentData().toInt() != static_cast<int>(BaffleModel::SimpleBaffleStep) ||
         !near(width->value(), 231.0) || !showResponse->isChecked() ||
+        !near(geometryPreview->baffleWidthMm(), 231.0) ||
+        !near(geometryPreview->baffleHeightMm(), BaffleSettings{}.heightMm) ||
+        !near(geometryPreview->driverXmm(), BaffleSettings{}.driverXmm) ||
+        !near(geometryPreview->driverYmm(), BaffleSettings{}.driverYmm) ||
         !midpoint->text().contains(QStringLiteral("497")) ||
         !status->text().contains(QStringLiteral("valid complex Simple")) ||
         height->isEnabled() || driverX->isEnabled() || driverY->isEnabled()) {
         std::cerr << "Persisted Stage-1 state was not loaded into the dialog correctly\n";
         return 3;
+    }
+
+    // Patch 199: the geometry preview is presentation-only, follows focus and
+    // starts with the values already shown in the geometry controls.
+    tabs->setCurrentIndex(0);
+    dialog.show();
+    QApplication::processEvents();
+    width->setFocus(Qt::OtherFocusReason);
+    QApplication::processEvents();
+    if (geometryPreview->currentHighlight() != BaffleGeometryPreview::Highlight::BaffleWidth) {
+        std::cerr << "Baffle width focus did not highlight the geometry preview\n";
+        return 18;
+    }
+    enabled->setFocus(Qt::OtherFocusReason);
+    QApplication::processEvents();
+    if (geometryPreview->currentHighlight() != BaffleGeometryPreview::Highlight::None) {
+        std::cerr << "Geometry preview did not return to neutral state after focus left the geometry fields\n";
+        return 19;
     }
 
     int previewCount = 0;
@@ -81,6 +107,7 @@ int main(int argc, char **argv)
     width->setValue(300.0);
     QApplication::processEvents();
     if (!near(settings[0].widthMm, 300.0) || previewCount == 0 ||
+        !near(geometryPreview->baffleWidthMm(), 300.0) ||
         !midpoint->text().contains(QStringLiteral("383"))) {
         std::cerr << "Baffle width change was not mirrored into the live preview model\n";
         return 4;
@@ -146,9 +173,39 @@ int main(int argc, char **argv)
     QApplication::processEvents();
     if (!near(settings[0].widthMm, 231.0) || !near(settings[0].heightMm, 900.0) ||
         !near(settings[0].driverXmm, 90.0) || !near(settings[0].driverYmm, 310.0) ||
+        !near(geometryPreview->baffleWidthMm(), 231.0) ||
+        !near(geometryPreview->baffleHeightMm(), 900.0) ||
+        !near(geometryPreview->driverXmm(), 90.0) ||
+        !near(geometryPreview->driverYmm(), 310.0) ||
         !status->text().contains(QStringLiteral("valid complex Rectangular"))) {
         std::cerr << "Valid Rectangular Edge Diffraction geometry was not previewed\n";
         return 7;
+    }
+
+    height->setFocus(Qt::OtherFocusReason);
+    QApplication::processEvents();
+    if (geometryPreview->currentHighlight() != BaffleGeometryPreview::Highlight::BaffleHeight) {
+        std::cerr << "Baffle height focus did not highlight the geometry preview\n";
+        return 20;
+    }
+    driverX->setFocus(Qt::OtherFocusReason);
+    QApplication::processEvents();
+    if (geometryPreview->currentHighlight() != BaffleGeometryPreview::Highlight::DriverX) {
+        std::cerr << "Driver X focus did not highlight the geometry preview\n";
+        return 21;
+    }
+    driverY->setFocus(Qt::OtherFocusReason);
+    QApplication::processEvents();
+    if (geometryPreview->currentHighlight() != BaffleGeometryPreview::Highlight::DriverY) {
+        std::cerr << "Driver Y focus did not highlight the geometry preview\n";
+        return 22;
+    }
+
+    showResponse->setFocus(Qt::OtherFocusReason);
+    QApplication::processEvents();
+    if (geometryPreview->currentHighlight() != BaffleGeometryPreview::Highlight::None) {
+        std::cerr << "Geometry preview did not clear after leaving the geometry fields\n";
+        return 23;
     }
 
     showResponse->setChecked(false);
@@ -206,6 +263,6 @@ int main(int argc, char **argv)
         return 13;
     }
 
-    std::cout << "Baffle / Diffraction Stage-1/Stage-2 dialog smoke test passed\n";
+    std::cout << "Baffle / Diffraction Stage-1/Stage-2 + geometry preview dialog smoke test passed\n";
     return 0;
 }

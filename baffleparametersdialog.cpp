@@ -6,6 +6,7 @@
 
 #include "baffleparametersdialog.h"
 
+#include "bafflegeometrypreview.h"
 #include "baffleresponse.h"
 #include "networkvalueutils.h"
 
@@ -14,7 +15,9 @@
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
+#include <QFocusEvent>
 #include <QFormLayout>
+#include <QHBoxLayout>
 #include <QGroupBox>
 #include <QLabel>
 #include <QPushButton>
@@ -26,7 +29,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
+#include <utility>
 
 namespace
 {
@@ -103,13 +108,36 @@ bool isIncompleteNumber(const QString& text, double minimum)
 class BaffleValueSpinBox : public QDoubleSpinBox
 {
 public:
+    using FocusCallback = std::function<void(bool)>;
+
     explicit BaffleValueSpinBox(QWidget *parent = nullptr)
         : QDoubleSpinBox(parent)
     {
         setCorrectionMode(QAbstractSpinBox::CorrectToPreviousValue);
     }
 
+    void setFocusCallback(FocusCallback callback)
+    {
+        m_focusCallback = std::move(callback);
+    }
+
 protected:
+    void focusInEvent(QFocusEvent *event) override
+    {
+        QDoubleSpinBox::focusInEvent(event);
+        if (m_focusCallback) {
+            m_focusCallback(true);
+        }
+    }
+
+    void focusOutEvent(QFocusEvent *event) override
+    {
+        QDoubleSpinBox::focusOutEvent(event);
+        if (m_focusCallback) {
+            m_focusCallback(false);
+        }
+    }
+
     double valueFromText(const QString& text) const override
     {
         double parsed = 0.0;
@@ -143,9 +171,12 @@ protected:
 
         return QValidator::Invalid;
     }
+
+private:
+    FocusCallback m_focusCallback;
 };
 
-QDoubleSpinBox *createGeometrySpinBox(QWidget *parent, const QString& objectName)
+BaffleValueSpinBox *createGeometrySpinBox(QWidget *parent, const QString& objectName)
 {
     auto *spin = new BaffleValueSpinBox(parent);
     spin->setObjectName(objectName);
@@ -167,7 +198,7 @@ BaffleParametersDialog::BaffleParametersDialog(BaffleSettingsPerDriver& settings
       m_workingSettings(settings)
 {
     setWindowTitle(tr("Baffle / Diffraction Parameters"));
-    resize(660, 520);
+    resize(900, 520);
 
     auto *mainLayout = new QVBoxLayout(this);
 
@@ -242,9 +273,13 @@ QWidget *BaffleParametersDialog::createDriverPage(int driverIndex)
     layout->addWidget(page.enabled);
 
     auto *parametersGroup = new QGroupBox(tr("Baffle / Diffraction Model"), page.page);
-    auto *form = new QFormLayout(parametersGroup);
+    auto *parametersLayout = new QHBoxLayout(parametersGroup);
 
-    page.model = new QComboBox(parametersGroup);
+    auto *formContainer = new QWidget(parametersGroup);
+    auto *form = new QFormLayout(formContainer);
+    parametersLayout->addWidget(formContainer, 0);
+
+    page.model = new QComboBox(formContainer);
     page.model->setObjectName(QStringLiteral("baffleModelCombo%1").arg(driverIndex + 1));
     page.model->addItem(tr("Simple Baffle Step"), static_cast<int>(BaffleModel::SimpleBaffleStep));
     page.model->addItem(tr("Rectangular Edge Diffraction"),
@@ -254,31 +289,60 @@ QWidget *BaffleParametersDialog::createDriverPage(int driverIndex)
            "uses a point-source, sharp-edge, on-axis far-field model."));
     form->addRow(tr("Model:"), page.model);
 
-    page.width = createGeometrySpinBox(parametersGroup,
+    page.width = createGeometrySpinBox(formContainer,
                                        QStringLiteral("baffleWidthSpin%1").arg(driverIndex + 1));
     page.width->setRange(1.0, 10000.0);
     page.width->setToolTip(
         tr("Baffle width. Simple Baffle Step uses f0 = 115 / W[m]; Rectangular Edge Diffraction uses the physical geometry."));
     form->addRow(tr("Baffle width:"), page.width);
 
-    page.height = createGeometrySpinBox(parametersGroup,
+    page.height = createGeometrySpinBox(formContainer,
                                         QStringLiteral("baffleHeightSpin%1").arg(driverIndex + 1));
     page.height->setToolTip(tr("Rectangular baffle height."));
     form->addRow(tr("Baffle height:"), page.height);
 
-    page.driverX = createGeometrySpinBox(parametersGroup,
+    page.driverX = createGeometrySpinBox(formContainer,
                                          QStringLiteral("baffleDriverXSpin%1").arg(driverIndex + 1));
     page.driverX->setToolTip(tr("Driver centre measured from the left baffle edge."));
     form->addRow(tr("Driver X from left:"), page.driverX);
 
-    page.driverY = createGeometrySpinBox(parametersGroup,
+    page.driverY = createGeometrySpinBox(formContainer,
                                          QStringLiteral("baffleDriverYSpin%1").arg(driverIndex + 1));
     page.driverY->setToolTip(tr("Driver centre measured from the top baffle edge."));
     form->addRow(tr("Driver Y from top:"), page.driverY);
 
-    page.midpoint = new QLabel(parametersGroup);
+    page.midpoint = new QLabel(formContainer);
     page.midpoint->setObjectName(QStringLiteral("baffleMidpointLabel%1").arg(driverIndex + 1));
     form->addRow(tr("Calculated midpoint:"), page.midpoint);
+
+    auto *previewGroup = new QGroupBox(tr("Geometry preview"), parametersGroup);
+    auto *previewLayout = new QVBoxLayout(previewGroup);
+    previewLayout->setContentsMargins(4, 0, 4, 4);
+    previewLayout->setSpacing(0);
+    page.geometryPreview = new BaffleGeometryPreview(previewGroup);
+    page.geometryPreview->setObjectName(
+        QStringLiteral("baffleGeometryPreview%1").arg(driverIndex + 1));
+    previewLayout->addWidget(page.geometryPreview, 1);
+    parametersLayout->addWidget(previewGroup, 1);
+
+    auto bindPreviewFocus = [preview = page.geometryPreview](BaffleValueSpinBox *spin,
+                                                            BaffleGeometryPreview::Highlight highlight) {
+        spin->setFocusCallback([preview, highlight](bool focused) {
+            if (focused) {
+                preview->setHighlight(highlight);
+            } else if (preview->currentHighlight() == highlight) {
+                preview->setHighlight(BaffleGeometryPreview::Highlight::None);
+            }
+        });
+    };
+    bindPreviewFocus(static_cast<BaffleValueSpinBox *>(page.width),
+                     BaffleGeometryPreview::Highlight::BaffleWidth);
+    bindPreviewFocus(static_cast<BaffleValueSpinBox *>(page.height),
+                     BaffleGeometryPreview::Highlight::BaffleHeight);
+    bindPreviewFocus(static_cast<BaffleValueSpinBox *>(page.driverX),
+                     BaffleGeometryPreview::Highlight::DriverX);
+    bindPreviewFocus(static_cast<BaffleValueSpinBox *>(page.driverY),
+                     BaffleGeometryPreview::Highlight::DriverY);
 
     layout->addWidget(parametersGroup);
 
@@ -389,8 +453,22 @@ void BaffleParametersDialog::updatePageState(int driverIndex)
     // Diagnostic visibility remains editable even while the processing stage is
     // bypassed, mirroring the Active Filters dialog semantics.
     page.showResponse->setEnabled(true);
+    updateGeometryPreview(driverIndex);
     updateMidpointLabel(driverIndex);
     updateResponseStatus(driverIndex);
+}
+
+void BaffleParametersDialog::updateGeometryPreview(int driverIndex)
+{
+    DriverPage& page = m_pages.at(static_cast<std::size_t>(driverIndex));
+    if (page.geometryPreview == nullptr) {
+        return;
+    }
+
+    page.geometryPreview->setGeometryValues(page.width->value(),
+                                            page.height->value(),
+                                            page.driverX->value(),
+                                            page.driverY->value());
 }
 
 void BaffleParametersDialog::updateMidpointLabel(int driverIndex)

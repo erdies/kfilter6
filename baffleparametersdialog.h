@@ -14,6 +14,7 @@
 
 #include <array>
 
+class BaffleGeometryPreview;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
@@ -66,6 +67,7 @@ private:
         QDoubleSpinBox *driverX = nullptr;
         QDoubleSpinBox *driverY = nullptr;
         QLabel *midpoint = nullptr;
+        BaffleGeometryPreview *geometryPreview = nullptr;
         QCheckBox *showResponse = nullptr;
         QLabel *responseStatus = nullptr;
     };
@@ -76,6 +78,7 @@ private:
     void writePageToWorkingModel(int driverIndex);
     void updatePageState(int driverIndex);
     void updateMidpointLabel(int driverIndex);
+    void updateGeometryPreview(int driverIndex);
     void updateResponseStatus(int driverIndex);
     void previewWorkingModel();
     void applyToModel();
