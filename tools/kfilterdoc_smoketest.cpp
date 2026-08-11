@@ -521,6 +521,36 @@ bool checkActiveFilterSimulationIntegration()
         return false;
     }
 
+    // Patch 186 Linkwitz-Riley integration: LR4 is -6.0206 dB at the
+    // crossover frequency and must use the same centralized complex path.
+    KFilterDoc linkwitzRileyDocument;
+    linkwitzRileyDocument.m_driverDriver[0].PressureisActive = true;
+    linkwitzRileyDocument.Sound(0);
+    const double linkwitzRileyBaselineDb =
+        linkwitzRileyDocument.m_doubleXContainer[0][TestSampleIndex];
+    ActiveFilterChain& linkwitzRileyChain = linkwitzRileyDocument.activeFilterChain(0);
+    linkwitzRileyChain.setEnabled(true);
+    linkwitzRileyChain.addSection(ActiveFilterType::LowPass);
+    auto& linkwitzRileyLowPass =
+        std::get<ActiveFilterLowPassParameters>(linkwitzRileyChain.section(0).parameters());
+    linkwitzRileyLowPass.characteristic = ActiveFilterCharacteristic::LinkwitzRiley;
+    linkwitzRileyLowPass.order = 4;
+    linkwitzRileyLowPass.frequencyHz = cutoffHz;
+    const ActiveFilterResponse& linkwitzRileyResponse =
+        linkwitzRileyDocument.activeFilterResponse(0);
+    if (linkwitzRileyResponse.status != ActiveFilterResponseStatus::Valid) {
+        QTextStream(stderr) << "LR4 active-filter chain was not reported as valid\n";
+        return false;
+    }
+    linkwitzRileyDocument.Sound(0);
+    if (!expectNear("LR4 single-driver active-filter magnitude",
+                    linkwitzRileyDocument.m_doubleXContainer[0][TestSampleIndex] -
+                        linkwitzRileyBaselineDb,
+                    20.0 * std::log10(0.5),
+                    1.0e-5)) {
+        return false;
+    }
+
     // Patch 182 Notch integration: use the grid point immediately below f0 so
     // the expected attenuation is finite and can be compared in dB directly.
     constexpr std::size_t NotchSampleIndex = TestSampleIndex - 1;
@@ -581,6 +611,43 @@ bool checkActiveFilterSimulationIntegration()
         return false;
     }
 
+    // Patch 187 Gain/Delay/Polarity integration. Two identical drivers make the
+    // relative phase directly observable in the vector sum. At the test frequency
+    // Gain = -6.0206 dB contributes 0.5, the quarter-cycle Delay contributes -j,
+    // and inverted Polarity contributes -1, so the filtered driver factor is +0.5j.
+    KFilterDoc elementaryDocument;
+    driver& elementaryFilteredDriver = elementaryDocument.m_driverDriver[0];
+    driver& elementaryRawDriver = elementaryDocument.m_driverDriver[1];
+    elementaryFilteredDriver.SummaryisActive = true;
+    elementaryRawDriver.SummaryisActive = true;
+    elementaryRawDriver.Schall();
+    const double elementaryRawMagnitude =
+        std::hypot(elementaryRawDriver.ResultSchall[resultIndex],
+                   elementaryRawDriver.ResultSchall[resultIndex + 1]);
+
+    ActiveFilterChain& elementaryChain = elementaryDocument.activeFilterChain(0);
+    elementaryChain.setEnabled(true);
+    elementaryChain.addSection(ActiveFilterType::Gain);
+    std::get<ActiveFilterGainParameters>(elementaryChain.section(0).parameters()).gainDb =
+        -6.020599913279624;
+    elementaryChain.addSection(ActiveFilterType::Delay);
+    std::get<ActiveFilterDelayParameters>(elementaryChain.section(1).parameters()).delayMs =
+        250.0 / cutoffHz;
+    elementaryChain.addSection(ActiveFilterType::Polarity);
+    std::get<ActiveFilterPolarityParameters>(elementaryChain.section(2).parameters()).inverted = true;
+
+    if (elementaryDocument.activeFilterResponse(0).status != ActiveFilterResponseStatus::Valid) {
+        QTextStream(stderr) << "Gain/Delay/Polarity active-filter chain was not reported as valid\n";
+        return false;
+    }
+    elementaryDocument.PressureSummary();
+    if (!expectNear("Gain/Delay/Polarity vector integration",
+                    elementaryDocument.m_doubleXContainer[0][TestSampleIndex],
+                    elementaryDocument.DB(elementaryRawMagnitude * std::sqrt(1.25)),
+                    1.0e-5)) {
+        return false;
+    }
+
     // Unsupported chains must bypass the complete active-filter stage instead
     // of applying only the supported prefix or propagating NaNs into the plot.
     KFilterDoc unsupportedDocument;
@@ -603,6 +670,225 @@ bool checkActiveFilterSimulationIntegration()
                     unsupportedDocument.m_doubleXContainer[0][TestSampleIndex],
                     unsupportedBaseline,
                     1.0e-6)) {
+        return false;
+    }
+
+    return true;
+}
+
+bool checkBaffleSimulationIntegration()
+{
+    constexpr std::size_t TestSampleIndex = 75;
+    const double testFrequencyHz = kfilterFrequencyGridHz()[TestSampleIndex];
+    const double alignedWidthMm = 115000.0 / testFrequencyHz;
+    const double baffleMidpointDb = 20.0 * std::log10(std::sqrt(2.0));
+
+    KFilterDoc document;
+    driver& d = document.m_driverDriver[0];
+    d.PressureisActive = true;
+
+    if (!document.Sound(0)) {
+        QTextStream(stderr) << "Baffle single-driver baseline could not be calculated\n";
+        return false;
+    }
+    const double baselineDb = document.m_doubleXContainer[0][TestSampleIndex];
+
+    BaffleSettings& settings = document.baffleSettings(0);
+    settings.enabled = true;
+    settings.model = BaffleModel::SimpleBaffleStep;
+    settings.widthMm = alignedWidthMm;
+    settings.showResponseInPlot = false; // future visualization must not gate simulation
+
+    const BaffleResponse& response = document.baffleResponse(0);
+    if (response.status != BaffleResponseStatus::Valid ||
+        !expectNear("Baffle response midpoint magnitude",
+                    std::abs(response.values[TestSampleIndex]),
+                    std::sqrt(2.0),
+                    1.0e-8) ||
+        !document.Sound(0) ||
+        !expectNear("Single-driver Simple Baffle Step magnitude",
+                    document.m_doubleXContainer[0][TestSampleIndex] - baselineDb,
+                    baffleMidpointDb,
+                    1.0e-5)) {
+        return false;
+    }
+    const double baffledDb = document.m_doubleXContainer[0][TestSampleIndex];
+
+    constexpr double MeasurementCorrectionDb = 6.0;
+    KFilterMeasurementCurve& curve = document.splCorrectionCurve(0);
+    curve.appendPoint(20.0, MeasurementCorrectionDb);
+    curve.appendPoint(20000.0, MeasurementCorrectionDb);
+    document.setMeasurementMergeEnabled(true);
+    document.Sound(0);
+    if (!expectNear("Baffle plus measurement single-driver path",
+                    document.m_doubleXContainer[0][TestSampleIndex] - baffledDb,
+                    MeasurementCorrectionDb,
+                    1.0e-5)) {
+        return false;
+    }
+
+    document.setMeasurementHiddenForDriver(0, true);
+    document.Sound(0);
+    if (!expectNear("Hide Measurement preserves baffle effect",
+                    document.m_doubleXContainer[0][TestSampleIndex],
+                    baffledDb,
+                    1.0e-5)) {
+        return false;
+    }
+
+    // Active Filters and Baffle are independent complex stages. At the common
+    // midpoint/cutoff, the +3.0103 dB baffle magnitude and -3.0103 dB LP1
+    // magnitude cancel exactly in the individual SPL magnitude.
+    ActiveFilterChain& chain = document.activeFilterChain(0);
+    chain.setEnabled(true);
+    chain.addSection(ActiveFilterType::LowPass);
+    auto& lowPass = std::get<ActiveFilterLowPassParameters>(chain.section(0).parameters());
+    lowPass.characteristic = ActiveFilterCharacteristic::Butterworth;
+    lowPass.order = 1;
+    lowPass.frequencyHz = testFrequencyHz;
+    document.Sound(0);
+    if (!expectNear("Active Filter times Baffle magnitude",
+                    document.m_doubleXContainer[0][TestSampleIndex],
+                    baselineDb,
+                    1.0e-5)) {
+        return false;
+    }
+
+    // Invalid baffle parameters bypass only H_baffle; the valid active-filter
+    // stage must remain effective.
+    settings.widthMm = 0.0;
+    if (document.baffleResponse(0).status != BaffleResponseStatus::InvalidParameters) {
+        QTextStream(stderr) << "Invalid baffle width was not reported\n";
+        return false;
+    }
+    document.Sound(0);
+    if (!expectNear("Invalid baffle bypass preserves active filter",
+                    document.m_doubleXContainer[0][TestSampleIndex] - baselineDb,
+                    -baffleMidpointDb,
+                    1.0e-5)) {
+        return false;
+    }
+
+    // Patch 192: Rectangular Edge Diffraction uses the same centralized complex
+    // H_baffle stage. Verify productive Stage-2 magnitude and invalid-geometry bypass.
+    KFilterDoc rectangularDocument;
+    rectangularDocument.m_driverDriver[0].PressureisActive = true;
+    rectangularDocument.Sound(0);
+    const double rectangularBaselineDb =
+        rectangularDocument.m_doubleXContainer[0][TestSampleIndex];
+
+    BaffleSettings& rectangularSettings = rectangularDocument.baffleSettings(0);
+    rectangularSettings.enabled = true;
+    rectangularSettings.model = BaffleModel::RectangularEdgeDiffraction;
+    rectangularSettings.widthMm = 231.0;
+    rectangularSettings.heightMm = 900.0;
+    rectangularSettings.driverXmm = 90.0;
+    rectangularSettings.driverYmm = 310.0;
+    rectangularSettings.edgeSourceCount = 200;
+
+    // Patch 194: Dm remains driver data and is passed transiently into the
+    // rectangular Baffle response/cache. Verify both point fallback and finite
+    // source without copying Dm into BaffleSettings.
+    driver& rectangularDriver = rectangularDocument.m_driverDriver[0];
+    rectangularDriver.setDm(0.0);
+    const BaffleResponse pointFromDocument = rectangularDocument.baffleResponse(0);
+    const BaffleResponse expectedPoint = calculateBaffleResponse(rectangularSettings, 0.0);
+    for (std::size_t sampleIndex = 0; sampleIndex < KFilterFrequencyCount; ++sampleIndex) {
+        if (std::abs(pointFromDocument.values[sampleIndex] -
+                     expectedPoint.values[sampleIndex]) > 1.0e-12) {
+            QTextStream(stderr) << "Document Dm<=0 point-source fallback mismatch\n";
+            return false;
+        }
+    }
+
+    constexpr double RectangularEffectiveDiameterCm = 13.0;
+    rectangularDriver.setDm(RectangularEffectiveDiameterCm);
+    const BaffleResponse finiteFromDocument = rectangularDocument.baffleResponse(0);
+    const BaffleResponse expectedFinite =
+        calculateBaffleResponse(rectangularSettings, RectangularEffectiveDiameterCm);
+    bool finiteSourceChangedResponse = false;
+    for (std::size_t sampleIndex = 0; sampleIndex < KFilterFrequencyCount; ++sampleIndex) {
+        if (std::abs(finiteFromDocument.values[sampleIndex] -
+                     expectedFinite.values[sampleIndex]) > 1.0e-12) {
+            QTextStream(stderr) << "Document finite-piston Dm data path mismatch\n";
+            return false;
+        }
+        if (std::abs(finiteFromDocument.values[sampleIndex] -
+                     pointFromDocument.values[sampleIndex]) > 1.0e-5) {
+            finiteSourceChangedResponse = true;
+        }
+    }
+    if (!finiteSourceChangedResponse) {
+        QTextStream(stderr) << "Document Dm change did not activate finite-piston response\n";
+        return false;
+    }
+
+    const BaffleResponse& rectangularResponse = rectangularDocument.baffleResponse(0);
+    if (rectangularResponse.status != BaffleResponseStatus::Valid) {
+        QTextStream(stderr) << "Valid Rectangular Edge Diffraction response was not reported\n";
+        return false;
+    }
+    rectangularDocument.Sound(0);
+    const double expectedRectangularDeltaDb =
+        20.0 * std::log10(std::abs(rectangularResponse.values[TestSampleIndex]));
+    if (!expectNear("Single-driver Rectangular Edge Diffraction magnitude",
+                    rectangularDocument.m_doubleXContainer[0][TestSampleIndex] - rectangularBaselineDb,
+                    expectedRectangularDeltaDb,
+                    1.0e-5)) {
+        return false;
+    }
+
+    rectangularSettings.driverXmm = 0.0;
+    if (rectangularDocument.baffleResponse(0).status != BaffleResponseStatus::InvalidParameters) {
+        QTextStream(stderr) << "Invalid rectangular driver position was not reported\n";
+        return false;
+    }
+    rectangularDocument.Sound(0);
+    if (!expectNear("Invalid rectangular geometry bypass",
+                    rectangularDocument.m_doubleXContainer[0][TestSampleIndex],
+                    rectangularBaselineDb,
+                    1.0e-5)) {
+        return false;
+    }
+
+    // A second identical raw driver makes the baffle shelf's phase observable
+    // in the vector sum. The energy sum, in contrast, depends only on |H|.
+    KFilterDoc phaseDocument;
+    driver& baffledDriver = phaseDocument.m_driverDriver[0];
+    driver& rawDriver = phaseDocument.m_driverDriver[1];
+    baffledDriver.SummaryisActive = true;
+    rawDriver.SummaryisActive = true;
+    baffledDriver.ScalarSummaryisActive = true;
+    rawDriver.ScalarSummaryisActive = true;
+
+    rawDriver.Schall();
+    const int resultIndex = static_cast<int>(TestSampleIndex) * 2;
+    const double rawMagnitude = std::hypot(rawDriver.ResultSchall[resultIndex],
+                                           rawDriver.ResultSchall[resultIndex + 1]);
+
+    BaffleSettings& phaseSettings = phaseDocument.baffleSettings(0);
+    phaseSettings.enabled = true;
+    phaseSettings.widthMm = alignedWidthMm;
+    const BaffleResponse& phaseResponse = phaseDocument.baffleResponse(0);
+    if (phaseResponse.status != BaffleResponseStatus::Valid) {
+        QTextStream(stderr) << "Baffle phase test response was not valid\n";
+        return false;
+    }
+    const std::complex<double> h = phaseResponse.values[TestSampleIndex];
+
+    phaseDocument.PressureSummary();
+    if (!expectNear("Baffle phase in vector summary",
+                    phaseDocument.m_doubleXContainer[0][TestSampleIndex],
+                    phaseDocument.DB(rawMagnitude * std::abs(std::complex<double>{1.0, 0.0} + h)),
+                    1.0e-5)) {
+        return false;
+    }
+
+    phaseDocument.PressureScalarSummary();
+    if (!expectNear("Baffle magnitude in energy summary",
+                    phaseDocument.m_doubleXContainer[0][TestSampleIndex],
+                    phaseDocument.DB(rawMagnitude * std::sqrt(1.0 + std::norm(h))),
+                    1.0e-5)) {
         return false;
     }
 
@@ -799,6 +1085,7 @@ int main(int argc, char** argv)
         !checkCorrectionCacheInvalidation() ||
         !checkMeasurementSummaryMerge() ||
         !checkActiveFilterSimulationIntegration() ||
+        !checkBaffleSimulationIntegration() ||
         !checkSelectiveMeasurementClearing() ||
         !checkSelectiveMeasurementSums()) {
         return 1;
@@ -821,8 +1108,7 @@ int main(int argc, char** argv)
     original.setMeasurementHiddenForDriver(0, true);
 
     // Patch 181: active-filter metadata is part of the .kfp project format.
-    // Gain is intentionally still DSP-unsupported here; persistence must not
-    // depend on current transfer-engine support.
+    // Patch 187 also makes this persisted Gain section transfer-active.
     original.activeFilterChain(1).setEnabled(true);
     original.activeFilterChain(1).addSection(ActiveFilterType::Gain);
     std::get<ActiveFilterGainParameters>(original.activeFilterChain(1).section(0).parameters()).gainDb = -3.0;
@@ -845,6 +1131,12 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // Patch 191 persists the Stage-1 Baffle settings in .kfp format version 6.
+    original.baffleSettings(2).enabled = true;
+    original.baffleSettings(2).model = BaffleModel::SimpleBaffleStep;
+    original.baffleSettings(2).widthMm = 231.0;
+    original.baffleSettings(2).showResponseInPlot = true;
+
     const QString filePath = QDir::temp().filePath(QStringLiteral("kfilter_doc_smoketest.kfp"));
     const QUrl fileUrl = QUrl::fromLocalFile(filePath);
 
@@ -864,9 +1156,18 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    if (!original.baffleSettings(2).enabled ||
+        !fuzzyEqual(original.baffleSettings(2).widthMm, 231.0) ||
+        !original.baffleSettings(2).showResponseInPlot) {
+        QTextStream(stderr) << "saveDocument unexpectedly changed baffle state\n";
+        return 1;
+    }
+
     KFilterDoc loaded;
     loaded.activeFilterChain(0).setEnabled(true);
     loaded.activeFilterChain(0).addSection(ActiveFilterType::Delay);
+    loaded.baffleSettings(0).enabled = true;
+    loaded.baffleSettings(0).widthMm = 999.0;
     QObject::connect(&loaded, &KFilterDoc::forceviewrefresh, [&refreshCount]() {
         ++refreshCount;
     });
@@ -902,6 +1203,22 @@ int main(int argc, char** argv)
         }
     }
 
+    for (int driverIndex = 0; driverIndex < KFilterProjectIo::DriverCount; ++driverIndex) {
+        const BaffleSettings& expected = original.baffleSettings(driverIndex);
+        const BaffleSettings& actual = loaded.baffleSettings(driverIndex);
+        if (expected.enabled != actual.enabled || expected.model != actual.model ||
+            !fuzzyEqual(expected.widthMm, actual.widthMm) ||
+            !fuzzyEqual(expected.heightMm, actual.heightMm) ||
+            !fuzzyEqual(expected.driverXmm, actual.driverXmm) ||
+            !fuzzyEqual(expected.driverYmm, actual.driverYmm) ||
+            expected.showResponseInPlot != actual.showResponseInPlot ||
+            expected.edgeSourceCount != actual.edgeSourceCount) {
+            QTextStream(stderr) << "Baffle settings were not restored for driver "
+                                << (driverIndex + 1) << '\n';
+            return 1;
+        }
+    }
+
     if (loaded.activeFilterChain(0).enabled() || !loaded.activeFilterChain(0).empty()) {
         QTextStream(stderr) << "Loading .kfp did not replace stale active-filter state for driver 1\n";
         return 1;
@@ -913,7 +1230,7 @@ int main(int argc, char** argv)
         loadedGainChain.section(0).type() != ActiveFilterType::Gain ||
         !fuzzyEqual(std::get<ActiveFilterGainParameters>(loadedGainChain.section(0).parameters()).gainDb,
                     -3.0)) {
-        QTextStream(stderr) << "Unsupported active-filter metadata was not restored for driver 2\n";
+        QTextStream(stderr) << "Gain active-filter metadata was not restored for driver 2\n";
         return 1;
     }
 
@@ -953,15 +1270,18 @@ int main(int argc, char** argv)
 
     loaded.activeFilterChain(3).setEnabled(true);
     loaded.activeFilterChain(3).addSection(ActiveFilterType::Notch);
+    loaded.baffleSettings(3).enabled = true;
+    loaded.baffleSettings(3).widthMm = 450.0;
     loaded.newDocument();
     if (loaded.hasMeasurementCurves() || loaded.measurementMergeEnabled() ||
         loaded.measurementHiddenForDriver(0) || loaded.measurementHiddenForDriver(3) ||
-        loaded.activeFilterChain(3).enabled() || !loaded.activeFilterChain(3).empty()) {
-        QTextStream(stderr) << "New document did not clear measurement/active-filter state\n";
+        loaded.activeFilterChain(3).enabled() || !loaded.activeFilterChain(3).empty() ||
+        loaded.baffleSettings(3).enabled) {
+        QTextStream(stderr) << "New document did not clear measurement/active-filter/baffle state\n";
         return 1;
     }
 
     QFile::remove(filePath);
-    QTextStream(stdout) << "KFilterDoc document, measurement, and active-filter persistence smoke test passed\n";
+    QTextStream(stdout) << "KFilterDoc document, measurement, active-filter, and baffle smoke test passed\n";
     return 0;
 }

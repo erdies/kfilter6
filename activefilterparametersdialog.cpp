@@ -19,6 +19,7 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QSpinBox>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -75,13 +76,14 @@ ActiveFilterParametersDialog::ActiveFilterParametersDialog(ActiveFilterChains& c
       m_workingChains(chains)
 {
     setWindowTitle(tr("Active Filter Parameters"));
-    resize(920, 700);
+    resize(920, 800);
 
     auto *mainLayout = new QVBoxLayout(this);
 
     auto *prototypeNotice = new QLabel(
         tr("Active-filter changes are previewed live in the diagnostic plot and, for supported "
-           "Butterworth low-pass/high-pass/band-pass and second-order Notch sections, in the driver simulation. "
+           "Butterworth low-pass/high-pass/band-pass, Linkwitz-Riley LR2/LR4 low-pass/high-pass, "
+           "first-/second-order All-pass, second-order Notch, Gain, Delay, and Polarity sections, in the driver simulation. "
            "Apply/OK commits the edited project state; Cancel restores the last applied state. "
            "Active-filter metadata is saved in .kfp projects."),
         this);
@@ -321,8 +323,10 @@ QWidget *ActiveFilterParametersDialog::createDriverPage(int driverIndex)
         QStringLiteral("activeFilterShowResponse%1").arg(driverIndex + 1));
     page.showResponse->setToolTip(
         tr("Show the combined transfer magnitude of all enabled supported sections, including "
-           "Butterworth low-pass/high-pass and second-order Notch. If any enabled section is not "
-           "implemented yet, no active-filter overlay is drawn for this driver."));
+           "Butterworth low-pass/high-pass/band-pass, Linkwitz-Riley LR2/LR4 low-pass/high-pass, "
+           "first-/second-order All-pass, second-order Notch, Gain, Delay, and Polarity. If any enabled section is not implemented "
+           "yet, no active-filter "
+           "overlay is drawn for this driver."));
     visualizationLayout->addWidget(page.showResponse);
 
     page.responseStatus = new QLabel(visualizationGroup);
@@ -386,13 +390,31 @@ void ActiveFilterParametersDialog::connectEditorSignals(int driverIndex)
             static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
             this,
             [this, driverIndex, changed](int) {
+                DriverPage& page = m_pages.at(driverIndex);
+                const ActiveFilterType type =
+                    static_cast<ActiveFilterType>(page.type->currentData().toInt());
+                const bool linkwitzRiley =
+                    page.characteristic->currentData().toInt() ==
+                    static_cast<int>(ActiveFilterCharacteristic::LinkwitzRiley);
+                if (linkwitzRiley &&
+                    (type == ActiveFilterType::LowPass || type == ActiveFilterType::HighPass) &&
+                    page.order->value() != 2 && page.order->value() != 4) {
+                    const QSignalBlocker blocker(page.order);
+                    page.order->setValue(page.order->value() < 3 ? 2 : 4);
+                }
                 updateEditorControlState(driverIndex);
                 changed();
             });
     connect(page.order,
             static_cast<void (QSpinBox::*)(int)>(&QSpinBox::valueChanged),
             this,
-            [changed](int) { changed(); });
+            [this, driverIndex, changed](int) {
+                if (m_loadingEditor) {
+                    return;
+                }
+                updateEditorControlState(driverIndex);
+                changed();
+            });
     connect(page.frequency1,
             static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
             this,
@@ -715,7 +737,7 @@ void ActiveFilterParametersDialog::updatePageState(int driverIndex)
     page.editorGroup->setEnabled(haveSelection);
 
     const QString bypassHint = page.activeProcessing->isChecked()
-        ? tr("The active-filter chain is enabled. Fully supported Butterworth low-pass/high-pass/band-pass and second-order Notch chains are applied to the driver simulation.")
+        ? tr("The active-filter chain is enabled. Supported Butterworth low-pass/high-pass/band-pass, Linkwitz-Riley LR2/LR4 low-pass/high-pass, first-/second-order All-pass, second-order Notch, Gain, Delay, and Polarity sections are applied to the driver simulation.")
         : tr("The active-filter chain is bypassed. Sections remain editable while bypassed.");
     page.activeProcessing->setToolTip(bypassHint);
     updateResponseStatus(driverIndex);
@@ -778,16 +800,32 @@ void ActiveFilterParametersDialog::updateEditorControlState(int driverIndex)
                                 type == ActiveFilterType::Notch ||
                                 type == ActiveFilterType::AllPass;
     const bool twoFrequencies = type == ActiveFilterType::BandPass;
+    const ActiveFilterCharacteristic characteristic =
+        static_cast<ActiveFilterCharacteristic>(page.characteristic->currentData().toInt());
     const bool qBased = type == ActiveFilterType::Notch ||
-                        type == ActiveFilterType::AllPass ||
-                        (crossover && page.characteristic->currentData().toInt() ==
-                                          static_cast<int>(ActiveFilterCharacteristic::GenericQ));
+                        (type == ActiveFilterType::AllPass && page.order->value() == 2) ||
+                        (crossover && characteristic == ActiveFilterCharacteristic::GenericQ);
+    const bool linkwitzRiley =
+        (type == ActiveFilterType::LowPass || type == ActiveFilterType::HighPass) &&
+        characteristic == ActiveFilterCharacteristic::LinkwitzRiley;
 
     page.characteristic->setEnabled(crossover);
     page.order->setEnabled(crossover || type == ActiveFilterType::AllPass);
+    if (linkwitzRiley) {
+        page.order->setToolTip(
+            tr("Linkwitz-Riley is currently implemented for orders 2 (LR2) and 4 (LR4)."));
+    } else if (type == ActiveFilterType::AllPass) {
+        page.order->setToolTip(
+            tr("All-pass is implemented for orders 1 (AP1) and 2 (AP2). Q is used only by AP2."));
+    } else {
+        page.order->setToolTip(QString());
+    }
     page.frequency1->setEnabled(frequencyBased);
     page.frequency2->setEnabled(twoFrequencies);
     page.q->setEnabled(qBased);
+    page.q->setToolTip(type == ActiveFilterType::AllPass
+        ? tr("Quality factor for second-order All-pass (AP2); not used by AP1.")
+        : QString());
     // The canonical Patch-182 notch is always full-depth; gainDb is retained only
     // as persisted forward-compatible metadata and is intentionally not editable here.
     page.gain->setEnabled(type == ActiveFilterType::Gain);
@@ -945,8 +983,12 @@ QString ActiveFilterParametersDialog::extraSummary(const ActiveFilterSection& se
         const auto& parameters = std::get<ActiveFilterNotchParameters>(section.parameters());
         return tr("Q %1").arg(parameters.q, 0, 'f', 3);
     }
-    case ActiveFilterType::AllPass:
-        return tr("Q %1").arg(std::get<ActiveFilterAllPassParameters>(section.parameters()).q, 0, 'f', 3);
+    case ActiveFilterType::AllPass: {
+        const auto& parameters = std::get<ActiveFilterAllPassParameters>(section.parameters());
+        return parameters.order == 2
+            ? tr("Q %1").arg(parameters.q, 0, 'f', 3)
+            : tr("-");
+    }
     case ActiveFilterType::Gain:
         return tr("%1 dB").arg(std::get<ActiveFilterGainParameters>(section.parameters()).gainDb, 0, 'f', 2);
     case ActiveFilterType::Delay:

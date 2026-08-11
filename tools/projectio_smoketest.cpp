@@ -311,6 +311,64 @@ bool activeFiltersAreDefault(const KFilterProjectIo::ActiveFilterChains& chains)
     });
 }
 
+void populateBaffleSettings(KFilterProjectIo::BaffleSettingsPerDriver& settings)
+{
+    settings[0].enabled = true;
+    settings[0].model = BaffleModel::SimpleBaffleStep;
+    settings[0].widthMm = 231.0;
+    settings[0].showResponseInPlot = true;
+
+    settings[1].enabled = false;
+    settings[1].model = BaffleModel::SimpleBaffleStep;
+    settings[1].widthMm = 180.5;
+    settings[1].showResponseInPlot = true;
+
+    settings[2].enabled = true;
+    settings[2].model = BaffleModel::RectangularEdgeDiffraction;
+    settings[2].widthMm = 260.0;
+    settings[2].heightMm = 720.0;
+    settings[2].driverXmm = 110.0;
+    settings[2].driverYmm = 245.0;
+    settings[2].showResponseInPlot = false;
+    settings[2].edgeSourceCount = 320;
+}
+
+bool compareBaffleSettings(const KFilterProjectIo::BaffleSettingsPerDriver& expected,
+                           const KFilterProjectIo::BaffleSettingsPerDriver& actual,
+                           QString& error)
+{
+    for (int driverIndex = 0; driverIndex < KFilterProjectIo::DriverCount; ++driverIndex) {
+        const std::size_t index = static_cast<std::size_t>(driverIndex);
+        const BaffleSettings& left = expected[index];
+        const BaffleSettings& right = actual[index];
+        if (left.enabled != right.enabled || left.model != right.model ||
+            !fuzzyEqual(left.widthMm, right.widthMm) ||
+            !fuzzyEqual(left.heightMm, right.heightMm) ||
+            !fuzzyEqual(left.driverXmm, right.driverXmm) ||
+            !fuzzyEqual(left.driverYmm, right.driverYmm) ||
+            left.showResponseInPlot != right.showResponseInPlot ||
+            left.edgeSourceCount != right.edgeSourceCount) {
+            error = QStringLiteral("Baffle settings mismatch for driver %1").arg(driverIndex + 1);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool baffleSettingsAreDefault(const KFilterProjectIo::BaffleSettingsPerDriver& settings)
+{
+    const BaffleSettings defaults;
+    return std::all_of(settings.cbegin(), settings.cend(), [&](const BaffleSettings& value) {
+        return value.enabled == defaults.enabled && value.model == defaults.model &&
+               fuzzyEqual(value.widthMm, defaults.widthMm) &&
+               fuzzyEqual(value.heightMm, defaults.heightMm) &&
+               fuzzyEqual(value.driverXmm, defaults.driverXmm) &&
+               fuzzyEqual(value.driverYmm, defaults.driverYmm) &&
+               value.showResponseInPlot == defaults.showResponseInPlot &&
+               value.edgeSourceCount == defaults.edgeSourceCount;
+    });
+}
+
 QString createLegacyProject(driver (&drivers)[KFilterProjectIo::DriverCount], bool includeQlSection)
 {
     QString content;
@@ -421,6 +479,8 @@ int main(int argc, char** argv)
     originalHiddenStates[0] = true;
     KFilterProjectIo::ActiveFilterChains originalActiveFilters{};
     populateActiveFilters(originalActiveFilters);
+    KFilterProjectIo::BaffleSettingsPerDriver originalBaffleSettings{};
+    populateBaffleSettings(originalBaffleSettings);
 
     if (!KFilterProjectIo::saveToFile(jsonFilePath,
                                       original,
@@ -428,6 +488,7 @@ int main(int argc, char** argv)
                                       true,
                                       originalHiddenStates,
                                       originalActiveFilters,
+                                      originalBaffleSettings,
                                       &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -458,6 +519,8 @@ int main(int argc, char** argv)
     const QJsonObject firstLowPass = firstActiveSections.at(0).toObject();
     const QJsonObject firstLowPassParameters =
         firstLowPass.value(QStringLiteral("parameters")).toObject();
+    const QJsonObject firstBaffle =
+        jsonDrivers.at(0).toObject().value(QStringLiteral("baffle")).toObject();
     if (validRoot.value(QStringLiteral("format")).toString() != QStringLiteral("KFilter project") ||
         validRoot.value(QStringLiteral("formatVersion")).toInt(-1) != KFilterProjectIo::JsonFormatVersion ||
         jsonDrivers.size() != KFilterProjectIo::DriverCount ||
@@ -473,8 +536,13 @@ int main(int argc, char** argv)
             QStringLiteral("linkwitzRiley") ||
         firstLowPassParameters.value(QStringLiteral("order")).toInt() != 4 ||
         !fuzzyEqual(firstLowPassParameters.value(QStringLiteral("frequencyHz")).toDouble(), 2350.5) ||
-        !fuzzyEqual(firstLowPassParameters.value(QStringLiteral("q")).toDouble(), 0.8123)) {
-        QTextStream(stderr) << "Saved JSON project metadata, measurements, active filters or driver count is invalid\n";
+        !fuzzyEqual(firstLowPassParameters.value(QStringLiteral("q")).toDouble(), 0.8123) ||
+        !firstBaffle.value(QStringLiteral("enabled")).toBool(false) ||
+        firstBaffle.value(QStringLiteral("model")).toString() != QStringLiteral("simpleBaffleStep") ||
+        !fuzzyEqual(firstBaffle.value(QStringLiteral("widthMm")).toDouble(), 231.0) ||
+        !firstBaffle.value(QStringLiteral("showResponseInPlot")).toBool(false) ||
+        firstBaffle.value(QStringLiteral("edgeSourceCount")).toInt() != 200) {
+        QTextStream(stderr) << "Saved JSON project metadata, measurements, active filters, baffle settings or driver count is invalid\n";
         return 1;
     }
 
@@ -483,12 +551,14 @@ int main(int argc, char** argv)
     bool jsonLoadedMergeEnabled = false;
     KFilterProjectIo::MeasurementHiddenStates jsonLoadedHiddenStates{};
     KFilterProjectIo::ActiveFilterChains jsonLoadedActiveFilters{};
+    KFilterProjectIo::BaffleSettingsPerDriver jsonLoadedBaffleSettings{};
     if (!KFilterProjectIo::loadFromFile(jsonFilePath,
                                         jsonLoaded,
                                         jsonLoadedMeasurements,
                                         jsonLoadedMergeEnabled,
                                         jsonLoadedHiddenStates,
                                         jsonLoadedActiveFilters,
+                                        jsonLoadedBaffleSettings,
                                         &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -498,6 +568,7 @@ int main(int argc, char** argv)
         !compareMeasurements(originalMeasurements, jsonLoadedMeasurements, errorMessage) ||
         !compareMeasurementHiddenStates(originalHiddenStates, jsonLoadedHiddenStates, errorMessage) ||
         !compareActiveFilters(originalActiveFilters, jsonLoadedActiveFilters, errorMessage) ||
+        !compareBaffleSettings(originalBaffleSettings, jsonLoadedBaffleSettings, errorMessage) ||
         !jsonLoadedMergeEnabled) {
         QTextStream(stderr) << (errorMessage.isEmpty()
                                     ? QStringLiteral("Measurement merge/per-driver hide state was not restored")
@@ -521,12 +592,15 @@ int main(int argc, char** argv)
     legacyHiddenStates.fill(true);
     KFilterProjectIo::ActiveFilterChains legacyActiveFilters{};
     populateActiveFilters(legacyActiveFilters);
+    KFilterProjectIo::BaffleSettingsPerDriver legacyBaffleSettings{};
+    populateBaffleSettings(legacyBaffleSettings);
     if (!KFilterProjectIo::loadFromFile(legacyFilePath,
                                         legacyLoaded,
                                         legacyMeasurements,
                                         legacyMergeEnabled,
                                         legacyHiddenStates,
                                         legacyActiveFilters,
+                                        legacyBaffleSettings,
                                         &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -539,7 +613,8 @@ int main(int argc, char** argv)
         legacyMergeEnabled ||
         std::any_of(legacyHiddenStates.cbegin(), legacyHiddenStates.cend(),
                     [](bool hidden) { return hidden; }) ||
-        !activeFiltersAreDefault(legacyActiveFilters)) {
+        !activeFiltersAreDefault(legacyActiveFilters) ||
+        !baffleSettingsAreDefault(legacyBaffleSettings)) {
         QTextStream(stderr) << (errorMessage.isEmpty()
                                     ? QStringLiteral("Legacy load did not reset measurement state")
                                     : errorMessage)
@@ -553,6 +628,7 @@ int main(int argc, char** argv)
                                       legacyMergeEnabled,
                                       legacyHiddenStates,
                                       legacyActiveFilters,
+                                      legacyBaffleSettings,
                                       &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -577,12 +653,14 @@ int main(int argc, char** argv)
     bool oldLegacyMergeEnabled = false;
     KFilterProjectIo::MeasurementHiddenStates oldLegacyHiddenStates{};
     KFilterProjectIo::ActiveFilterChains oldLegacyActiveFilters{};
+    KFilterProjectIo::BaffleSettingsPerDriver oldLegacyBaffleSettings{};
     if (!KFilterProjectIo::loadFromFile(oldLegacyFilePath,
                                         oldLegacyLoaded,
                                         oldLegacyMeasurements,
                                         oldLegacyMergeEnabled,
                                         oldLegacyHiddenStates,
                                         oldLegacyActiveFilters,
+                                        oldLegacyBaffleSettings,
                                         &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -594,6 +672,12 @@ int main(int argc, char** argv)
                                 << (driverIndex + 1) << '\n';
             return 1;
         }
+    }
+
+    if (!activeFiltersAreDefault(oldLegacyActiveFilters) ||
+        !baffleSettingsAreDefault(oldLegacyBaffleSettings)) {
+        QTextStream(stderr) << "Old legacy file did not reset active-filter/Baffle metadata\n";
+        return 1;
     }
 
     // Patch 155 JSON files contain neither measurementSettings nor per-driver measurements.
@@ -623,12 +707,15 @@ int main(int argc, char** argv)
     patch155HiddenStates.fill(true);
     KFilterProjectIo::ActiveFilterChains patch155ActiveFilters{};
     populateActiveFilters(patch155ActiveFilters);
+    KFilterProjectIo::BaffleSettingsPerDriver patch155BaffleSettings{};
+    populateBaffleSettings(patch155BaffleSettings);
     if (!KFilterProjectIo::loadFromFile(invalidFilePath,
                                         patch155Loaded,
                                         patch155Measurements,
                                         patch155MergeEnabled,
                                         patch155HiddenStates,
                                         patch155ActiveFilters,
+                                        patch155BaffleSettings,
                                         &errorMessage) ||
         !compareDrivers(original, patch155Loaded, true, errorMessage) ||
         !std::all_of(patch155Measurements.cbegin(),
@@ -637,8 +724,56 @@ int main(int argc, char** argv)
         patch155MergeEnabled ||
         std::any_of(patch155HiddenStates.cbegin(), patch155HiddenStates.cend(),
                     [](bool hidden) { return hidden; }) ||
-        !activeFiltersAreDefault(patch155ActiveFilters)) {
+        !activeFiltersAreDefault(patch155ActiveFilters) ||
+        !baffleSettingsAreDefault(patch155BaffleSettings)) {
         QTextStream(stderr) << "Patch 155 JSON compatibility failed: " << errorMessage << '\n';
+        return 1;
+    }
+
+    // Format version 5 contains active-filter persistence but predates Baffle /
+    // Diffraction. Active filters must survive while every BaffleSettings entry
+    // falls back to the Patch-190 defaults.
+    QJsonObject version5Root = validRoot;
+    version5Root.insert(QStringLiteral("formatVersion"), 5);
+    QJsonObject version5Project = version5Root.value(QStringLiteral("project")).toObject();
+    QJsonArray version5Drivers = version5Project.value(QStringLiteral("drivers")).toArray();
+    for (int index = 0; index < version5Drivers.size(); ++index) {
+        QJsonObject driverObject = version5Drivers.at(index).toObject();
+        driverObject.remove(QStringLiteral("baffle"));
+        version5Drivers[index] = driverObject;
+    }
+    version5Project.insert(QStringLiteral("drivers"), version5Drivers);
+    version5Root.insert(QStringLiteral("project"), version5Project);
+    if (!writeTextFile(invalidFilePath,
+                       QString::fromUtf8(QJsonDocument(version5Root).toJson(QJsonDocument::Indented)),
+                       errorMessage)) {
+        QTextStream(stderr) << errorMessage << '\n';
+        return 1;
+    }
+
+    driver version5Loaded[KFilterProjectIo::DriverCount];
+    KFilterProjectIo::MeasurementCurves version5Measurements;
+    bool version5MergeEnabled = false;
+    KFilterProjectIo::MeasurementHiddenStates version5HiddenStates{};
+    KFilterProjectIo::ActiveFilterChains version5ActiveFilters{};
+    KFilterProjectIo::BaffleSettingsPerDriver version5BaffleSettings{};
+    populateBaffleSettings(version5BaffleSettings);
+    if (!KFilterProjectIo::loadFromFile(invalidFilePath,
+                                        version5Loaded,
+                                        version5Measurements,
+                                        version5MergeEnabled,
+                                        version5HiddenStates,
+                                        version5ActiveFilters,
+                                        version5BaffleSettings,
+                                        &errorMessage) ||
+        !compareDrivers(original, version5Loaded, true, errorMessage) ||
+        !compareMeasurements(originalMeasurements, version5Measurements, errorMessage) ||
+        !compareMeasurementHiddenStates(originalHiddenStates, version5HiddenStates, errorMessage) ||
+        !compareActiveFilters(originalActiveFilters, version5ActiveFilters, errorMessage) ||
+        !version5MergeEnabled ||
+        !baffleSettingsAreDefault(version5BaffleSettings)) {
+        QTextStream(stderr) << "Format version 5 Baffle compatibility failed: "
+                            << errorMessage << '\n';
         return 1;
     }
 
@@ -669,18 +804,22 @@ int main(int argc, char** argv)
     KFilterProjectIo::MeasurementHiddenStates version4HiddenStates{};
     KFilterProjectIo::ActiveFilterChains version4ActiveFilters{};
     populateActiveFilters(version4ActiveFilters);
+    KFilterProjectIo::BaffleSettingsPerDriver version4BaffleSettings{};
+    populateBaffleSettings(version4BaffleSettings);
     if (!KFilterProjectIo::loadFromFile(invalidFilePath,
                                         version4Loaded,
                                         version4Measurements,
                                         version4MergeEnabled,
                                         version4HiddenStates,
                                         version4ActiveFilters,
+                                        version4BaffleSettings,
                                         &errorMessage) ||
         !compareDrivers(original, version4Loaded, true, errorMessage) ||
         !compareMeasurements(originalMeasurements, version4Measurements, errorMessage) ||
         !compareMeasurementHiddenStates(originalHiddenStates, version4HiddenStates, errorMessage) ||
         !version4MergeEnabled ||
-        !activeFiltersAreDefault(version4ActiveFilters)) {
+        !activeFiltersAreDefault(version4ActiveFilters) ||
+        !baffleSettingsAreDefault(version4BaffleSettings)) {
         QTextStream(stderr) << "Format version 4 active-filter compatibility failed: "
                             << errorMessage << '\n';
         return 1;
@@ -709,19 +848,23 @@ int main(int argc, char** argv)
     KFilterProjectIo::MeasurementHiddenStates version3HiddenStates{};
     KFilterProjectIo::ActiveFilterChains version3ActiveFilters{};
     populateActiveFilters(version3ActiveFilters);
+    KFilterProjectIo::BaffleSettingsPerDriver version3BaffleSettings{};
+    populateBaffleSettings(version3BaffleSettings);
     if (!KFilterProjectIo::loadFromFile(invalidFilePath,
                                         version3Loaded,
                                         version3Measurements,
                                         version3MergeEnabled,
                                         version3HiddenStates,
                                         version3ActiveFilters,
+                                        version3BaffleSettings,
                                         &errorMessage) ||
         !compareDrivers(original, version3Loaded, true, errorMessage) ||
         !compareMeasurements(originalMeasurements, version3Measurements, errorMessage) ||
         !version3MergeEnabled ||
         !version3HiddenStates[0] || version3HiddenStates[1] ||
         !version3HiddenStates[2] || version3HiddenStates[3] ||
-        !activeFiltersAreDefault(version3ActiveFilters)) {
+        !activeFiltersAreDefault(version3ActiveFilters) ||
+        !baffleSettingsAreDefault(version3BaffleSettings)) {
         QTextStream(stderr) << "Format version 3 global-hide migration failed: "
                             << errorMessage << '\n';
         return 1;
@@ -750,19 +893,23 @@ int main(int argc, char** argv)
     version2HiddenStates.fill(true);
     KFilterProjectIo::ActiveFilterChains version2ActiveFilters{};
     populateActiveFilters(version2ActiveFilters);
+    KFilterProjectIo::BaffleSettingsPerDriver version2BaffleSettings{};
+    populateBaffleSettings(version2BaffleSettings);
     if (!KFilterProjectIo::loadFromFile(invalidFilePath,
                                         version2Loaded,
                                         version2Measurements,
                                         version2MergeEnabled,
                                         version2HiddenStates,
                                         version2ActiveFilters,
+                                        version2BaffleSettings,
                                         &errorMessage) ||
         !compareDrivers(original, version2Loaded, true, errorMessage) ||
         !compareMeasurements(originalMeasurements, version2Measurements, errorMessage) ||
         !version2MergeEnabled ||
         std::any_of(version2HiddenStates.cbegin(), version2HiddenStates.cend(),
                     [](bool hidden) { return hidden; }) ||
-        !activeFiltersAreDefault(version2ActiveFilters)) {
+        !activeFiltersAreDefault(version2ActiveFilters) ||
+        !baffleSettingsAreDefault(version2BaffleSettings)) {
         QTextStream(stderr) << "Format version 2 compatibility failed: " << errorMessage << '\n';
         return 1;
     }
@@ -804,12 +951,16 @@ int main(int argc, char** argv)
     KFilterProjectIo::ActiveFilterChains unchangedActiveFilters{};
     populateActiveFilters(unchangedActiveFilters);
     const KFilterProjectIo::ActiveFilterChains unchangedActiveFiltersExpected = unchangedActiveFilters;
+    KFilterProjectIo::BaffleSettingsPerDriver unchangedBaffleSettings{};
+    populateBaffleSettings(unchangedBaffleSettings);
+    const KFilterProjectIo::BaffleSettingsPerDriver unchangedBaffleSettingsExpected = unchangedBaffleSettings;
     if (KFilterProjectIo::loadFromFile(invalidFilePath,
                                        unchanged,
                                        unchangedMeasurements,
                                        unchangedMergeEnabled,
                                        unchangedHiddenStates,
                                        unchangedActiveFilters,
+                                       unchangedBaffleSettings,
                                        &errorMessage)) {
         QTextStream(stderr) << "Invalid measurement point ordering was accepted\n";
         return 1;
@@ -820,7 +971,8 @@ int main(int argc, char** argv)
         !unchangedMergeEnabled ||
         !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
                      [](bool hidden) { return hidden; }) ||
-        !compareActiveFilters(unchangedActiveFiltersExpected, unchangedActiveFilters, errorMessage)) {
+        !compareActiveFilters(unchangedActiveFiltersExpected, unchangedActiveFilters, errorMessage) ||
+        !compareBaffleSettings(unchangedBaffleSettingsExpected, unchangedBaffleSettings, errorMessage)) {
         QTextStream(stderr) << "Failed measurement load modified the destination project state\n";
         return 1;
     }
@@ -854,6 +1006,7 @@ int main(int argc, char** argv)
                                        unchangedMergeEnabled,
                                        unchangedHiddenStates,
                                        unchangedActiveFilters,
+                                       unchangedBaffleSettings,
                                        &errorMessage)) {
         QTextStream(stderr) << "Invalid per-driver hidden value was accepted\n";
         return 1;
@@ -863,7 +1016,8 @@ int main(int argc, char** argv)
         !unchangedMergeEnabled ||
         !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
                      [](bool hidden) { return hidden; }) ||
-        !compareActiveFilters(unchangedActiveFiltersExpected, unchangedActiveFilters, errorMessage)) {
+        !compareActiveFilters(unchangedActiveFiltersExpected, unchangedActiveFilters, errorMessage) ||
+        !compareBaffleSettings(unchangedBaffleSettingsExpected, unchangedBaffleSettings, errorMessage)) {
         QTextStream(stderr) << "Failed hide-state load modified the destination project state\n";
         return 1;
     }
@@ -900,6 +1054,7 @@ int main(int argc, char** argv)
                                        unchangedMergeEnabled,
                                        unchangedHiddenStates,
                                        unchangedActiveFilters,
+                                       unchangedBaffleSettings,
                                        &errorMessage)) {
         QTextStream(stderr) << "Unknown active-filter type was accepted\n";
         return 1;
@@ -908,8 +1063,48 @@ int main(int argc, char** argv)
         unchangedMeasurements[0].size() != 1 || !unchangedMergeEnabled ||
         !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
                      [](bool hidden) { return hidden; }) ||
-        !compareActiveFilters(unchangedActiveFiltersExpected, unchangedActiveFilters, errorMessage)) {
+        !compareActiveFilters(unchangedActiveFiltersExpected, unchangedActiveFilters, errorMessage) ||
+        !compareBaffleSettings(unchangedBaffleSettingsExpected, unchangedBaffleSettings, errorMessage)) {
         QTextStream(stderr) << "Failed active-filter load modified the destination project state\n";
+        return 1;
+    }
+
+    // Invalid Baffle metadata in format 6 must fail transactionally.
+    QJsonObject invalidBaffleRoot = validRoot;
+    QJsonObject invalidBaffleProject = invalidBaffleRoot.value(QStringLiteral("project")).toObject();
+    QJsonArray invalidBaffleDrivers = invalidBaffleProject.value(QStringLiteral("drivers")).toArray();
+    QJsonObject invalidBaffleDriver = invalidBaffleDrivers.at(0).toObject();
+    QJsonObject invalidBaffle = invalidBaffleDriver.value(QStringLiteral("baffle")).toObject();
+    invalidBaffle.insert(QStringLiteral("widthMm"), 0.0);
+    invalidBaffleDriver.insert(QStringLiteral("baffle"), invalidBaffle);
+    invalidBaffleDrivers[0] = invalidBaffleDriver;
+    invalidBaffleProject.insert(QStringLiteral("drivers"), invalidBaffleDrivers);
+    invalidBaffleRoot.insert(QStringLiteral("project"), invalidBaffleProject);
+    if (!writeTextFile(invalidFilePath,
+                       QString::fromUtf8(QJsonDocument(invalidBaffleRoot).toJson(QJsonDocument::Indented)),
+                       errorMessage)) {
+        QTextStream(stderr) << errorMessage << '\n';
+        return 1;
+    }
+
+    if (KFilterProjectIo::loadFromFile(invalidFilePath,
+                                       unchanged,
+                                       unchangedMeasurements,
+                                       unchangedMergeEnabled,
+                                       unchangedHiddenStates,
+                                       unchangedActiveFilters,
+                                       unchangedBaffleSettings,
+                                       &errorMessage)) {
+        QTextStream(stderr) << "Invalid Baffle width was accepted\n";
+        return 1;
+    }
+    if (unchanged[0].GetTitle() != QStringLiteral("unchanged sentinel") ||
+        unchangedMeasurements[0].size() != 1 || !unchangedMergeEnabled ||
+        !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
+                     [](bool hidden) { return hidden; }) ||
+        !compareActiveFilters(unchangedActiveFiltersExpected, unchangedActiveFilters, errorMessage) ||
+        !compareBaffleSettings(unchangedBaffleSettingsExpected, unchangedBaffleSettings, errorMessage)) {
+        QTextStream(stderr) << "Failed Baffle load modified the destination project state\n";
         return 1;
     }
 
@@ -928,6 +1123,7 @@ int main(int argc, char** argv)
                                        unchangedMergeEnabled,
                                        unchangedHiddenStates,
                                        unchangedActiveFilters,
+                                       unchangedBaffleSettings,
                                        &errorMessage)) {
         QTextStream(stderr) << "Unsupported JSON project version was accepted\n";
         return 1;
@@ -937,7 +1133,8 @@ int main(int argc, char** argv)
         !unchangedMergeEnabled ||
         !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
                      [](bool hidden) { return hidden; }) ||
-        !compareActiveFilters(unchangedActiveFiltersExpected, unchangedActiveFilters, errorMessage)) {
+        !compareActiveFilters(unchangedActiveFiltersExpected, unchangedActiveFilters, errorMessage) ||
+        !compareBaffleSettings(unchangedBaffleSettingsExpected, unchangedBaffleSettings, errorMessage)) {
         QTextStream(stderr) << "Failed JSON load modified the destination project state\n";
         return 1;
     }
@@ -946,6 +1143,6 @@ int main(int argc, char** argv)
     QFile::remove(oldLegacyFilePath);
     QFile::remove(legacyFilePath);
     QFile::remove(jsonFilePath);
-    QTextStream(stdout) << "KFilterProjectIo JSON measurement, active-filter, and legacy compatibility smoke test passed\n";
+    QTextStream(stdout) << "KFilterProjectIo JSON measurement, active-filter, baffle, and legacy compatibility smoke test passed\n";
     return 0;
 }

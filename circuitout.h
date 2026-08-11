@@ -12,14 +12,18 @@
 #include <QRect>
 #include <QSize>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 #include <QWidget>
 
 #include <array>
 
 class QContextMenuEvent;
+class QFontMetrics;
 class QPainter;
+class ActiveFilterChain;
 class driver;
+enum class ActiveFilterResponseStatus;
 
 /**
  * Qt6 bring-up replacement for the legacy pixmap based CircuitOut widget.
@@ -39,6 +43,9 @@ public:
 
     void setDriver(driver& drv, int driverNumber);
     void setDrivers(driver drivers[], int driverCount);
+    void setActiveFilterState(int driverIndex,
+                              const ActiveFilterChain& chain,
+                              ActiveFilterResponseStatus status);
     void setvalues(double network[]);
     void setShowValues(bool showValues);
     static QColor defaultBackgroundColor();
@@ -113,6 +120,14 @@ private:
         Print = 1
     };
 
+    enum class ActiveFilterDisplayMode
+    {
+        None = 0,
+        Active,
+        BypassUnsupported,
+        BypassInvalid
+    };
+
     enum class HoverHitKind
     {
         None = 0,
@@ -131,10 +146,15 @@ private:
         double fb = 0.0;
         double v2 = 0.0;
         bool curveOrTotalFlagActive = false;
+        ActiveFilterDisplayMode activeFilterDisplayMode = ActiveFilterDisplayMode::None;
+        QStringList activeFilterSectionLabels;
         bool valid = false;
     };
 
     static DriverSnapshot snapshotFromDriver(driver& drv, int driverNumber);
+    static void updateActiveFilterState(DriverSnapshot& snapshot,
+                                        const ActiveFilterChain& chain,
+                                        ActiveFilterResponseStatus status);
     void applySnapshot(const DriverSnapshot& snapshot);
     void applyPreviewGeometry();
     void registerSectionHit(int section, NetworkHitGroup group, const QRectF& bounds) const;
@@ -156,6 +176,7 @@ private:
     void drawCurrentDriverPreview(QPainter& painter, const QRect& previewRect) const;
     void drawNoDriversMessage(QPainter& painter, const QRect& messageRect) const;
     void drawNoPrintableDriversMessage(QPainter& painter, const QRect& messageRect) const;
+    QString activeFilterSummaryText(const QFontMetrics& metrics, int maxWidth) const;
 
     bool printRenderStyle() const;
     QColor backgroundFillColor() const;
@@ -206,6 +227,8 @@ private:
     double m_fb = 0.0;
     double m_v2 = 0.0;
     bool m_curveOrTotalFlagActive = false;
+    ActiveFilterDisplayMode m_activeFilterDisplayMode = ActiveFilterDisplayMode::None;
+    QStringList m_activeFilterSectionLabels;
     bool m_showValues = true;
     QColor m_backgroundColor = defaultBackgroundColor();
     mutable QVector<NetworkSectionHit> m_sectionHits;

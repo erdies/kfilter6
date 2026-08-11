@@ -7,6 +7,7 @@
 #include "kfilterqt6app.h"
 
 #include "activefilterparametersdialog.h"
+#include "baffleparametersdialog.h"
 #include "circuitout.h"
 #include "correctioncurveexport.h"
 #include "driver.h"
@@ -598,6 +599,10 @@ void KFilterQt6App::createActions()
     connect(m_activeFilterParametersAction, &QAction::triggered,
             this, &KFilterQt6App::editActiveFilterParameters);
 
+    m_baffleParametersAction = new QAction(tr("&Baffle / Diffraction Parameters..."), this);
+    connect(m_baffleParametersAction, &QAction::triggered,
+            this, &KFilterQt6App::editBaffleParameters);
+
     m_showFileToolBarAction = new QAction(tr("Show &File Toolbar"), this);
     m_showFileToolBarAction->setCheckable(true);
     m_showFileToolBarAction->setChecked(true);
@@ -732,6 +737,7 @@ void KFilterQt6App::createMenusAndToolBar()
     editMenu->addAction(m_driverParametersAction);
     editMenu->addAction(m_networkParametersAction);
     editMenu->addAction(m_activeFilterParametersAction);
+    editMenu->addAction(m_baffleParametersAction);
 
     QMenu *measurementMenu = menuBar()->addMenu(tr("&Measurements"));
     QMenu *importMeasurementMenu = measurementMenu->addMenu(tr("&Import Measurement for Driver"));
@@ -818,6 +824,7 @@ void KFilterQt6App::createMenusAndToolBar()
     m_editToolBar->addAction(m_driverParametersAction);
     m_editToolBar->addAction(m_networkParametersAction);
     m_editToolBar->addAction(m_activeFilterParametersAction);
+    m_editToolBar->addAction(m_baffleParametersAction);
 }
 
 
@@ -2241,6 +2248,11 @@ void KFilterQt6App::refreshCircuitPreview()
 
     if (m_circuitPreviewDriverIndex == KFilterProjectIo::DriverCount) {
         m_circuitPreview->setDrivers(m_doc->m_driverDriver, KFilterProjectIo::DriverCount);
+        for (int driverIndex = 0; driverIndex < KFilterProjectIo::DriverCount; ++driverIndex) {
+            m_circuitPreview->setActiveFilterState(driverIndex,
+                                                   m_doc->activeFilterChain(driverIndex),
+                                                   m_doc->activeFilterResponse(driverIndex).status);
+        }
         return;
     }
 
@@ -2252,10 +2264,18 @@ void KFilterQt6App::refreshCircuitPreview()
 
     if (driverIndex == KFilterProjectIo::DriverCount) {
         m_circuitPreview->setDrivers(m_doc->m_driverDriver, KFilterProjectIo::DriverCount);
+        for (int activeDriverIndex = 0; activeDriverIndex < KFilterProjectIo::DriverCount; ++activeDriverIndex) {
+            m_circuitPreview->setActiveFilterState(activeDriverIndex,
+                                                   m_doc->activeFilterChain(activeDriverIndex),
+                                                   m_doc->activeFilterResponse(activeDriverIndex).status);
+        }
         return;
     }
 
     m_circuitPreview->setDriver(m_doc->m_driverDriver[driverIndex], driverIndex + 1);
+    m_circuitPreview->setActiveFilterState(driverIndex,
+                                           m_doc->activeFilterChain(driverIndex),
+                                           m_doc->activeFilterResponse(driverIndex).status);
 }
 
 void KFilterQt6App::setCircuitPreviewDriverIndex(int driverIndex, bool showStatusMessage)
@@ -2369,6 +2389,9 @@ void KFilterQt6App::updateActionState()
     }
     if (m_activeFilterParametersAction != nullptr) {
         m_activeFilterParametersAction->setEnabled(!locked);
+    }
+    if (m_baffleParametersAction != nullptr) {
+        m_baffleParametersAction->setEnabled(!locked);
     }
     if (m_quitAction != nullptr) {
         m_quitAction->setEnabled(!locked);
@@ -2604,9 +2627,32 @@ void KFilterQt6App::editActiveFilterParameters()
         m_doc->setModified(true);
         m_doc->viewrefresh();
         statusBar()->showMessage(
-            tr("Active-filter parameters applied; supported Butterworth and Notch filters affect the simulation and are stored with the project."),
+            tr("Active-filter parameters applied; all supported sections affect the simulation and are stored with the project."),
             4000);
     });
     dialog.exec();
     m_lastActiveFilterDriverIndex = dialog.currentDriverIndex();
+}
+
+void KFilterQt6App::editBaffleParameters()
+{
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
+    BaffleParametersDialog dialog(m_doc->baffleSettingsPerDriver(),
+                                  this,
+                                  m_lastBaffleDriverIndex);
+    connect(&dialog, &BaffleParametersDialog::parametersPreviewChanged, this, [this]() {
+        m_doc->viewrefresh();
+    });
+    connect(&dialog, &BaffleParametersDialog::parametersApplied, this, [this]() {
+        m_doc->setModified(true);
+        m_doc->viewrefresh();
+        statusBar()->showMessage(
+            tr("Baffle / Diffraction parameters applied; Stage-1 processing and diagnostic visibility are stored with the project."),
+            4000);
+    });
+    dialog.exec();
+    m_lastBaffleDriverIndex = dialog.currentDriverIndex();
 }

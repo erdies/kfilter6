@@ -98,7 +98,7 @@ With **Merge Measurement** enabled, the interpolated correction is applied to th
 
 The **Hide Measurement for Driver** submenu controls each driver independently. A checked driver keeps its simulated SPL curve visible but suppresses both the stored correction curve and its correction influence. With Merge enabled, hidden drivers therefore contribute their uncorrected simulation to vector and energetic sums, while non-hidden drivers contribute their corrected simulation. The same effective contribution is used for the individual curve and both sum modes, so mixed hide states remain mathematically and visually consistent.
 
-Only the resulting relative correction points are project data. The original measurement file, absolute raw levels, calibration range, offset settings, and fade settings are not persisted. The current `.kfp` JSON format version 5 stores each correction curve together with its per-driver hide state, plus the project-wide merge switch. It also persists every driver's complete active-filter metadata (chain enable state, diagnostic-plot visibility, ordered sections, section enable state, type, characteristic, and all type-specific parameters). The calculated complex transfer-response arrays remain transient and are rebuilt from this metadata after loading. PDF rendering follows the same effective per-driver correction state as the plot.
+Only the resulting relative correction points are project data. The original measurement file, absolute raw levels, calibration range, offset settings, and fade settings are not persisted. The current `.kfp` JSON format version 6 stores each correction curve together with its per-driver hide state, plus the project-wide merge switch. It also persists every driver's complete active-filter metadata and Baffle / Diffraction settings. Calculated complex transfer-response arrays remain transient and are rebuilt from the stored metadata after loading. PDF rendering follows the same effective per-driver correction state as the plot.
 
 ### Active filters
 
@@ -109,14 +109,19 @@ individual SPL curve, vector sum, and energetic sum through the same centralized
 signal path. The optional diagnostic overlay shows `20 * log10(|H_active(f)|)` and
 does not control whether the filter itself is active.
 
-Patch 183 supports these analog transfer sections:
+The current active-filter engine supports these transfer sections:
 
 - Butterworth low-pass, orders 1 through 8;
 - Butterworth high-pass, orders 1 through 8;
+- Linkwitz-Riley low-pass/high-pass as LR2 or LR4;
 - Butterworth band-pass, defined as high-pass at the lower cutoff multiplied by
   low-pass at the upper cutoff, with the selected order applied independently
   to both flanks;
-- full-depth second-order Notch with center frequency `f0` and quality factor `Q`.
+- full-depth second-order Notch with center frequency `f0` and quality factor `Q`;
+- Gain as a frequency-independent dB multiplier;
+- Delay as a pure time delay with unity magnitude;
+- Polarity as normal (`+1`) or inverted (`-1`) phase;
+- first-order and second-order All-pass (AP1/AP2).
 
 For a Butterworth Band-pass, `Frequency 1` is the lower cutoff and `Frequency 2`
 is the upper cutoff. The lower cutoff must be strictly below the upper cutoff.
@@ -128,6 +133,39 @@ H_band(f) = H_highpass(f, f_lower) * H_lowpass(f, f_upper)
 ```
 
 so magnitude and phase from both flanks are preserved.
+
+Linkwitz-Riley LR2/LR4 low-pass and high-pass sections use
+
+```text
+H_LR,N(f) = H_BW,N/2(f)^2
+```
+
+so each branch is -6.0206 dB at its crossover frequency.
+
+Gain, Delay, and Polarity are elementary complex multipliers:
+
+```text
+H_gain(f)     = 10^(gainDb/20)
+H_delay(f)    = exp(-j*2*pi*f*delaySeconds)
+H_polarity(f) = +1 (normal) or -1 (inverted)
+```
+
+Delay must be finite and non-negative. Gain must produce a finite positive
+linear multiplier. These sections are multiplied into the same complex chain as
+the frequency-selective filters.
+
+All-pass sections are unity-magnitude phase filters. KFilter implements the
+normalized forms
+
+```text
+AP1: H(s) = (s - 1) / (s + 1)
+AP2: H(s) = (s^2 - s/Q + 1) / (s^2 + s/Q + 1)
+s = j*f/f0
+```
+
+AP1 uses only `frequencyHz`; its stored Q value is ignored. AP2 uses both
+`frequencyHz` and a positive Q. Only orders 1 and 2 are supported for All-pass.
+Both variants preserve `|H(f)| = 1` and affect only phase.
 
 The Notch response is
 
@@ -141,8 +179,50 @@ reserved metadata for a possible future finite-depth variant and does not affect
 the current DSP; the dialog therefore exposes only center frequency and Q for Notch.
 If any enabled section in a chain is unsupported or invalid, the complete active
 filter stage for that driver is bypassed rather than applying a supported prefix.
-Active-filter metadata is stored in `.kfp` format version 5; calculated 150-point
-complex responses remain transient cache data.
+Active-filter metadata was introduced in `.kfp` format version 5 and remains part of
+the current version-6 format; calculated 150-point complex responses remain transient
+cache data.
+
+### Baffle / Diffraction
+
+The **Edit -> Baffle / Diffraction Parameters...** dialog maintains one independent
+Baffle processing stage per driver. Two models are available:
+
+- **Simple Baffle Step**: width-only engineering shelf with midpoint
+  `f0 = 115 / W[m]`, 0 dB LF reference, +3.0103 dB at `f0`, and approximately
+  +6.02 dB at high frequency.
+- **Rectangular Edge Diffraction**: sharp-edged, point-source, on-axis far-field
+  model using baffle width/height and the driver centre position `(X,Y)`.
+
+The Patch-192 rectangular model discretizes the perimeter into 200 edge sources by
+default, distributed approximately in proportion to edge length while retaining all
+four corners. For each edge source the angular increment `phi_j` seen from the driver
+sets the normalized weight, and the complex response is
+
+```text
+H_rect(f) = 2 - sum_j w_j * exp(-j * k * b_j)
+w_j       = phi_j / (2*pi)
+k          = 2*pi*f / 343 m/s
+```
+
+`b_j` is the driver-centre-to-edge-source distance. Stage 2 replaces Stage 1; the two
+responses are never multiplied together. There is no hidden observer-distance
+parameter in this first rectangular model.
+
+The resulting complex multiplier is inserted after the Active Filter response and
+before the scalar Measurement correction in the centralized driver path, so both its
+magnitude and phase also enter the vector SPL sum. Invalid rectangular geometry safely
+bypasses only the Baffle stage.
+
+The optional diagnostic overlay shows `20 * log10(|H_baffle(f)|)` with its own
+dash-dot plot style. Diagnostic visibility never controls whether the Baffle stage
+itself is active. **Hide Measurement** affects only the Measurement correction and
+therefore does not bypass Baffle processing.
+
+`.kfp` format version 6 stores each driver's Baffle enable state, model, width,
+rectangular geometry, diagnostic visibility, and edge-source count. The 150-point
+complex Baffle response and cache generation are not serialized. Projects through
+format version 5 load with Baffle processing disabled and default settings.
 
 ### Network preview
 

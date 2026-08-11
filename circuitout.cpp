@@ -6,6 +6,8 @@
 
 #include "circuitout.h"
 
+#include "activefiltermodel.h"
+#include "activefilterresponse.h"
 #include "driver.h"
 
 #include <QBrush>
@@ -23,6 +25,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <variant>
 
 namespace
 {
@@ -36,6 +39,98 @@ bool isActive(double value)
 QString compactNumber(double value, int precision = 4)
 {
     return QString::number(value, 'g', precision);
+}
+
+QString compactFrequency(double frequencyHz)
+{
+    if (frequencyHz >= 1000.0) {
+        return QStringLiteral("%1 kHz").arg(compactNumber(frequencyHz / 1000.0));
+    }
+    return QStringLiteral("%1 Hz").arg(compactNumber(frequencyHz));
+}
+
+QString compactFrequencyRange(double lowerFrequencyHz, double upperFrequencyHz)
+{
+    if (lowerFrequencyHz >= 1000.0) {
+        return QStringLiteral("%1–%2 kHz")
+            .arg(compactNumber(lowerFrequencyHz / 1000.0),
+                 compactNumber(upperFrequencyHz / 1000.0));
+    }
+    return QStringLiteral("%1–%2 Hz")
+        .arg(compactNumber(lowerFrequencyHz), compactNumber(upperFrequencyHz));
+}
+
+QString activeFilterSectionLabel(const ActiveFilterSection& section)
+{
+    switch (section.type()) {
+    case ActiveFilterType::LowPass:
+        if (const auto *parameters = std::get_if<ActiveFilterLowPassParameters>(&section.parameters())) {
+            if (parameters->characteristic == ActiveFilterCharacteristic::LinkwitzRiley) {
+                return QStringLiteral("LR%1 LP %2")
+                    .arg(parameters->order)
+                    .arg(compactFrequency(parameters->frequencyHz));
+            }
+            return QStringLiteral("LP%1 %2")
+                .arg(parameters->order)
+                .arg(compactFrequency(parameters->frequencyHz));
+        }
+        break;
+    case ActiveFilterType::HighPass:
+        if (const auto *parameters = std::get_if<ActiveFilterHighPassParameters>(&section.parameters())) {
+            if (parameters->characteristic == ActiveFilterCharacteristic::LinkwitzRiley) {
+                return QStringLiteral("LR%1 HP %2")
+                    .arg(parameters->order)
+                    .arg(compactFrequency(parameters->frequencyHz));
+            }
+            return QStringLiteral("HP%1 %2")
+                .arg(parameters->order)
+                .arg(compactFrequency(parameters->frequencyHz));
+        }
+        break;
+    case ActiveFilterType::BandPass:
+        if (const auto *parameters = std::get_if<ActiveFilterBandPassParameters>(&section.parameters())) {
+            return QStringLiteral("BP%1 %2")
+                .arg(parameters->order)
+                .arg(compactFrequencyRange(parameters->lowerFrequencyHz,
+                                           parameters->upperFrequencyHz));
+        }
+        break;
+    case ActiveFilterType::Notch:
+        if (const auto *parameters = std::get_if<ActiveFilterNotchParameters>(&section.parameters())) {
+            return QStringLiteral("Notch %1 Q%2")
+                .arg(compactFrequency(parameters->centerFrequencyHz), compactNumber(parameters->q));
+        }
+        break;
+    case ActiveFilterType::AllPass:
+        if (const auto *parameters = std::get_if<ActiveFilterAllPassParameters>(&section.parameters())) {
+            if (parameters->order == 2) {
+                return QStringLiteral("AP2 %1 Q%2")
+                    .arg(compactFrequency(parameters->frequencyHz), compactNumber(parameters->q));
+            }
+            return QStringLiteral("AP%1 %2")
+                .arg(parameters->order)
+                .arg(compactFrequency(parameters->frequencyHz));
+        }
+        break;
+    case ActiveFilterType::Gain:
+        if (const auto *parameters = std::get_if<ActiveFilterGainParameters>(&section.parameters())) {
+            return QStringLiteral("Gain %1 dB").arg(compactNumber(parameters->gainDb));
+        }
+        break;
+    case ActiveFilterType::Delay:
+        if (const auto *parameters = std::get_if<ActiveFilterDelayParameters>(&section.parameters())) {
+            return QStringLiteral("Delay %1 ms").arg(compactNumber(parameters->delayMs));
+        }
+        break;
+    case ActiveFilterType::Polarity:
+        if (const auto *parameters = std::get_if<ActiveFilterPolarityParameters>(&section.parameters())) {
+            return parameters->inverted ? QStringLiteral("Polarity inv")
+                                        : QStringLiteral("Polarity normal");
+        }
+        break;
+    }
+
+    return QString();
 }
 
 int perceivedBrightness(const QColor& color)
@@ -149,6 +244,46 @@ CircuitOut::DriverSnapshot CircuitOut::snapshotFromDriver(driver& drv, int drive
     return snapshot;
 }
 
+void CircuitOut::updateActiveFilterState(DriverSnapshot& snapshot,
+                                         const ActiveFilterChain& chain,
+                                         ActiveFilterResponseStatus status)
+{
+    snapshot.activeFilterDisplayMode = ActiveFilterDisplayMode::None;
+    snapshot.activeFilterSectionLabels.clear();
+
+    if (!chain.enabled()) {
+        return;
+    }
+
+    if (status == ActiveFilterResponseStatus::Unsupported) {
+        snapshot.activeFilterDisplayMode = ActiveFilterDisplayMode::BypassUnsupported;
+        return;
+    }
+    if (status == ActiveFilterResponseStatus::InvalidParameters) {
+        snapshot.activeFilterDisplayMode = ActiveFilterDisplayMode::BypassInvalid;
+        return;
+    }
+    if (status != ActiveFilterResponseStatus::Valid) {
+        return;
+    }
+
+    for (std::size_t sectionIndex = 0; sectionIndex < chain.sectionCount(); ++sectionIndex) {
+        const ActiveFilterSection& section = chain.section(sectionIndex);
+        if (!section.enabled()) {
+            continue;
+        }
+
+        const QString label = activeFilterSectionLabel(section);
+        if (!label.isEmpty()) {
+            snapshot.activeFilterSectionLabels.append(label);
+        }
+    }
+
+    if (!snapshot.activeFilterSectionLabels.isEmpty()) {
+        snapshot.activeFilterDisplayMode = ActiveFilterDisplayMode::Active;
+    }
+}
+
 void CircuitOut::applySnapshot(const DriverSnapshot& snapshot)
 {
     m_network = snapshot.network;
@@ -159,6 +294,8 @@ void CircuitOut::applySnapshot(const DriverSnapshot& snapshot)
     m_fb = snapshot.fb;
     m_v2 = snapshot.v2;
     m_curveOrTotalFlagActive = snapshot.curveOrTotalFlagActive;
+    m_activeFilterDisplayMode = snapshot.activeFilterDisplayMode;
+    m_activeFilterSectionLabels = snapshot.activeFilterSectionLabels;
 }
 
 void CircuitOut::applyPreviewGeometry()
@@ -197,10 +334,39 @@ void CircuitOut::setDrivers(driver drivers[], int driverCount)
     applyPreviewGeometry();
 }
 
+void CircuitOut::setActiveFilterState(int driverIndex,
+                                      const ActiveFilterChain& chain,
+                                      ActiveFilterResponseStatus status)
+{
+    if (driverIndex < 0 || driverIndex >= static_cast<int>(m_driverSnapshots.size())) {
+        return;
+    }
+
+    const int driverNumber = driverIndex + 1;
+    for (int snapshotIndex = 0; snapshotIndex < m_driverSnapshotCount; ++snapshotIndex) {
+        DriverSnapshot& snapshot = m_driverSnapshots[snapshotIndex];
+        if (!snapshot.valid || snapshot.driverNumber != driverNumber) {
+            continue;
+        }
+        updateActiveFilterState(snapshot, chain, status);
+    }
+
+    if (m_driverNumber == driverNumber) {
+        DriverSnapshot displayState;
+        updateActiveFilterState(displayState, chain, status);
+        m_activeFilterDisplayMode = displayState.activeFilterDisplayMode;
+        m_activeFilterSectionLabels = displayState.activeFilterSectionLabels;
+    }
+
+    update();
+}
+
 void CircuitOut::setvalues(double network[])
 {
     m_showAllDrivers = false;
     m_driverSnapshotCount = 0;
+    m_activeFilterDisplayMode = ActiveFilterDisplayMode::None;
+    m_activeFilterSectionLabels.clear();
     for (int unitIndex = 1; unitIndex <= NetworkUnitCount; ++unitIndex) {
         m_network[unitIndex] = network[unitIndex];
     }
@@ -373,7 +539,8 @@ bool CircuitOut::driverSnapshotPrintableInAllDriversPdf(const DriverSnapshot& sn
 {
     return snapshot.valid &&
            (driverSnapshotHasAnyNetworkElement(snapshot) ||
-            snapshot.curveOrTotalFlagActive);
+            snapshot.curveOrTotalFlagActive ||
+            snapshot.activeFilterDisplayMode != ActiveFilterDisplayMode::None);
 }
 
 void CircuitOut::paintEvent(QPaintEvent *event)
@@ -462,6 +629,8 @@ void CircuitOut::drawPreview(QPainter& painter, const QRect& previewRect, Render
     previousSnapshot.fb = m_fb;
     previousSnapshot.v2 = m_v2;
     previousSnapshot.curveOrTotalFlagActive = m_curveOrTotalFlagActive;
+    previousSnapshot.activeFilterDisplayMode = m_activeFilterDisplayMode;
+    previousSnapshot.activeFilterSectionLabels = m_activeFilterSectionLabels;
     previousSnapshot.valid = true;
 
     const QRect outerRect = previewRect.adjusted(8, 8, -8, -8);
@@ -722,6 +891,60 @@ void CircuitOut::drawNoPrintableDriversMessage(QPainter& painter, const QRect& m
                      tr("All drivers are empty and have no active plot or summary flag."));
 }
 
+QString CircuitOut::activeFilterSummaryText(const QFontMetrics& metrics, int maxWidth) const
+{
+    if (maxWidth <= 0 || m_activeFilterDisplayMode == ActiveFilterDisplayMode::None) {
+        return QString();
+    }
+
+    const QString prefix = QStringLiteral(" | AF: ");
+    auto fits = [&metrics, maxWidth](const QString& text) {
+        return metrics.horizontalAdvance(text) <= maxWidth;
+    };
+
+    if (m_activeFilterDisplayMode == ActiveFilterDisplayMode::BypassUnsupported ||
+        m_activeFilterDisplayMode == ActiveFilterDisplayMode::BypassInvalid) {
+        const QString detailed = prefix +
+            (m_activeFilterDisplayMode == ActiveFilterDisplayMode::BypassUnsupported
+                 ? QStringLiteral("BYPASS (unsupported)")
+                 : QStringLiteral("BYPASS (invalid)"));
+        if (fits(detailed)) {
+            return detailed;
+        }
+
+        const QString compact = prefix + QStringLiteral("BYPASS");
+        return fits(compact) ? compact : metrics.elidedText(compact, Qt::ElideRight, maxWidth);
+    }
+
+    if (m_activeFilterSectionLabels.isEmpty()) {
+        return QString();
+    }
+
+    const QString separator = QStringLiteral(" · ");
+    const QString full = prefix + m_activeFilterSectionLabels.join(separator);
+    if (fits(full)) {
+        return full;
+    }
+
+    for (int visibleCount = m_activeFilterSectionLabels.size() - 1; visibleCount >= 1; --visibleCount) {
+        QStringList visibleSections;
+        visibleSections.reserve(visibleCount);
+        for (int index = 0; index < visibleCount; ++index) {
+            visibleSections.append(m_activeFilterSectionLabels.at(index));
+        }
+
+        const int hiddenCount = m_activeFilterSectionLabels.size() - visibleCount;
+        const QString shortened = prefix + visibleSections.join(separator) + separator +
+                                  QStringLiteral("+%1").arg(hiddenCount);
+        if (fits(shortened)) {
+            return shortened;
+        }
+    }
+
+    const QString firstOnly = prefix + m_activeFilterSectionLabels.first();
+    return fits(firstOnly) ? firstOnly : metrics.elidedText(firstOnly, Qt::ElideRight, maxWidth);
+}
+
 void CircuitOut::drawCurrentDriverPreview(QPainter& painter, const QRect& previewRect) const
 {
     painter.setPen(QPen(primaryInkColor(), 1.2));
@@ -735,7 +958,6 @@ void CircuitOut::drawCurrentDriverPreview(QPainter& painter, const QRect& previe
     QFont titleFont = oldFont;
     titleFont.setBold(true);
     titleFont.setPointSize(titleFont.pointSize() + 1);
-    painter.setFont(titleFont);
     const qreal lampSize = 14.0;
     const qreal lampGap = 8.0;
     const QRectF lampRect(drawingRect.left() + 2.0,
@@ -746,8 +968,38 @@ void CircuitOut::drawCurrentDriverPreview(QPainter& painter, const QRect& previe
     registerDriverActivityLampHit(lampRect.adjusted(-5.0, -5.0, 5.0, 5.0));
 
     const int titleLeft = static_cast<int>(lampRect.right() + lampGap);
-    painter.drawText(titleLeft, drawingRect.top(), drawingRect.right() - titleLeft, 22,
-                     Qt::AlignLeft | Qt::AlignVCenter, title);
+    const int headerWidth = std::max(0, drawingRect.right() - titleLeft);
+    const QFontMetrics titleMetrics(titleFont);
+    const QFontMetrics statusMetrics(oldFont);
+
+    int titleWidth = std::min(headerWidth, titleMetrics.horizontalAdvance(title));
+    int statusWidth = 0;
+    if (m_activeFilterDisplayMode != ActiveFilterDisplayMode::None && headerWidth > 0) {
+        const int preferredStatusWidth = std::clamp(headerWidth * 55 / 100, 220, 480);
+        const QString unrestrictedStatus = activeFilterSummaryText(statusMetrics, headerWidth);
+        const int unrestrictedStatusWidth = statusMetrics.horizontalAdvance(unrestrictedStatus);
+
+        if (titleWidth + unrestrictedStatusWidth <= headerWidth) {
+            statusWidth = headerWidth - titleWidth;
+        } else {
+            statusWidth = std::min(headerWidth, preferredStatusWidth);
+            titleWidth = std::max(0, headerWidth - statusWidth);
+        }
+    }
+
+    painter.setFont(titleFont);
+    const QString visibleTitle = titleMetrics.elidedText(title, Qt::ElideRight, titleWidth);
+    painter.drawText(titleLeft, drawingRect.top(), titleWidth, 22,
+                     Qt::AlignLeft | Qt::AlignVCenter, visibleTitle);
+
+    if (statusWidth > 0) {
+        painter.setFont(oldFont);
+        painter.setPen(QPen(secondaryInkColor(), 1.0));
+        const QString statusText = activeFilterSummaryText(statusMetrics, statusWidth);
+        painter.drawText(titleLeft + titleWidth, drawingRect.top(), statusWidth, 22,
+                         Qt::AlignLeft | Qt::AlignVCenter, statusText);
+    }
+
     painter.setPen(QPen(panelBorderColor(), 1.0));
     painter.drawLine(QPointF(drawingRect.left(), drawingRect.top() + 24),
                      QPointF(drawingRect.right(), drawingRect.top() + 24));

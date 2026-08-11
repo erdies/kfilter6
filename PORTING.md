@@ -858,3 +858,70 @@ changed.
 - `.kfp` remains `formatVersion = 5`; Band-pass metadata was already persisted by
   Patch 181, so no project-format migration is required.
 
+
+## Patch 190: Baffle-processing core / Simple Baffle Step
+
+- Added per-driver `BaffleSettings` and a Qt-independent complex Baffle response
+  engine on the shared 150-point frequency grid.
+- Implemented Stage-1 **Simple Baffle Step** using the engineering midpoint
+  `f0 = 115 / W[m]` and a first-order complex shelf from 0 dB to +6.02 dB.
+- Added one transient `BaffleResponseCache` per driver. Transfer arrays are
+  rebuilt only when transfer-relevant Baffle settings change.
+- Extended the centralized effective driver path to
+  `raw -> H_active -> H_baffle -> measurement amplitude correction`.
+- Unsupported or invalid Baffle settings bypass only the Baffle stage; Active
+  Filters and Measurement processing remain independent.
+- Added response and document smoke coverage for magnitude, phase, cache
+  behavior, vector/energetic sums, Hide Measurement independence, and isolated
+  invalid-Baffle bypass.
+- Patch 190 intentionally left Baffle metadata transient and kept `.kfp`
+  `formatVersion = 5` pending the follow-up UI/persistence patch.
+
+## Patch 191: Stage-1 Baffle UI, persistence, and diagnostic plot
+
+- Added **Edit -> Baffle / Diffraction Parameters...** with one tab per driver,
+  live preview, Apply/OK/Cancel semantics, Stage-1 width editing, calculated
+  midpoint display, and diagnostic-plot visibility.
+- Rectangular Edge Diffraction remains visible as a forward-compatible model
+  label but is deliberately disabled in the Patch-191 selector because its DSP
+  is not implemented yet.
+- Added a dedicated Baffle diagnostic curve showing
+  `20 * log10(|H_baffle(f)|)` with a dash-dot style and its own legend entry.
+  Diagnostic visibility does not control processing.
+- Advanced the JSON `.kfp` format to `formatVersion = 6`. Each driver stores its
+  complete `BaffleSettings` metadata: enable state, model, width, reserved
+  rectangular geometry, diagnostic visibility, and edge-source count.
+- JSON versions 1 through 5 and legacy text projects remain readable. Because
+  those formats predate Baffle persistence, they load with default disabled
+  Baffle settings. Version 5 still restores its active-filter metadata normally.
+- Calculated 150-point Baffle responses and cache generations remain transient
+  derived data and are never serialized.
+- Added Baffle dialog smoke coverage and extended project/document persistence
+  tests for version-6 round trips, version-5 compatibility, forward-compatible
+  Rectangular metadata, and transactional rejection of invalid Baffle data.
+
+
+## Patch 192: Rectangular Edge Diffraction DSP and minimum geometry UI
+
+- Activated **Rectangular Edge Diffraction** as the second productive Baffle model.
+- Implemented the validated on-axis far-field edge-source expression
+  `H = 2 - sum(w_j * exp(-j*k*b_j))`, with `w_j = phi_j/(2*pi)` and
+  `c = 343 m/s`. No hidden observer-distance parameter is used.
+- The rectangular perimeter is discretized with the persisted `edgeSourceCount`
+  (default 200), approximately proportional to physical edge length while all four
+  corners remain explicit contour points.
+- Added strict DSP validation: width/height must be positive, the driver centre must
+  lie strictly inside the rectangle, and at least four edge sources are required.
+  Invalid geometry returns a unity Baffle response and does not affect Active Filters
+  or Measurement processing.
+- Extended the Baffle dialog with the minimum Stage-2 geometry controls: baffle height,
+  Driver X from left, and Driver Y from top. Stage-2 geometry controls are disabled
+  while Simple Baffle Step is selected.
+- Existing `.kfp` format version 6 already contains all required Stage-2 fields, so no
+  project-format version change is needed.
+- Extended response tests with Stage-2 finite/bounds checks, exact geometry/frequency
+  scaling, N=200 -> 400 convergence, position sensitivity, invalid-geometry bypass,
+  and Stage-2 cache invalidation. The document smoke test also verifies productive
+  Rectangular processing in the centralized complex driver path.
+- Not included yet: Copy Geometry, a baffle sketch, user-editable edge-source count,
+  piston directivity, edge radius/chamfer, or off-axis/directivity modelling.

@@ -392,6 +392,94 @@ bool readRequiredBool(const QJsonObject& object,
     return true;
 }
 
+QString baffleModelToString(BaffleModel model)
+{
+    switch (model) {
+    case BaffleModel::SimpleBaffleStep:
+        return QStringLiteral("simpleBaffleStep");
+    case BaffleModel::RectangularEdgeDiffraction:
+        return QStringLiteral("rectangularEdgeDiffraction");
+    }
+
+    return {};
+}
+
+bool baffleModelFromString(const QString& value, BaffleModel& model)
+{
+    if (value == QStringLiteral("simpleBaffleStep")) {
+        model = BaffleModel::SimpleBaffleStep;
+    } else if (value == QStringLiteral("rectangularEdgeDiffraction")) {
+        model = BaffleModel::RectangularEdgeDiffraction;
+    } else {
+        return false;
+    }
+
+    return true;
+}
+
+bool jsonToBaffleSettings(const QJsonObject& driverObject,
+                          BaffleSettings& settings,
+                          const QString& driverContext,
+                          QString* errorMessage)
+{
+    QJsonObject baffleObject;
+    if (!readObject(driverObject,
+                    QStringLiteral("baffle"),
+                    baffleObject,
+                    driverContext,
+                    errorMessage)) {
+        return false;
+    }
+
+    const QString context = driverContext + QStringLiteral(".baffle");
+    BaffleSettings parsed;
+    QString modelString;
+    int edgeSourceCount = 0;
+    if (!readRequiredBool(baffleObject, QStringLiteral("enabled"), parsed.enabled, context, errorMessage) ||
+        !readRequiredString(baffleObject, QStringLiteral("model"), modelString, context, errorMessage) ||
+        !readRequiredDouble(baffleObject, QStringLiteral("widthMm"), parsed.widthMm, context, errorMessage) ||
+        !readRequiredDouble(baffleObject, QStringLiteral("heightMm"), parsed.heightMm, context, errorMessage) ||
+        !readRequiredDouble(baffleObject, QStringLiteral("driverXmm"), parsed.driverXmm, context, errorMessage) ||
+        !readRequiredDouble(baffleObject, QStringLiteral("driverYmm"), parsed.driverYmm, context, errorMessage) ||
+        !readRequiredBool(baffleObject, QStringLiteral("showResponseInPlot"), parsed.showResponseInPlot, context, errorMessage) ||
+        !readRequiredInt(baffleObject, QStringLiteral("edgeSourceCount"), edgeSourceCount, context, errorMessage)) {
+        return false;
+    }
+
+    if (!baffleModelFromString(modelString, parsed.model)) {
+        setError(errorMessage,
+                 QStringLiteral("Unsupported baffle model '%1' in '%2.model'.")
+                     .arg(modelString, context));
+        return false;
+    }
+    if (edgeSourceCount <= 0 || edgeSourceCount > 100000) {
+        setError(errorMessage,
+                 QStringLiteral("Field '%1.edgeSourceCount' must be between 1 and 100000.")
+                     .arg(context));
+        return false;
+    }
+    parsed.edgeSourceCount = static_cast<std::size_t>(edgeSourceCount);
+
+    if (parsed.widthMm <= 0.0) {
+        setError(errorMessage, QStringLiteral("Field '%1.widthMm' must be greater than zero.").arg(context));
+        return false;
+    }
+    if (parsed.model == BaffleModel::RectangularEdgeDiffraction) {
+        if (parsed.heightMm <= 0.0 ||
+            parsed.driverXmm <= 0.0 || parsed.driverXmm >= parsed.widthMm ||
+            parsed.driverYmm <= 0.0 || parsed.driverYmm >= parsed.heightMm ||
+            parsed.edgeSourceCount < 4) {
+            setError(errorMessage,
+                     QStringLiteral("Rectangular geometry in '%1' is invalid; the driver centre must lie strictly inside the baffle and edgeSourceCount must be at least 4.")
+                         .arg(context));
+            return false;
+        }
+    }
+
+    settings = parsed;
+    return true;
+}
+
 QString activeFilterTypeToString(ActiveFilterType type)
 {
     switch (type) {
@@ -1043,11 +1131,13 @@ bool loadJsonProject(const QByteArray& data,
                      bool& mergeMeasurementsEnabled,
                      KFilterProjectIo::MeasurementHiddenStates& measurementHiddenForDrivers,
                      KFilterProjectIo::ActiveFilterChains& activeFilterChains,
+                     KFilterProjectIo::BaffleSettingsPerDriver& baffleSettings,
                      QString* errorMessage)
 {
     mergeMeasurementsEnabled = false;
     measurementHiddenForDrivers.fill(false);
     activeFilterChains = KFilterProjectIo::ActiveFilterChains{};
+    baffleSettings = KFilterProjectIo::BaffleSettingsPerDriver{};
 
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(data, &parseError);
@@ -1175,6 +1265,15 @@ bool loadJsonProject(const QByteArray& data,
             !jsonToActiveFilterChain(
                 entry,
                 activeFilterChains[static_cast<std::size_t>(driverIndex)],
+                driverContext,
+                errorMessage)) {
+            return false;
+        }
+
+        if (formatVersion >= 6 &&
+            !jsonToBaffleSettings(
+                entry,
+                baffleSettings[static_cast<std::size_t>(driverIndex)],
                 driverContext,
                 errorMessage)) {
             return false;
@@ -1342,6 +1441,68 @@ QJsonObject activeFilterChainToJson(const ActiveFilterChain& chain)
     activeFilter.insert(QStringLiteral("showResponseInPlot"), chain.showResponseInPlot());
     activeFilter.insert(QStringLiteral("sections"), sections);
     return activeFilter;
+}
+
+QJsonObject baffleSettingsToJson(const BaffleSettings& settings)
+{
+    QJsonObject baffle;
+    baffle.insert(QStringLiteral("enabled"), settings.enabled);
+    baffle.insert(QStringLiteral("model"), baffleModelToString(settings.model));
+    baffle.insert(QStringLiteral("widthMm"), settings.widthMm);
+    baffle.insert(QStringLiteral("heightMm"), settings.heightMm);
+    baffle.insert(QStringLiteral("driverXmm"), settings.driverXmm);
+    baffle.insert(QStringLiteral("driverYmm"), settings.driverYmm);
+    baffle.insert(QStringLiteral("showResponseInPlot"), settings.showResponseInPlot);
+    baffle.insert(QStringLiteral("edgeSourceCount"), static_cast<int>(settings.edgeSourceCount));
+    return baffle;
+}
+
+bool validateBaffleSettings(const BaffleSettings& settings,
+                            int driverIndex,
+                            QString* errorMessage)
+{
+    const QString context = QStringLiteral("Driver %1 baffle settings").arg(driverIndex + 1);
+    const auto requireFinite = [&](double value, const QString& field) {
+        if (std::isfinite(value)) {
+            return true;
+        }
+        setError(errorMessage, QStringLiteral("%1 field '%2' must be finite.").arg(context, field));
+        return false;
+    };
+
+    if (!requireFinite(settings.widthMm, QStringLiteral("widthMm")) ||
+        !requireFinite(settings.heightMm, QStringLiteral("heightMm")) ||
+        !requireFinite(settings.driverXmm, QStringLiteral("driverXmm")) ||
+        !requireFinite(settings.driverYmm, QStringLiteral("driverYmm"))) {
+        return false;
+    }
+    if (settings.widthMm <= 0.0) {
+        setError(errorMessage, QStringLiteral("%1 widthMm must be greater than zero.").arg(context));
+        return false;
+    }
+    if (settings.edgeSourceCount == 0 || settings.edgeSourceCount > 100000) {
+        setError(errorMessage, QStringLiteral("%1 edgeSourceCount must be between 1 and 100000.").arg(context));
+        return false;
+    }
+
+    switch (settings.model) {
+    case BaffleModel::SimpleBaffleStep:
+        return true;
+    case BaffleModel::RectangularEdgeDiffraction:
+        if (settings.heightMm <= 0.0 ||
+            settings.driverXmm <= 0.0 || settings.driverXmm >= settings.widthMm ||
+            settings.driverYmm <= 0.0 || settings.driverYmm >= settings.heightMm ||
+            settings.edgeSourceCount < 4) {
+            setError(errorMessage,
+                     QStringLiteral("%1 rectangular geometry is invalid; the driver centre must lie strictly inside the baffle and edgeSourceCount must be at least 4.")
+                         .arg(context));
+            return false;
+        }
+        return true;
+    }
+
+    setError(errorMessage, QStringLiteral("%1 contains an unsupported model value.").arg(context));
+    return false;
 }
 
 bool validateActiveFilterSection(const ActiveFilterSection& section,
@@ -1544,6 +1705,7 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
                                     bool& mergeMeasurementsEnabled,
                                     MeasurementHiddenStates& measurementHiddenForDrivers,
                                     ActiveFilterChains& activeFilterChains,
+                                    BaffleSettingsPerDriver& baffleSettings,
                                     QString* errorMessage)
 {
     QFile file(filePath);
@@ -1566,6 +1728,7 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
     bool parsedMergeMeasurementsEnabled = false;
     MeasurementHiddenStates parsedMeasurementHiddenForDrivers{};
     ActiveFilterChains parsedActiveFilterChains{};
+    BaffleSettingsPerDriver parsedBaffleSettings{};
     const char firstByte = data.at(firstByteIndex);
     const bool isJson = firstByte == '{' || firstByte == '[';
     const QByteArray significantData = data.mid(firstByteIndex);
@@ -1576,6 +1739,7 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
                           parsedMergeMeasurementsEnabled,
                           parsedMeasurementHiddenForDrivers,
                           parsedActiveFilterChains,
+                          parsedBaffleSettings,
                           errorMessage)
         : loadLegacyProject(significantData, parsedDrivers, errorMessage);
     if (!loaded) {
@@ -1595,6 +1759,7 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
                     splCorrectionCurves.cend(),
                     [](const KFilterMeasurementCurve& curve) { return curve.size() >= 2; });
     activeFilterChains = parsedActiveFilterChains;
+    baffleSettings = parsedBaffleSettings;
 
     return true;
 }
@@ -1605,6 +1770,7 @@ bool KFilterProjectIo::saveToFile(const QString& filePath,
                                   bool mergeMeasurementsEnabled,
                                   const MeasurementHiddenStates& measurementHiddenForDrivers,
                                   const ActiveFilterChains& activeFilterChains,
+                                  const BaffleSettingsPerDriver& baffleSettings,
                                   QString* errorMessage)
 {
     QJsonArray driverArray;
@@ -1616,6 +1782,10 @@ bool KFilterProjectIo::saveToFile(const QString& filePath,
             !validateMeasurementCurve(correctionCurve, driverIndex, errorMessage) ||
             !validateActiveFilterChain(
                 activeFilterChains[static_cast<std::size_t>(driverIndex)],
+                driverIndex,
+                errorMessage) ||
+            !validateBaffleSettings(
+                baffleSettings[static_cast<std::size_t>(driverIndex)],
                 driverIndex,
                 errorMessage)) {
             return false;
@@ -1633,6 +1803,9 @@ bool KFilterProjectIo::saveToFile(const QString& filePath,
         driverObject.insert(
             QStringLiteral("activeFilter"),
             activeFilterChainToJson(activeFilterChains[static_cast<std::size_t>(driverIndex)]));
+        driverObject.insert(
+            QStringLiteral("baffle"),
+            baffleSettingsToJson(baffleSettings[static_cast<std::size_t>(driverIndex)]));
         driverArray.append(driverObject);
     }
 

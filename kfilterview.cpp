@@ -42,6 +42,16 @@ QPen activeFilterResponsePen(const QColor& color)
     pen.setCapStyle(Qt::FlatCap);
     return pen;
 }
+
+QPen baffleResponsePen(const QColor& color)
+{
+    QPen pen(color);
+    pen.setWidth(2);
+    pen.setStyle(Qt::CustomDashLine);
+    pen.setDashPattern(QList<qreal>{2.0, 3.0, 7.0, 3.0});
+    pen.setCapStyle(Qt::FlatCap);
+    return pen;
+}
 }
 
 KFilterView::KFilterView(KFilterDoc *document, QWidget *parent)
@@ -513,6 +523,54 @@ void KFilterView::drawActiveFilterResponses(QPainter& painter)
     painter.restore();
 }
 
+void KFilterView::drawBaffleResponses(QPainter& painter)
+{
+    if (m_document == nullptr) {
+        return;
+    }
+
+    const KFilterFrequencyGrid& frequencies = kfilterFrequencyGridHz();
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    for (int driverIndex = 0; driverIndex < 4; ++driverIndex) {
+        const BaffleSettings& settings = m_document->baffleSettings(driverIndex);
+        if (!settings.enabled || !settings.showResponseInPlot) {
+            continue;
+        }
+
+        const BaffleResponse& response = m_document->baffleResponse(driverIndex);
+        if (!response.plottable()) {
+            continue;
+        }
+
+        painter.setPen(baffleResponsePen(pressureCurveColor(driverIndex)));
+        bool haveLastPoint = false;
+        QPointF lastPoint;
+        for (std::size_t sampleIndex = 0; sampleIndex < KFilterFrequencyCount; ++sampleIndex) {
+            const double magnitude = std::abs(response.values[sampleIndex]);
+            if (!std::isfinite(magnitude) || magnitude <= 0.0) {
+                haveLastPoint = false;
+                continue;
+            }
+
+            const double valueDb = 20.0 * std::log10(magnitude);
+            const QPointF point(frequencyHzToX(frequencies[sampleIndex]), pressureDbToY(valueDb));
+            if (!std::isfinite(point.x()) || !std::isfinite(point.y())) {
+                haveLastPoint = false;
+                continue;
+            }
+            if (haveLastPoint) {
+                painter.drawLine(lastPoint, point);
+            }
+            lastPoint = point;
+            haveLastPoint = true;
+        }
+    }
+
+    painter.restore();
+}
+
 void KFilterView::drawCurveLabel(QPainter& painter, const QPointF& point, const QString& label) const
 {
     const QString trimmedLabel = label.trimmed();
@@ -738,6 +796,18 @@ void KFilterView::drawLegend(QPainter& painter)
         }
     }
 
+    for (int driverIndex = 0; driverIndex < 4; ++driverIndex) {
+        const BaffleSettings& settings = m_document->baffleSettings(driverIndex);
+        if (!settings.enabled || !settings.showResponseInPlot) {
+            continue;
+        }
+        const BaffleResponse& response = m_document->baffleResponse(driverIndex);
+        if (response.plottable()) {
+            drawPenEntry(baffleResponsePen(pressureCurveColor(driverIndex)),
+                         tr("Driver %1 baffle").arg(driverIndex + 1));
+        }
+    }
+
     if (mydoc->m_driverDriver[0].SummaryisActive ||
         mydoc->m_driverDriver[1].SummaryisActive ||
         mydoc->m_driverDriver[2].SummaryisActive ||
@@ -934,6 +1004,7 @@ void KFilterView::paintEvent(QPaintEvent *event)
     }
 
     drawActiveFilterResponses(mypainter);
+    drawBaffleResponses(mypainter);
     drawMeasurementCurves(mypainter);
 
     pen.setColor(foregroundTextColor());

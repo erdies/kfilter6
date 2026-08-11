@@ -10,6 +10,7 @@
 #include <cmath>
 #include <complex>
 #include <iostream>
+#include <limits>
 
 namespace
 {
@@ -57,6 +58,26 @@ ActiveFilterChain singleButterworth(ActiveFilterType type, int order, double cut
 }
 
 
+ActiveFilterChain singleLinkwitzRiley(ActiveFilterType type, int order, double cutoffHz)
+{
+    ActiveFilterChain chain;
+    chain.setEnabled(true);
+    const std::size_t index = chain.addSection(type);
+    ActiveFilterSection& section = chain.section(index);
+    if (type == ActiveFilterType::LowPass) {
+        auto& parameters = std::get<ActiveFilterLowPassParameters>(section.parameters());
+        parameters.characteristic = ActiveFilterCharacteristic::LinkwitzRiley;
+        parameters.order = order;
+        parameters.frequencyHz = cutoffHz;
+    } else {
+        auto& parameters = std::get<ActiveFilterHighPassParameters>(section.parameters());
+        parameters.characteristic = ActiveFilterCharacteristic::LinkwitzRiley;
+        parameters.order = order;
+        parameters.frequencyHz = cutoffHz;
+    }
+    return chain;
+}
+
 ActiveFilterChain singleBandPass(int order, double lowerFrequencyHz, double upperFrequencyHz)
 {
     ActiveFilterChain chain;
@@ -79,6 +100,46 @@ ActiveFilterChain singleNotch(double centerFrequencyHz, double q)
     auto& parameters = std::get<ActiveFilterNotchParameters>(chain.section(index).parameters());
     parameters.centerFrequencyHz = centerFrequencyHz;
     parameters.q = q;
+    return chain;
+}
+
+ActiveFilterChain singleAllPass(int order, double frequencyHz, double q = 0.707)
+{
+    ActiveFilterChain chain;
+    chain.setEnabled(true);
+    const std::size_t index = chain.addSection(ActiveFilterType::AllPass);
+    auto& parameters =
+        std::get<ActiveFilterAllPassParameters>(chain.section(index).parameters());
+    parameters.order = order;
+    parameters.frequencyHz = frequencyHz;
+    parameters.q = q;
+    return chain;
+}
+
+ActiveFilterChain singleGain(double gainDb)
+{
+    ActiveFilterChain chain;
+    chain.setEnabled(true);
+    const std::size_t index = chain.addSection(ActiveFilterType::Gain);
+    std::get<ActiveFilterGainParameters>(chain.section(index).parameters()).gainDb = gainDb;
+    return chain;
+}
+
+ActiveFilterChain singleDelay(double delayMs)
+{
+    ActiveFilterChain chain;
+    chain.setEnabled(true);
+    const std::size_t index = chain.addSection(ActiveFilterType::Delay);
+    std::get<ActiveFilterDelayParameters>(chain.section(index).parameters()).delayMs = delayMs;
+    return chain;
+}
+
+ActiveFilterChain singlePolarity(bool inverted)
+{
+    ActiveFilterChain chain;
+    chain.setEnabled(true);
+    const std::size_t index = chain.addSection(ActiveFilterType::Polarity);
+    std::get<ActiveFilterPolarityParameters>(chain.section(index).parameters()).inverted = inverted;
     return chain;
 }
 }
@@ -162,6 +223,319 @@ int main()
     response = calculateActiveFilterResponse(singleButterworth(ActiveFilterType::HighPass, 2, cutoffHz));
     if (!require(nearComplex(response.values[CutoffIndex], {0.0, invSqrt2}, 2.0e-10),
                  "HP2 cutoff phase must be +90 degrees")) {
+        return 1;
+    }
+
+    // Patch 186: Linkwitz-Riley LP/HP.  LR2 and LR4 are implemented as
+    // two cascaded Butterworth filters of half the final order, so the
+    // complete complex response must equal H_BW(order/2)^2.
+    for (int order : {2, 4}) {
+        for (ActiveFilterType type : {ActiveFilterType::LowPass, ActiveFilterType::HighPass}) {
+            const ActiveFilterResponse linkwitzRiley =
+                calculateActiveFilterResponse(singleLinkwitzRiley(type, order, cutoffHz));
+            const ActiveFilterResponse butterworthHalfOrder =
+                calculateActiveFilterResponse(singleButterworth(type, order / 2, cutoffHz));
+
+            if (!require(linkwitzRiley.status == ActiveFilterResponseStatus::Valid,
+                         "LR2/LR4 low-pass/high-pass must be supported") ||
+                !require(near(std::abs(linkwitzRiley.values[CutoffIndex]), 0.5, 2.0e-10),
+                         "Linkwitz-Riley cutoff magnitude must be -6.0206 dB")) {
+                return 1;
+            }
+
+            for (std::size_t index = 0; index < KFilterFrequencyCount; ++index) {
+                const std::complex<double> expected =
+                    butterworthHalfOrder.values[index] * butterworthHalfOrder.values[index];
+                if (!require(nearComplex(linkwitzRiley.values[index], expected, 5.0e-10),
+                             "Linkwitz-Riley complex response must equal squared Butterworth response")) {
+                    return 1;
+                }
+            }
+        }
+    }
+
+    response = calculateActiveFilterResponse(
+        singleLinkwitzRiley(ActiveFilterType::LowPass, 2, cutoffHz));
+    if (!require(nearComplex(response.values[CutoffIndex], {0.0, -0.5}, 2.0e-10),
+                 "LR2 low-pass cutoff phase must be -90 degrees")) {
+        return 1;
+    }
+
+    response = calculateActiveFilterResponse(
+        singleLinkwitzRiley(ActiveFilterType::HighPass, 2, cutoffHz));
+    if (!require(nearComplex(response.values[CutoffIndex], {0.0, 0.5}, 2.0e-10),
+                 "LR2 high-pass cutoff phase must be +90 degrees")) {
+        return 1;
+    }
+
+    response = calculateActiveFilterResponse(
+        singleLinkwitzRiley(ActiveFilterType::LowPass, 4, cutoffHz));
+    if (!require(nearComplex(response.values[CutoffIndex], {-0.5, 0.0}, 3.0e-10),
+                 "LR4 low-pass cutoff phase must be 180 degrees")) {
+        return 1;
+    }
+
+    response = calculateActiveFilterResponse(
+        singleLinkwitzRiley(ActiveFilterType::HighPass, 4, cutoffHz));
+    if (!require(nearComplex(response.values[CutoffIndex], {-0.5, 0.0}, 3.0e-10),
+                 "LR4 high-pass cutoff phase must be 180 degrees")) {
+        return 1;
+    }
+
+    // LR4 low-pass/high-pass are in phase and sum to a flat-magnitude
+    // all-pass response when used at the same cutoff.
+    const ActiveFilterResponse lr4LowPass = calculateActiveFilterResponse(
+        singleLinkwitzRiley(ActiveFilterType::LowPass, 4, cutoffHz));
+    const ActiveFilterResponse lr4HighPass = calculateActiveFilterResponse(
+        singleLinkwitzRiley(ActiveFilterType::HighPass, 4, cutoffHz));
+    for (std::size_t index = 0; index < KFilterFrequencyCount; ++index) {
+        if (!require(near(std::abs(lr4LowPass.values[index] + lr4HighPass.values[index]),
+                          1.0, 6.0e-10),
+                     "matched LR4 low-pass/high-pass must sum with flat magnitude")) {
+            return 1;
+        }
+    }
+
+    for (int invalidOrder : {1, 3, 8}) {
+        response = calculateActiveFilterResponse(
+            singleLinkwitzRiley(ActiveFilterType::LowPass, invalidOrder, cutoffHz));
+        if (!require(response.status == ActiveFilterResponseStatus::InvalidParameters,
+                     "Patch 186 supports only LR2 and LR4 orders")) {
+            return 1;
+        }
+    }
+
+    // Patch 188: AP1/AP2 All-pass. Both variants must have exact unity
+    // magnitude over the whole grid and must match the agreed complex forms.
+    const ActiveFilterResponse ap1 =
+        calculateActiveFilterResponse(singleAllPass(1, cutoffHz));
+    if (!require(ap1.status == ActiveFilterResponseStatus::Valid,
+                 "AP1 must be supported") ||
+        !require(ap1.hasActiveSections,
+                 "enabled AP1 must report an active section") ||
+        !require(nearComplex(ap1.values[CutoffIndex], {0.0, 1.0}, 2.0e-10),
+                 "AP1 must be +90 degrees at f0 for the Patch-188 convention")) {
+        return 1;
+    }
+    for (std::size_t index = 0; index < KFilterFrequencyCount; ++index) {
+        const double ratio = frequencies[index] / cutoffHz;
+        const std::complex<double> normalizedS{0.0, ratio};
+        const std::complex<double> expected =
+            (normalizedS - 1.0) / (normalizedS + 1.0);
+        if (!require(near(std::abs(ap1.values[index]), 1.0, 3.0e-12),
+                     "AP1 magnitude must remain unity") ||
+            !require(nearComplex(ap1.values[index], expected, 3.0e-10),
+                     "AP1 complex response does not match the reference form")) {
+            return 1;
+        }
+    }
+
+    constexpr double AllPassQ = 0.8;
+    const ActiveFilterResponse ap2 =
+        calculateActiveFilterResponse(singleAllPass(2, cutoffHz, AllPassQ));
+    if (!require(ap2.status == ActiveFilterResponseStatus::Valid,
+                 "AP2 must be supported") ||
+        !require(nearComplex(ap2.values[CutoffIndex], {-1.0, 0.0}, 2.0e-10),
+                 "AP2 must be 180 degrees at f0")) {
+        return 1;
+    }
+    for (std::size_t index = 0; index < KFilterFrequencyCount; ++index) {
+        const double ratio = frequencies[index] / cutoffHz;
+        const std::complex<double> normalizedS{0.0, ratio};
+        const std::complex<double> squared = normalizedS * normalizedS;
+        const std::complex<double> expected =
+            (squared - normalizedS / AllPassQ + 1.0) /
+            (squared + normalizedS / AllPassQ + 1.0);
+        if (!require(near(std::abs(ap2.values[index]), 1.0, 3.0e-12),
+                     "AP2 magnitude must remain unity") ||
+            !require(nearComplex(ap2.values[index], expected, 4.0e-10),
+                     "AP2 complex response does not match the reference form")) {
+            return 1;
+        }
+    }
+
+    // Q is deliberately irrelevant to AP1. This keeps persisted AP1 Q metadata
+    // from affecting either transfer validity or cache equivalence.
+    response = calculateActiveFilterResponse(
+        singleAllPass(1, cutoffHz, std::numeric_limits<double>::quiet_NaN()));
+    if (!require(response.status == ActiveFilterResponseStatus::Valid,
+                 "AP1 must ignore its unused Q metadata")) {
+        return 1;
+    }
+
+    for (int invalidOrder : {0, 3, 8}) {
+        response = calculateActiveFilterResponse(singleAllPass(invalidOrder, cutoffHz));
+        if (!require(response.status == ActiveFilterResponseStatus::InvalidParameters,
+                     "All-pass must support only AP1 and AP2")) {
+            return 1;
+        }
+    }
+    response = calculateActiveFilterResponse(singleAllPass(2, 0.0, AllPassQ));
+    if (!require(response.status == ActiveFilterResponseStatus::InvalidParameters,
+                 "All-pass frequency must be positive")) {
+        return 1;
+    }
+    response = calculateActiveFilterResponse(singleAllPass(2, cutoffHz, 0.0));
+    if (!require(response.status == ActiveFilterResponseStatus::InvalidParameters,
+                 "AP2 Q must be positive")) {
+        return 1;
+    }
+    response = calculateActiveFilterResponse(
+        singleAllPass(2, cutoffHz, std::numeric_limits<double>::infinity()));
+    if (!require(response.status == ActiveFilterResponseStatus::InvalidParameters,
+                 "AP2 Q must be finite")) {
+        return 1;
+    }
+
+    // Regression for the Patch-187 observation: once All-pass is implemented,
+    // an All-pass -> Gain chain must stay valid and the Gain must determine the
+    // magnitude while the All-pass supplies only phase.
+    ActiveFilterChain allPassGain;
+    allPassGain.setEnabled(true);
+    std::size_t allPassGainIndex = allPassGain.addSection(ActiveFilterType::AllPass);
+    auto& allPassGainAp =
+        std::get<ActiveFilterAllPassParameters>(allPassGain.section(allPassGainIndex).parameters());
+    allPassGainAp.order = 2;
+    allPassGainAp.frequencyHz = cutoffHz;
+    allPassGainAp.q = AllPassQ;
+    allPassGainIndex = allPassGain.addSection(ActiveFilterType::Gain);
+    constexpr double AllPassGainDb = -6.020599913279624;
+    std::get<ActiveFilterGainParameters>(
+        allPassGain.section(allPassGainIndex).parameters()).gainDb = AllPassGainDb;
+    const ActiveFilterResponse allPassGainResponse =
+        calculateActiveFilterResponse(allPassGain);
+    if (!require(allPassGainResponse.status == ActiveFilterResponseStatus::Valid,
+                 "All-pass/Gain chain must be valid")) {
+        return 1;
+    }
+    for (std::size_t index = 0; index < KFilterFrequencyCount; ++index) {
+        if (!require(near(std::abs(allPassGainResponse.values[index]), 0.5, 4.0e-12),
+                     "Gain must remain effective after All-pass") ||
+            !require(nearComplex(allPassGainResponse.values[index],
+                                 ap2.values[index] * 0.5,
+                                 5.0e-10),
+                     "All-pass/Gain chain must multiply phase and gain")) {
+            return 1;
+        }
+    }
+
+    // Patch 187: elementary active-processing sections. Gain is a constant
+    // positive real multiplier, Delay is a unit-magnitude phase rotation, and
+    // Polarity is exactly +1 or -1.
+    constexpr double HalfGainDb = -6.020599913279624;
+    const ActiveFilterResponse halfGain = calculateActiveFilterResponse(singleGain(HalfGainDb));
+    if (!require(halfGain.status == ActiveFilterResponseStatus::Valid,
+                 "finite Gain must be supported") ||
+        !require(halfGain.hasActiveSections,
+                 "enabled Gain must report an active section")) {
+        return 1;
+    }
+    for (const std::complex<double>& value : halfGain.values) {
+        if (!require(nearComplex(value, {0.5, 0.0}, 2.0e-12),
+                     "Gain must be frequency-independent and phase-neutral")) {
+            return 1;
+        }
+    }
+
+    const ActiveFilterResponse unityGain = calculateActiveFilterResponse(singleGain(0.0));
+    for (const std::complex<double>& value : unityGain.values) {
+        if (!require(nearComplex(value, {1.0, 0.0}, 1.0e-15),
+                     "0 dB Gain must be exact unity")) {
+            return 1;
+        }
+    }
+
+    const double quarterCycleDelayMs = 250.0 / cutoffHz;
+    const ActiveFilterResponse delay = calculateActiveFilterResponse(singleDelay(quarterCycleDelayMs));
+    if (!require(delay.status == ActiveFilterResponseStatus::Valid,
+                 "non-negative finite Delay must be supported") ||
+        !require(nearComplex(delay.values[CutoffIndex], {0.0, -1.0}, 3.0e-10),
+                 "quarter-cycle Delay must produce -90 degrees at the reference frequency")) {
+        return 1;
+    }
+    for (std::size_t index = 0; index < KFilterFrequencyCount; ++index) {
+        const double phase = -2.0 * Pi * frequencies[index] * (quarterCycleDelayMs / 1000.0);
+        const std::complex<double> expected = std::polar(1.0, phase);
+        if (!require(near(std::abs(delay.values[index]), 1.0, 2.0e-12),
+                     "Delay magnitude must remain exactly unity") ||
+            !require(nearComplex(delay.values[index], expected, 3.0e-10),
+                     "Delay phase must follow -2*pi*f*tau")) {
+            return 1;
+        }
+    }
+
+    const ActiveFilterResponse invertedPolarity = calculateActiveFilterResponse(singlePolarity(true));
+    const ActiveFilterResponse normalPolarity = calculateActiveFilterResponse(singlePolarity(false));
+    if (!require(invertedPolarity.status == ActiveFilterResponseStatus::Valid &&
+                     normalPolarity.status == ActiveFilterResponseStatus::Valid,
+                 "both Polarity states must be supported")) {
+        return 1;
+    }
+    for (std::size_t index = 0; index < KFilterFrequencyCount; ++index) {
+        if (!require(nearComplex(invertedPolarity.values[index], {-1.0, 0.0}, 1.0e-15),
+                     "inverted Polarity must be exactly -1") ||
+            !require(nearComplex(normalPolarity.values[index], {1.0, 0.0}, 1.0e-15),
+                     "normal Polarity must be exactly +1")) {
+            return 1;
+        }
+    }
+
+    ActiveFilterChain elementaryCascade;
+    elementaryCascade.setEnabled(true);
+    std::size_t sectionIndex = elementaryCascade.addSection(ActiveFilterType::LowPass);
+    auto& cascadeLowPass =
+        std::get<ActiveFilterLowPassParameters>(elementaryCascade.section(sectionIndex).parameters());
+    cascadeLowPass.characteristic = ActiveFilterCharacteristic::LinkwitzRiley;
+    cascadeLowPass.order = 4;
+    cascadeLowPass.frequencyHz = cutoffHz;
+    sectionIndex = elementaryCascade.addSection(ActiveFilterType::Gain);
+    std::get<ActiveFilterGainParameters>(elementaryCascade.section(sectionIndex).parameters()).gainDb =
+        HalfGainDb;
+    sectionIndex = elementaryCascade.addSection(ActiveFilterType::Delay);
+    std::get<ActiveFilterDelayParameters>(elementaryCascade.section(sectionIndex).parameters()).delayMs =
+        quarterCycleDelayMs;
+    sectionIndex = elementaryCascade.addSection(ActiveFilterType::Polarity);
+    std::get<ActiveFilterPolarityParameters>(elementaryCascade.section(sectionIndex).parameters()).inverted = true;
+
+    const ActiveFilterResponse elementaryCascadeResponse =
+        calculateActiveFilterResponse(elementaryCascade);
+    if (!require(elementaryCascadeResponse.status == ActiveFilterResponseStatus::Valid,
+                 "LR4/Gain/Delay/Polarity cascade must be valid")) {
+        return 1;
+    }
+    for (std::size_t index = 0; index < KFilterFrequencyCount; ++index) {
+        const std::complex<double> expected =
+            lr4LowPass.values[index] * halfGain.values[index] *
+            delay.values[index] * invertedPolarity.values[index];
+        if (!require(nearComplex(elementaryCascadeResponse.values[index], expected, 8.0e-10),
+                     "elementary sections must multiply with the existing complex filter response")) {
+            return 1;
+        }
+    }
+
+    ActiveFilterChain invalidGain = singleGain(std::numeric_limits<double>::infinity());
+    response = calculateActiveFilterResponse(invalidGain);
+    if (!require(response.status == ActiveFilterResponseStatus::InvalidParameters,
+                 "non-finite Gain must be invalid")) {
+        return 1;
+    }
+    invalidGain = singleGain(1.0e9);
+    response = calculateActiveFilterResponse(invalidGain);
+    if (!require(response.status == ActiveFilterResponseStatus::InvalidParameters,
+                 "Gain that overflows the linear multiplier must be invalid")) {
+        return 1;
+    }
+
+    ActiveFilterChain invalidDelay = singleDelay(-0.001);
+    response = calculateActiveFilterResponse(invalidDelay);
+    if (!require(response.status == ActiveFilterResponseStatus::InvalidParameters,
+                 "negative Delay must be invalid")) {
+        return 1;
+    }
+    invalidDelay = singleDelay(std::numeric_limits<double>::infinity());
+    response = calculateActiveFilterResponse(invalidDelay);
+    if (!require(response.status == ActiveFilterResponseStatus::InvalidParameters,
+                 "non-finite Delay must be invalid")) {
         return 1;
     }
 
@@ -349,8 +723,11 @@ int main()
     }
 
     ActiveFilterChain ignoredUnsupported = singleButterworth(ActiveFilterType::LowPass, 2, cutoffHz);
-    const std::size_t gainIndex = ignoredUnsupported.addSection(ActiveFilterType::Gain);
-    ignoredUnsupported.section(gainIndex).setEnabled(false);
+    const std::size_t unsupportedIndex = ignoredUnsupported.addSection(ActiveFilterType::LowPass);
+    auto& disabledUnsupportedParameters =
+        std::get<ActiveFilterLowPassParameters>(ignoredUnsupported.section(unsupportedIndex).parameters());
+    disabledUnsupportedParameters.characteristic = ActiveFilterCharacteristic::Bessel;
+    ignoredUnsupported.section(unsupportedIndex).setEnabled(false);
     response = calculateActiveFilterResponse(ignoredUnsupported);
     if (!require(response.status == ActiveFilterResponseStatus::Valid,
                  "disabled unsupported section must be neutral")) {
@@ -422,6 +799,68 @@ int main()
         return 1;
     }
 
+    ActiveFilterResponseCache allPassCache;
+    ActiveFilterChain cachedAllPass = singleAllPass(1, cutoffHz, 0.5);
+    allPassCache.responseFor(cachedAllPass);
+    const std::uint64_t allPassGeneration = allPassCache.generation();
+    std::get<ActiveFilterAllPassParameters>(cachedAllPass.section(0).parameters()).q = 9.0;
+    allPassCache.responseFor(cachedAllPass);
+    if (!require(allPassCache.generation() == allPassGeneration,
+                 "unused AP1 Q must not invalidate transfer cache")) {
+        return 1;
+    }
+    auto& cachedAllPassParameters =
+        std::get<ActiveFilterAllPassParameters>(cachedAllPass.section(0).parameters());
+    cachedAllPassParameters.frequencyHz *= 1.1;
+    allPassCache.responseFor(cachedAllPass);
+    if (!require(allPassCache.generation() == allPassGeneration + 1,
+                 "All-pass frequency change must invalidate transfer cache")) {
+        return 1;
+    }
+    cachedAllPassParameters.order = 2;
+    cachedAllPassParameters.q = 0.7;
+    allPassCache.responseFor(cachedAllPass);
+    const std::uint64_t ap2Generation = allPassCache.generation();
+    cachedAllPassParameters.q = 1.4;
+    allPassCache.responseFor(cachedAllPass);
+    if (!require(allPassCache.generation() == ap2Generation + 1,
+                 "AP2 Q change must invalidate transfer cache")) {
+        return 1;
+    }
+
+    ActiveFilterResponseCache gainCache;
+    ActiveFilterChain cachedGain = singleGain(-3.0);
+    gainCache.responseFor(cachedGain);
+    const std::uint64_t gainGeneration = gainCache.generation();
+    std::get<ActiveFilterGainParameters>(cachedGain.section(0).parameters()).gainDb = -6.0;
+    gainCache.responseFor(cachedGain);
+    if (!require(gainCache.generation() == gainGeneration + 1,
+                 "Gain change must invalidate transfer cache")) {
+        return 1;
+    }
+
+    ActiveFilterResponseCache delayCache;
+    ActiveFilterChain cachedDelay = singleDelay(0.25);
+    delayCache.responseFor(cachedDelay);
+    const std::uint64_t delayGeneration = delayCache.generation();
+    std::get<ActiveFilterDelayParameters>(cachedDelay.section(0).parameters()).delayMs = 0.5;
+    delayCache.responseFor(cachedDelay);
+    if (!require(delayCache.generation() == delayGeneration + 1,
+                 "Delay change must invalidate transfer cache")) {
+        return 1;
+    }
+
+    ActiveFilterResponseCache polarityCache;
+    ActiveFilterChain cachedPolarity = singlePolarity(false);
+    polarityCache.responseFor(cachedPolarity);
+    const std::uint64_t polarityGeneration = polarityCache.generation();
+    std::get<ActiveFilterPolarityParameters>(cachedPolarity.section(0).parameters()).inverted = true;
+    polarityCache.responseFor(cachedPolarity);
+    if (!require(polarityCache.generation() == polarityGeneration + 1,
+                 "Polarity change must invalidate transfer cache")) {
+        return 1;
+    }
+
     const std::complex<double> inputSignal{2.0, 0.0};
     response = calculateActiveFilterResponse(
         singleButterworth(ActiveFilterType::LowPass, 1, cutoffHz));
@@ -460,7 +899,12 @@ int main()
 
     ActiveFilterChain mixedUnsupported =
         singleButterworth(ActiveFilterType::LowPass, 1, cutoffHz);
-    mixedUnsupported.addSection(ActiveFilterType::Gain);
+    const std::size_t mixedUnsupportedIndex =
+        mixedUnsupported.addSection(ActiveFilterType::HighPass);
+    auto& mixedUnsupportedParameters =
+        std::get<ActiveFilterHighPassParameters>(
+            mixedUnsupported.section(mixedUnsupportedIndex).parameters());
+    mixedUnsupportedParameters.characteristic = ActiveFilterCharacteristic::Bessel;
     response = calculateActiveFilterResponse(mixedUnsupported);
     if (!require(response.status == ActiveFilterResponseStatus::Unsupported,
                  "mixed supported/unsupported chain must be reported as unsupported") ||

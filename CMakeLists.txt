@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(kfilter VERSION 0.1.0 LANGUAGES CXX)
 
-set(KFILTER_PATCH_LEVEL "183")
+set(KFILTER_PATCH_LEVEL "197")
 set(KFILTER_LICENSE_STRING "GPL-3.0-or-later")
 
 set(CMAKE_CXX_STANDARD 17)
@@ -29,12 +29,18 @@ option(KFILTER_BUILD_QT6_APP "Build the minimal Qt6 Widgets application shell" O
 option(KFILTER_BUILD_ACTIVE_FILTER_MODEL_SMOKETEST "Build the active-filter data-model smoke test" ON)
 option(KFILTER_BUILD_ACTIVE_FILTER_DIALOG_SMOKETEST "Build the active-filter model/dialog round-trip smoke test" ON)
 option(KFILTER_BUILD_ACTIVE_FILTER_RESPONSE_SMOKETEST "Build the active-filter complex transfer-function smoke test" ON)
+option(KFILTER_BUILD_BAFFLE_RESPONSE_SMOKETEST "Build the baffle complex transfer-function smoke test" ON)
+option(KFILTER_BUILD_BAFFLE_DIALOG_SMOKETEST "Build the Baffle / Diffraction dialog smoke test" ON)
 
 add_library(kfilter_core STATIC
     activefiltermodel.cpp
     activefiltermodel.h
     activefilterresponse.cpp
     activefilterresponse.h
+    bafflemodel.cpp
+    bafflemodel.h
+    baffleresponse.cpp
+    baffleresponse.h
     kfilterfrequencygrid.cpp
     kfilterfrequencygrid.h
     driver.cpp
@@ -81,6 +87,8 @@ if(KFILTER_BUILD_QT6_APP)
         driverparametersdialog.h
         activefilterparametersdialog.cpp
         activefilterparametersdialog.h
+        baffleparametersdialog.cpp
+        baffleparametersdialog.h
         networkparametersdialog.cpp
         networkparametersdialog.h
         networksectioneditdialog.cpp
@@ -127,6 +135,27 @@ if(KFILTER_BUILD_QT6_APP)
         set_tests_properties(kfilter_active_filter_dialog_smoketest
             PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     endif()
+
+    if(KFILTER_BUILD_BAFFLE_DIALOG_SMOKETEST)
+        add_executable(kfilter_baffle_dialog_smoketest
+            tools/baffle_dialog_smoketest.cpp
+            baffleparametersdialog.cpp
+            baffleparametersdialog.h
+            networkvalueutils.cpp
+            networkvalueutils.h
+        )
+        target_link_libraries(kfilter_baffle_dialog_smoketest
+            PRIVATE
+                kfilter_core
+                Qt6::Widgets
+        )
+
+        enable_testing()
+        add_test(NAME kfilter_baffle_dialog_smoketest
+                 COMMAND kfilter_baffle_dialog_smoketest)
+        set_tests_properties(kfilter_baffle_dialog_smoketest
+            PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    endif()
 endif()
 
 if(KFILTER_BUILD_ACTIVE_FILTER_MODEL_SMOKETEST)
@@ -149,6 +178,17 @@ if(KFILTER_BUILD_ACTIVE_FILTER_RESPONSE_SMOKETEST)
     enable_testing()
     add_test(NAME kfilter_active_filter_response_smoketest
              COMMAND kfilter_active_filter_response_smoketest)
+endif()
+
+if(KFILTER_BUILD_BAFFLE_RESPONSE_SMOKETEST)
+    add_executable(kfilter_baffle_response_smoketest
+        tools/baffle_response_smoketest.cpp
+    )
+    target_link_libraries(kfilter_baffle_response_smoketest PRIVATE kfilter_core)
+
+    enable_testing()
+    add_test(NAME kfilter_baffle_response_smoketest
+             COMMAND kfilter_baffle_response_smoketest)
 endif()
 
 if(KFILTER_BUILD_DRIVER_SMOKETEST)

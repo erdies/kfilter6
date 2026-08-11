@@ -21,6 +21,8 @@
 
 #include "activefiltermodel.h"
 #include "activefilterresponse.h"
+#include "bafflemodel.h"
+#include "baffleresponse.h"
 #include "driver.h"
 #include "kfiltermeasurementcurve.h"
 
@@ -37,6 +39,7 @@ class KFilterDoc : public QObject
   Q_OBJECT
   public:
     using ActiveFilterChains = std::array<ActiveFilterChain, 4>;
+    using BaffleSettingsPerDriver = std::array<BaffleSettings, 4>;
     /** Constructor for the document object of the application. */
     explicit KFilterDoc(QObject *parent = nullptr, const char *name = nullptr);
     /** Destructor for the document object of the application. */
@@ -78,6 +81,12 @@ const ActiveFilterChain& activeFilterChain(int driverIndex) const;
 ActiveFilterChains& activeFilterChains();
 const ActiveFilterChains& activeFilterChains() const;
 const ActiveFilterResponse& activeFilterResponse(int driverIndex) const;
+
+BaffleSettings& baffleSettings(int driverIndex);
+const BaffleSettings& baffleSettings(int driverIndex) const;
+BaffleSettingsPerDriver& baffleSettingsPerDriver();
+const BaffleSettingsPerDriver& baffleSettingsPerDriver() const;
+const BaffleResponse& baffleResponse(int driverIndex) const;
 
 //////////////////////////////////////////////////////////
     /** adds a view to the document which represents the document contents. Usually this is your main view. */
@@ -144,15 +153,19 @@ const ActiveFilterResponse& activeFilterResponse(int driverIndex) const;
     std::array<bool, 4> m_measurementHiddenForDrivers{};
     ActiveFilterChains m_activeFilterChains{};
     mutable std::array<ActiveFilterResponseCache, 4> m_activeFilterResponseCaches{};
+    BaffleSettingsPerDriver m_baffleSettings{};
+    mutable std::array<BaffleResponseCache, 4> m_baffleResponseCaches{};
 
     const SplCorrectionCache* ensureSplCorrectionCache(int driverIndex) const;
     std::complex<double> effectivePressureSample(
         int driverIndex,
         int sampleIndex,
         const ActiveFilterResponse& activeFilter,
+        const BaffleResponse& baffle,
         const SplCorrectionCache* correctionCache) const;
     void invalidateSplCorrectionCaches();
     void resetActiveFilterChains();
+    void resetBaffleSettings();
     void markLoadedContentsReady();
 
   private slots:

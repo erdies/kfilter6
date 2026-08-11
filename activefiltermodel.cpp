@@ -70,7 +70,7 @@ bool parametersEquivalent(const ActiveFilterParameters& first,
         } else if constexpr (std::is_same_v<First, ActiveFilterAllPassParameters>) {
             return firstParameters.order == secondParameters.order &&
                    firstParameters.frequencyHz == secondParameters.frequencyHz &&
-                   firstParameters.q == secondParameters.q;
+                   (firstParameters.order != 2 || firstParameters.q == secondParameters.q);
         } else if constexpr (std::is_same_v<First, ActiveFilterGainParameters>) {
             return firstParameters.gainDb == secondParameters.gainDb;
         } else if constexpr (std::is_same_v<First, ActiveFilterDelayParameters>) {

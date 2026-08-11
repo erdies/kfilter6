@@ -294,6 +294,34 @@ const ActiveFilterResponse& KFilterDoc::activeFilterResponse(int driverIndex) co
   return m_activeFilterResponseCaches.at(index).responseFor(m_activeFilterChains.at(index));
 }
 
+BaffleSettings& KFilterDoc::baffleSettings(int driverIndex)
+{
+  return m_baffleSettings.at(static_cast<std::size_t>(driverIndex));
+}
+
+const BaffleSettings& KFilterDoc::baffleSettings(int driverIndex) const
+{
+  return m_baffleSettings.at(static_cast<std::size_t>(driverIndex));
+}
+
+KFilterDoc::BaffleSettingsPerDriver& KFilterDoc::baffleSettingsPerDriver()
+{
+  return m_baffleSettings;
+}
+
+const KFilterDoc::BaffleSettingsPerDriver& KFilterDoc::baffleSettingsPerDriver() const
+{
+  return m_baffleSettings;
+}
+
+const BaffleResponse& KFilterDoc::baffleResponse(int driverIndex) const
+{
+  const std::size_t index = static_cast<std::size_t>(driverIndex);
+  return m_baffleResponseCaches.at(index).responseFor(
+      m_baffleSettings.at(index),
+      m_driverDriver[index].getDm());
+}
+
 void KFilterDoc::addView(KFilterView *view)
 {
   if (view != nullptr) {
@@ -373,6 +401,7 @@ bool KFilterDoc::openDocument(const QUrl& url, const char *format /*=nullptr*/)
                                       m_measurementMergeEnabled,
                                       m_measurementHiddenForDrivers,
                                       m_activeFilterChains,
+                                      m_baffleSettings,
                                       &errorMessage)) {
     qWarning().noquote() << errorMessage;
     return false;
@@ -400,6 +429,7 @@ bool KFilterDoc::saveDocument(const QUrl& url, const char *format /*=nullptr*/)
                                     m_measurementMergeEnabled,
                                     m_measurementHiddenForDrivers,
                                     m_activeFilterChains,
+                                    m_baffleSettings,
                                     &errorMessage)) {
     qWarning().noquote() << errorMessage;
     return false;
@@ -420,6 +450,7 @@ void KFilterDoc::deleteContents()
   m_measurementMergeEnabled = false;
   m_measurementHiddenForDrivers.fill(false);
   resetActiveFilterChains();
+  resetBaffleSettings();
   invalidateSplCorrectionCaches();
   modified = false;
 }
@@ -428,6 +459,13 @@ void KFilterDoc::resetActiveFilterChains()
 {
   for (ActiveFilterChain& chain : m_activeFilterChains) {
     chain = ActiveFilterChain{};
+  }
+}
+
+void KFilterDoc::resetBaffleSettings()
+{
+  for (BaffleSettings& settings : m_baffleSettings) {
+    settings = BaffleSettings{};
   }
 }
 
@@ -476,6 +514,7 @@ std::complex<double> KFilterDoc::effectivePressureSample(
     int driverIndex,
     int sampleIndex,
     const ActiveFilterResponse& activeFilter,
+    const BaffleResponse& baffle,
     const SplCorrectionCache* correctionCache) const
 {
   if (driverIndex < 0 || driverIndex >= 4 ||
@@ -496,6 +535,13 @@ std::complex<double> KFilterDoc::effectivePressureSample(
                                            static_cast<std::size_t>(sampleIndex),
                                            sample);
 
+  // Patch 190: geometrical baffle processing is a separate complex stage.
+  // Unsupported/invalid baffle settings bypass only this stage and never
+  // disable Active Filters or Measurement processing.
+  sample = applyBaffleResponseSample(baffle,
+                                     static_cast<std::size_t>(sampleIndex),
+                                     sample);
+
   // Measurement correction remains a real amplitude factor and is applied to
   // the same effective complex sample used by the individual and summary paths.
   if (correctionCache != nullptr && correctionCache->active) {
@@ -511,6 +557,7 @@ bool KFilterDoc::Sound( int a_intIndex )
   {
     m_driverDriver[ a_intIndex ].Schall();
     const ActiveFilterResponse& activeFilter = activeFilterResponse(a_intIndex);
+    const BaffleResponse& baffle = baffleResponse(a_intIndex);
     const SplCorrectionCache* correctionCache = ensureSplCorrectionCache(a_intIndex);
     for (int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex)
     {
@@ -518,6 +565,7 @@ bool KFilterDoc::Sound( int a_intIndex )
           DB(std::abs(effectivePressureSample(a_intIndex,
                                              sampleIndex,
                                              activeFilter,
+                                             baffle,
                                              correctionCache)));
     }
   }
@@ -552,6 +600,7 @@ bool KFilterDoc::PressureSummary()
 		{
 			m_driverDriver[ intIndex ].Schall();
 			const ActiveFilterResponse& activeFilter = activeFilterResponse(intIndex);
+			const BaffleResponse& baffle = baffleResponse(intIndex);
 			const SplCorrectionCache* correctionCache = ensureSplCorrectionCache(intIndex);
 			for ( int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex )
 			{
@@ -559,6 +608,7 @@ bool KFilterDoc::PressureSummary()
 					effectivePressureSample(intIndex,
 					                        sampleIndex,
 					                        activeFilter,
+					                        baffle,
 					                        correctionCache);
 			}
 		}
@@ -589,6 +639,7 @@ bool KFilterDoc::PressureScalarSummary()
 		{
 			m_driverDriver[ intIndex ].Schall();
 			const ActiveFilterResponse& activeFilter = activeFilterResponse(intIndex);
+			const BaffleResponse& baffle = baffleResponse(intIndex);
 			const SplCorrectionCache* correctionCache = ensureSplCorrectionCache(intIndex);
 			for ( int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex )
 			{
@@ -596,6 +647,7 @@ bool KFilterDoc::PressureScalarSummary()
 					effectivePressureSample(intIndex,
 					                        sampleIndex,
 					                        activeFilter,
+					                        baffle,
 					                        correctionCache);
 				m_doubleXContainer[ 0 ][ sampleIndex ] += std::norm(sample);
 			}

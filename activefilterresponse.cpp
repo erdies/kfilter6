@@ -39,6 +39,12 @@ bool validButterworthParameters(int order, double cutoffHz)
     return order >= 1 && order <= 8 && std::isfinite(cutoffHz) && cutoffHz > 0.0;
 }
 
+bool validLinkwitzRileyParameters(int order, double cutoffHz)
+{
+    return (order == 2 || order == 4) &&
+           std::isfinite(cutoffHz) && cutoffHz > 0.0;
+}
+
 bool validBandPassParameters(int order, double lowerFrequencyHz, double upperFrequencyHz)
 {
     return order >= 1 && order <= 8 &&
@@ -50,6 +56,65 @@ bool validNotchParameters(double centerFrequencyHz, double q)
 {
     return std::isfinite(centerFrequencyHz) && centerFrequencyHz > 0.0 &&
            std::isfinite(q) && q > 0.0;
+}
+
+bool validAllPassParameters(int order, double frequencyHz, double q)
+{
+    if ((order != 1 && order != 2) ||
+        !std::isfinite(frequencyHz) || frequencyHz <= 0.0) {
+        return false;
+    }
+
+    // Q is part of the second-order denominator only.  Keep it deliberately
+    // irrelevant for AP1, just as unused crossover Q metadata is ignored.
+    return order == 1 || (std::isfinite(q) && q > 0.0);
+}
+
+bool validGainParameters(double gainDb)
+{
+    if (!std::isfinite(gainDb)) {
+        return false;
+    }
+
+    const double linearGain = std::pow(10.0, gainDb / 20.0);
+    return std::isfinite(linearGain) && linearGain > 0.0;
+}
+
+bool validDelayParameters(double delayMs)
+{
+    return std::isfinite(delayMs) && delayMs >= 0.0;
+}
+
+std::complex<double> allPassTransfer(int order,
+                                     double frequencyHz,
+                                     double centerFrequencyHz,
+                                     double q)
+{
+    // Patch 188 All-pass convention, using normalized s = j*f/f0:
+    // AP1: H(s) = (s - 1) / (s + 1)
+    // AP2: H(s) = (s^2 - s/Q + 1) / (s^2 + s/Q + 1)
+    // Both are exact unity-magnitude transfer functions for real f.
+    const double ratio = frequencyHz / centerFrequencyHz;
+    const std::complex<double> s{0.0, ratio};
+
+    if (order == 1) {
+        return (s - 1.0) / (s + 1.0);
+    }
+
+    const std::complex<double> sSquared = s * s;
+    return (sSquared - s / q + 1.0) / (sSquared + s / q + 1.0);
+}
+
+std::complex<double> gainTransfer(double gainDb)
+{
+    return {std::pow(10.0, gainDb / 20.0), 0.0};
+}
+
+std::complex<double> delayTransfer(double frequencyHz, double delayMs)
+{
+    const double delaySeconds = delayMs / 1000.0;
+    const double phaseRadians = -2.0 * Pi * frequencyHz * delaySeconds;
+    return std::polar(1.0, phaseRadians);
 }
 
 std::complex<double> notchTransfer(double frequencyHz,
@@ -87,6 +152,19 @@ std::complex<double> butterworthTransfer(int order,
     }
 
     return response;
+}
+
+std::complex<double> linkwitzRileyTransfer(int order,
+                                           double frequencyHz,
+                                           double cutoffHz,
+                                           bool highPass)
+{
+    // A Linkwitz-Riley filter of order N is the cascade of two identical
+    // Butterworth filters of order N/2.  Squaring the complete complex
+    // Butterworth response preserves both magnitude and phase.
+    const std::complex<double> butterworth =
+        butterworthTransfer(order / 2, frequencyHz, cutoffHz, highPass);
+    return butterworth * butterworth;
 }
 
 enum class SectionSupport
@@ -155,25 +233,79 @@ SectionSupport evaluateSection(const ActiveFilterSection& section,
         return SectionSupport::Supported;
     }
 
+    if (section.type() == ActiveFilterType::AllPass) {
+        const auto& parameters = std::get<ActiveFilterAllPassParameters>(section.parameters());
+        if (!validAllPassParameters(parameters.order, parameters.frequencyHz, parameters.q)) {
+            return SectionSupport::Invalid;
+        }
+
+        for (std::size_t sampleIndex = 0; sampleIndex < KFilterFrequencyCount; ++sampleIndex) {
+            const double frequencyHz = frequencies[sampleIndex];
+            if (!std::isfinite(frequencyHz) || frequencyHz <= 0.0) {
+                return SectionSupport::Invalid;
+            }
+            response[sampleIndex] = allPassTransfer(parameters.order,
+                                                    frequencyHz,
+                                                    parameters.frequencyHz,
+                                                    parameters.q);
+        }
+        return SectionSupport::Supported;
+    }
+
+    if (section.type() == ActiveFilterType::Gain) {
+        const auto& parameters = std::get<ActiveFilterGainParameters>(section.parameters());
+        if (!validGainParameters(parameters.gainDb)) {
+            return SectionSupport::Invalid;
+        }
+
+        response.fill(gainTransfer(parameters.gainDb));
+        return SectionSupport::Supported;
+    }
+
+    if (section.type() == ActiveFilterType::Delay) {
+        const auto& parameters = std::get<ActiveFilterDelayParameters>(section.parameters());
+        if (!validDelayParameters(parameters.delayMs)) {
+            return SectionSupport::Invalid;
+        }
+
+        for (std::size_t sampleIndex = 0; sampleIndex < KFilterFrequencyCount; ++sampleIndex) {
+            const double frequencyHz = frequencies[sampleIndex];
+            if (!std::isfinite(frequencyHz) || frequencyHz <= 0.0) {
+                return SectionSupport::Invalid;
+            }
+
+            const double phaseRadians = -2.0 * Pi * frequencyHz * (parameters.delayMs / 1000.0);
+            if (!std::isfinite(phaseRadians)) {
+                return SectionSupport::Invalid;
+            }
+            response[sampleIndex] = delayTransfer(frequencyHz, parameters.delayMs);
+        }
+        return SectionSupport::Supported;
+    }
+
+    if (section.type() == ActiveFilterType::Polarity) {
+        const auto& parameters = std::get<ActiveFilterPolarityParameters>(section.parameters());
+        response.fill(parameters.inverted ? std::complex<double>{-1.0, 0.0}
+                                          : std::complex<double>{1.0, 0.0});
+        return SectionSupport::Supported;
+    }
+
     int order = 0;
     double cutoffHz = 0.0;
     bool highPass = false;
+    ActiveFilterCharacteristic characteristic = ActiveFilterCharacteristic::Butterworth;
 
     switch (section.type()) {
     case ActiveFilterType::LowPass: {
         const auto& parameters = std::get<ActiveFilterLowPassParameters>(section.parameters());
-        if (parameters.characteristic != ActiveFilterCharacteristic::Butterworth) {
-            return SectionSupport::Unsupported;
-        }
+        characteristic = parameters.characteristic;
         order = parameters.order;
         cutoffHz = parameters.frequencyHz;
         break;
     }
     case ActiveFilterType::HighPass: {
         const auto& parameters = std::get<ActiveFilterHighPassParameters>(section.parameters());
-        if (parameters.characteristic != ActiveFilterCharacteristic::Butterworth) {
-            return SectionSupport::Unsupported;
-        }
+        characteristic = parameters.characteristic;
         order = parameters.order;
         cutoffHz = parameters.frequencyHz;
         highPass = true;
@@ -181,14 +313,21 @@ SectionSupport evaluateSection(const ActiveFilterSection& section,
     }
     case ActiveFilterType::BandPass: // handled above; retained for exhaustive enum handling
     case ActiveFilterType::Notch: // handled above; retained for exhaustive enum handling
-    case ActiveFilterType::AllPass:
-    case ActiveFilterType::Gain:
-    case ActiveFilterType::Delay:
-    case ActiveFilterType::Polarity:
+    case ActiveFilterType::AllPass: // handled above; retained for exhaustive enum handling
+    case ActiveFilterType::Gain: // handled above; retained for exhaustive enum handling
+    case ActiveFilterType::Delay: // handled above; retained for exhaustive enum handling
+    case ActiveFilterType::Polarity: // handled above; retained for exhaustive enum handling
         return SectionSupport::Unsupported;
     }
 
-    if (!validButterworthParameters(order, cutoffHz)) {
+    if (characteristic != ActiveFilterCharacteristic::Butterworth &&
+        characteristic != ActiveFilterCharacteristic::LinkwitzRiley) {
+        return SectionSupport::Unsupported;
+    }
+
+    const bool linkwitzRiley = characteristic == ActiveFilterCharacteristic::LinkwitzRiley;
+    if (linkwitzRiley ? !validLinkwitzRileyParameters(order, cutoffHz)
+                      : !validButterworthParameters(order, cutoffHz)) {
         return SectionSupport::Invalid;
     }
 
@@ -197,7 +336,9 @@ SectionSupport evaluateSection(const ActiveFilterSection& section,
         if (!std::isfinite(frequencyHz) || frequencyHz <= 0.0) {
             return SectionSupport::Invalid;
         }
-        response[sampleIndex] = butterworthTransfer(order, frequencyHz, cutoffHz, highPass);
+        response[sampleIndex] = linkwitzRiley
+            ? linkwitzRileyTransfer(order, frequencyHz, cutoffHz, highPass)
+            : butterworthTransfer(order, frequencyHz, cutoffHz, highPass);
     }
 
     return SectionSupport::Supported;

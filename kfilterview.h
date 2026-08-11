@@ -171,6 +171,7 @@ private:
     void drawCurve(QPainter& painter, const double values[200], int type);
     void drawDriverPressureCurve(QPainter& painter, const double values[200]);
     void drawActiveFilterResponses(QPainter& painter);
+    void drawBaffleResponses(QPainter& painter);
     void drawCurveLabel(QPainter& painter, const QPointF& point, const QString& label) const;
     void drawDriverCurveLabels(QPainter& painter);
     void drawMeasurementCurves(QPainter& painter);

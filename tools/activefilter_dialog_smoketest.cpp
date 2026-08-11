@@ -34,6 +34,32 @@ int main(int argc, char **argv)
     QApplication app(argc, argv);
 
     ActiveFilterParametersDialog::ActiveFilterChains chains;
+
+    // Patch 187: Gain, Delay and Polarity are all supported sections and the
+    // existing type-specific editor controls must load their persisted values.
+    ActiveFilterChain& driver1 = chains.at(0);
+    driver1.setEnabled(true);
+    driver1.addSection(ActiveFilterType::Gain);
+    std::get<ActiveFilterGainParameters>(driver1.section(0).parameters()).gainDb = -3.5;
+    driver1.addSection(ActiveFilterType::Delay);
+    std::get<ActiveFilterDelayParameters>(driver1.section(1).parameters()).delayMs = 0.625;
+    driver1.addSection(ActiveFilterType::Polarity);
+    std::get<ActiveFilterPolarityParameters>(driver1.section(2).parameters()).inverted = true;
+
+    // Patch 188: AP1 uses Frequency only, AP2 uses Frequency + Q.
+    ActiveFilterChain& driver2 = chains.at(1);
+    driver2.setEnabled(true);
+    driver2.addSection(ActiveFilterType::AllPass);
+    auto& ap1 = std::get<ActiveFilterAllPassParameters>(driver2.section(0).parameters());
+    ap1.order = 1;
+    ap1.frequencyHz = 1200.0;
+    ap1.q = 4.0; // persisted metadata; deliberately unused by AP1
+    driver2.addSection(ActiveFilterType::AllPass);
+    auto& ap2 = std::get<ActiveFilterAllPassParameters>(driver2.section(1).parameters());
+    ap2.order = 2;
+    ap2.frequencyHz = 2400.0;
+    ap2.q = 1.25;
+
     ActiveFilterChain& driver3 = chains.at(2);
     driver3.setEnabled(true);
     driver3.setShowResponseInPlot(true);
@@ -69,6 +95,11 @@ int main(int argc, char **argv)
 
     ActiveFilterParametersDialog dialog(chains, nullptr, 2);
 
+    if (dialog.size().height() < 800) {
+        std::cerr << "active-filter dialog initial height is too small\n";
+        return 1;
+    }
+
     auto *tabs = dialog.findChild<QTabWidget *>(QStringLiteral("activeFilterDriverTabs"));
     auto *enabled = dialog.findChild<QCheckBox *>(QStringLiteral("activeFilterEnableDriver3"));
     auto *showResponse = dialog.findChild<QCheckBox *>(QStringLiteral("activeFilterShowResponse3"));
@@ -78,14 +109,117 @@ int main(int argc, char **argv)
         enabled == nullptr || !enabled->isChecked() ||
         showResponse == nullptr || !showResponse->isChecked() ||
         table == nullptr || table->rowCount() != 2 ||
-        responseStatus == nullptr || !responseStatus->text().contains(QStringLiteral("bypassed"))) {
-        std::cerr << "active-filter model was not loaded into the dialog\n";
+        responseStatus == nullptr || !responseStatus->text().contains(QStringLiteral("valid and applied"))) {
+        std::cerr << "active-filter model was not loaded into the dialog or LR4 was not recognized as supported\n";
         return 1;
     }
 
     if (table->item(0, 1) == nullptr || table->item(0, 1)->text() != QStringLiteral("High-pass") ||
         table->item(1, 1) == nullptr || table->item(1, 1)->text() != QStringLiteral("Notch")) {
         std::cerr << "active-filter table does not reflect model ordering/types\n";
+        return 2;
+    }
+
+    auto *driver1Status = dialog.findChild<QLabel *>(QStringLiteral("activeFilterResponseStatus1"));
+    auto *driver1Table = dialog.findChild<QTableWidget *>(QStringLiteral("activeFilterSectionTable1"));
+    auto *driver1Characteristic = dialog.findChild<QComboBox *>(QStringLiteral("activeFilterCharacteristicCombo1"));
+    auto *driver1Order = dialog.findChild<QSpinBox *>(QStringLiteral("activeFilterOrderSpin1"));
+    auto *driver1Frequency1 = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterFrequency1Spin1"));
+    auto *driver1Q = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterQSpin1"));
+    auto *driver1Gain = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterGainSpin1"));
+    auto *driver1Delay = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterDelaySpin1"));
+    auto *driver1Polarity = dialog.findChild<QComboBox *>(QStringLiteral("activeFilterPolarityCombo1"));
+    if (driver1Status == nullptr || !driver1Status->text().contains(QStringLiteral("valid and applied")) ||
+        driver1Table == nullptr || driver1Table->rowCount() != 3 ||
+        driver1Characteristic == nullptr || driver1Order == nullptr || driver1Frequency1 == nullptr ||
+        driver1Q == nullptr || driver1Gain == nullptr || driver1Delay == nullptr || driver1Polarity == nullptr) {
+        std::cerr << "Gain/Delay/Polarity chain was not loaded as a supported active-filter chain\n";
+        return 2;
+    }
+
+    driver1Table->selectRow(0);
+    driver1Table->setCurrentCell(0, 1);
+    QApplication::processEvents();
+    if (!driver1Gain->isEnabled() || driver1Delay->isEnabled() || driver1Polarity->isEnabled() ||
+        driver1Characteristic->isEnabled() || driver1Order->isEnabled() ||
+        driver1Frequency1->isEnabled() || driver1Q->isEnabled() ||
+        !near(driver1Gain->value(), -3.5)) {
+        std::cerr << "Gain editor does not expose exactly the Gain control\n";
+        return 2;
+    }
+
+    driver1Table->selectRow(1);
+    driver1Table->setCurrentCell(1, 1);
+    QApplication::processEvents();
+    if (driver1Gain->isEnabled() || !driver1Delay->isEnabled() || driver1Polarity->isEnabled() ||
+        driver1Characteristic->isEnabled() || driver1Order->isEnabled() ||
+        driver1Frequency1->isEnabled() || driver1Q->isEnabled() ||
+        !near(driver1Delay->value(), 0.625)) {
+        std::cerr << "Delay editor does not expose exactly the Delay control\n";
+        return 2;
+    }
+
+    driver1Table->selectRow(2);
+    driver1Table->setCurrentCell(2, 1);
+    QApplication::processEvents();
+    if (driver1Gain->isEnabled() || driver1Delay->isEnabled() || !driver1Polarity->isEnabled() ||
+        driver1Characteristic->isEnabled() || driver1Order->isEnabled() ||
+        driver1Frequency1->isEnabled() || driver1Q->isEnabled() ||
+        !driver1Polarity->currentData().toBool()) {
+        std::cerr << "Polarity editor does not expose exactly the Polarity control\n";
+        return 2;
+    }
+
+    auto *driver2Status = dialog.findChild<QLabel *>(QStringLiteral("activeFilterResponseStatus2"));
+    auto *driver2Table = dialog.findChild<QTableWidget *>(QStringLiteral("activeFilterSectionTable2"));
+    auto *driver2Characteristic = dialog.findChild<QComboBox *>(QStringLiteral("activeFilterCharacteristicCombo2"));
+    auto *driver2Order = dialog.findChild<QSpinBox *>(QStringLiteral("activeFilterOrderSpin2"));
+    auto *driver2Frequency1 = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterFrequency1Spin2"));
+    auto *driver2Q = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterQSpin2"));
+    auto *driver2Gain = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterGainSpin2"));
+    auto *driver2Delay = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterDelaySpin2"));
+    auto *driver2Polarity = dialog.findChild<QComboBox *>(QStringLiteral("activeFilterPolarityCombo2"));
+    if (driver2Status == nullptr || !driver2Status->text().contains(QStringLiteral("valid and applied")) ||
+        driver2Table == nullptr || driver2Table->rowCount() != 2 ||
+        driver2Characteristic == nullptr || driver2Order == nullptr || driver2Frequency1 == nullptr ||
+        driver2Q == nullptr || driver2Gain == nullptr || driver2Delay == nullptr || driver2Polarity == nullptr) {
+        std::cerr << "AP1/AP2 chain was not loaded as a supported active-filter chain\n";
+        return 2;
+    }
+
+    driver2Table->selectRow(0);
+    driver2Table->setCurrentCell(0, 1);
+    QApplication::processEvents();
+    if (driver2Characteristic->isEnabled() || !driver2Order->isEnabled() ||
+        !driver2Frequency1->isEnabled() || driver2Q->isEnabled() ||
+        driver2Gain->isEnabled() || driver2Delay->isEnabled() || driver2Polarity->isEnabled() ||
+        driver2Order->value() != 1 || !near(driver2Frequency1->value(), 1200.0) ||
+        !driver2Order->toolTip().contains(QStringLiteral("AP1")) ||
+        !driver2Order->toolTip().contains(QStringLiteral("AP2"))) {
+        std::cerr << "AP1 editor must expose Order/Frequency and keep Q disabled\n";
+        return 2;
+    }
+
+    driver2Table->selectRow(1);
+    driver2Table->setCurrentCell(1, 1);
+    QApplication::processEvents();
+    if (driver2Order->value() != 2 || !near(driver2Frequency1->value(), 2400.0) ||
+        !driver2Q->isEnabled() || !near(driver2Q->value(), 1.25)) {
+        std::cerr << "AP2 editor must expose Frequency and Q\n";
+        return 2;
+    }
+
+    driver2Order->setValue(1);
+    QApplication::processEvents();
+    if (driver2Q->isEnabled() ||
+        std::get<ActiveFilterAllPassParameters>(driver2.section(1).parameters()).order != 1) {
+        std::cerr << "changing AP2 to AP1 must disable Q immediately\n";
+        return 2;
+    }
+    driver2Order->setValue(2);
+    QApplication::processEvents();
+    if (!driver2Q->isEnabled()) {
+        std::cerr << "changing AP1 back to AP2 must re-enable Q immediately\n";
         return 2;
     }
 
@@ -130,8 +264,11 @@ int main(int argc, char **argv)
     auto *gain = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterGainSpin3"));
     if (characteristic == nullptr || order == nullptr || frequency1 == nullptr || q == nullptr || gain == nullptr ||
         characteristic->currentData().toInt() != static_cast<int>(ActiveFilterCharacteristic::LinkwitzRiley) ||
-        order->value() != 4 || !near(frequency1->value(), 80.0)) {
-        std::cerr << "typed model parameters were not loaded into the editor\n";
+        order->value() != 4 || !near(frequency1->value(), 80.0) ||
+        !characteristic->isEnabled() || !order->isEnabled() || !frequency1->isEnabled() || q->isEnabled() ||
+        !order->toolTip().contains(QStringLiteral("LR2")) ||
+        !order->toolTip().contains(QStringLiteral("LR4"))) {
+        std::cerr << "Linkwitz-Riley editor state was not loaded correctly\n";
         return 3;
     }
 
