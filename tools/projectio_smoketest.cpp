@@ -196,6 +196,24 @@ void populateActiveFilters(KFilterProjectIo::ActiveFilterChains& chains)
     notch.centerFrequencyHz = 1234.5;
     notch.q = 4.25;
     notch.gainDb = -8.75;
+    second.addSection(ActiveFilterType::PeakingEq);
+    auto& peakingEq =
+        std::get<ActiveFilterPeakingEqParameters>(second.section(2).parameters());
+    peakingEq.centerFrequencyHz = 1789.25;
+    peakingEq.q = 2.75;
+    peakingEq.gainDb = 5.625;
+    second.addSection(ActiveFilterType::LowShelf);
+    auto& lowShelf =
+        std::get<ActiveFilterLowShelfParameters>(second.section(3).parameters());
+    lowShelf.transitionFrequencyHz = 220.75;
+    lowShelf.q = 0.82;
+    lowShelf.gainDb = 4.25;
+    second.addSection(ActiveFilterType::HighShelf);
+    auto& highShelf =
+        std::get<ActiveFilterHighShelfParameters>(second.section(4).parameters());
+    highShelf.transitionFrequencyHz = 8750.5;
+    highShelf.q = 0.63;
+    highShelf.gainDb = -2.875;
 
     ActiveFilterChain& third = chains[2];
     third.setShowResponseInPlot(true);
@@ -253,6 +271,24 @@ bool compareActiveFilterSections(const ActiveFilterSection& expected,
         const auto& left = std::get<ActiveFilterNotchParameters>(expected.parameters());
         const auto& right = std::get<ActiveFilterNotchParameters>(actual.parameters());
         return fuzzyEqual(left.centerFrequencyHz, right.centerFrequencyHz) &&
+               fuzzyEqual(left.q, right.q) && fuzzyEqual(left.gainDb, right.gainDb);
+    }
+    case ActiveFilterType::PeakingEq: {
+        const auto& left = std::get<ActiveFilterPeakingEqParameters>(expected.parameters());
+        const auto& right = std::get<ActiveFilterPeakingEqParameters>(actual.parameters());
+        return fuzzyEqual(left.centerFrequencyHz, right.centerFrequencyHz) &&
+               fuzzyEqual(left.q, right.q) && fuzzyEqual(left.gainDb, right.gainDb);
+    }
+    case ActiveFilterType::LowShelf: {
+        const auto& left = std::get<ActiveFilterLowShelfParameters>(expected.parameters());
+        const auto& right = std::get<ActiveFilterLowShelfParameters>(actual.parameters());
+        return fuzzyEqual(left.transitionFrequencyHz, right.transitionFrequencyHz) &&
+               fuzzyEqual(left.q, right.q) && fuzzyEqual(left.gainDb, right.gainDb);
+    }
+    case ActiveFilterType::HighShelf: {
+        const auto& left = std::get<ActiveFilterHighShelfParameters>(expected.parameters());
+        const auto& right = std::get<ActiveFilterHighShelfParameters>(actual.parameters());
+        return fuzzyEqual(left.transitionFrequencyHz, right.transitionFrequencyHz) &&
                fuzzyEqual(left.q, right.q) && fuzzyEqual(left.gainDb, right.gainDb);
     }
     case ActiveFilterType::AllPass: {

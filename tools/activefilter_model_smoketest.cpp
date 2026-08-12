@@ -30,7 +30,7 @@ int main()
     chain.setEnabled(true);
     chain.setShowResponseInPlot(true);
 
-    constexpr std::array<ActiveFilterType, 8> types{
+    constexpr std::array<ActiveFilterType, 11> types{
         ActiveFilterType::LowPass,
         ActiveFilterType::HighPass,
         ActiveFilterType::BandPass,
@@ -38,7 +38,10 @@ int main()
         ActiveFilterType::AllPass,
         ActiveFilterType::Gain,
         ActiveFilterType::Delay,
-        ActiveFilterType::Polarity
+        ActiveFilterType::Polarity,
+        ActiveFilterType::PeakingEq,
+        ActiveFilterType::LowShelf,
+        ActiveFilterType::HighShelf
     };
 
     for (ActiveFilterType type : types) {
@@ -75,6 +78,36 @@ int main()
         !near(notch.q, 3.5) || !near(notch.gainDb, -6.0)) {
         std::cerr << "typed notch parameters failed\n";
         return 5;
+    }
+
+    auto& peakingEq = std::get<ActiveFilterPeakingEqParameters>(chain.section(8).parameters());
+    peakingEq.centerFrequencyHz = 1800.0;
+    peakingEq.q = 2.25;
+    peakingEq.gainDb = 5.5;
+    if (!near(peakingEq.centerFrequencyHz, 1800.0) ||
+        !near(peakingEq.q, 2.25) || !near(peakingEq.gainDb, 5.5)) {
+        std::cerr << "typed Peaking-EQ parameters failed\n";
+        return 6;
+    }
+
+    auto& lowShelf = std::get<ActiveFilterLowShelfParameters>(chain.section(9).parameters());
+    lowShelf.transitionFrequencyHz = 320.0;
+    lowShelf.q = 0.8;
+    lowShelf.gainDb = 4.5;
+    if (!near(lowShelf.transitionFrequencyHz, 320.0) ||
+        !near(lowShelf.q, 0.8) || !near(lowShelf.gainDb, 4.5)) {
+        std::cerr << "typed Low-Shelf parameters failed\n";
+        return 6;
+    }
+
+    auto& highShelf = std::get<ActiveFilterHighShelfParameters>(chain.section(10).parameters());
+    highShelf.transitionFrequencyHz = 6400.0;
+    highShelf.q = 0.65;
+    highShelf.gainDb = -3.0;
+    if (!near(highShelf.transitionFrequencyHz, 6400.0) ||
+        !near(highShelf.q, 0.65) || !near(highShelf.gainDb, -3.0)) {
+        std::cerr << "typed High-Shelf parameters failed\n";
+        return 6;
     }
 
     chain.section(7).setEnabled(false);

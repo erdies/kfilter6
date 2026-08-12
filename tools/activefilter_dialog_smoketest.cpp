@@ -12,6 +12,7 @@
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QTableWidget>
@@ -26,6 +27,22 @@ namespace
 bool near(double left, double right)
 {
     return std::abs(left - right) < 1.0e-6;
+}
+
+bool enterSpinBoxText(QDoubleSpinBox *spinBox, const QString& text, double expected)
+{
+    if (spinBox == nullptr) {
+        return false;
+    }
+
+    QLineEdit *editor = spinBox->findChild<QLineEdit *>();
+    if (editor == nullptr) {
+        return false;
+    }
+
+    editor->setText(text);
+    spinBox->interpretText();
+    return near(spinBox->value(), expected);
 }
 }
 
@@ -93,6 +110,29 @@ int main(int argc, char **argv)
     driver4Notch.centerFrequencyHz = 2500.0;
     driver4Notch.q = 5.0;
 
+    // Patch 208: Parametric / Peaking EQ uses Frequency 1 + Q + Gain.
+    driver4.addSection(ActiveFilterType::PeakingEq);
+    auto& driver4PeakingEq =
+        std::get<ActiveFilterPeakingEqParameters>(driver4.section(2).parameters());
+    driver4PeakingEq.centerFrequencyHz = 1800.0;
+    driver4PeakingEq.q = 2.25;
+    driver4PeakingEq.gainDb = 5.5;
+
+    // Patch 209: Low/High Shelf use Frequency 1 + Q + Gain.
+    driver4.addSection(ActiveFilterType::LowShelf);
+    auto& driver4LowShelf =
+        std::get<ActiveFilterLowShelfParameters>(driver4.section(3).parameters());
+    driver4LowShelf.transitionFrequencyHz = 250.0;
+    driver4LowShelf.q = 0.8;
+    driver4LowShelf.gainDb = 4.0;
+
+    driver4.addSection(ActiveFilterType::HighShelf);
+    auto& driver4HighShelf =
+        std::get<ActiveFilterHighShelfParameters>(driver4.section(4).parameters());
+    driver4HighShelf.transitionFrequencyHz = 7200.0;
+    driver4HighShelf.q = 0.65;
+    driver4HighShelf.gainDb = -3.5;
+
     ActiveFilterParametersDialog dialog(chains, nullptr, 2);
 
     if (dialog.size().height() < 800) {
@@ -136,6 +176,22 @@ int main(int argc, char **argv)
         std::cerr << "Gain/Delay/Polarity chain was not loaded as a supported active-filter chain\n";
         return 2;
     }
+
+    // Patch 207: all floating-point editors in the active-filter dialog accept
+    // decimal comma as well as decimal point, matching the other parameter dialogs.
+    if (!enterSpinBoxText(driver1Frequency1, QStringLiteral("1234,5 Hz"), 1234.5) ||
+        !enterSpinBoxText(driver1Q, QStringLiteral("1,25"), 1.25) ||
+        !enterSpinBoxText(driver1Gain, QStringLiteral("-2,75 dB"), -2.75) ||
+        !enterSpinBoxText(driver1Delay, QStringLiteral("0,875 ms"), 0.875)) {
+        std::cerr << "active-filter floating-point editors do not accept decimal comma\n";
+        return 2;
+    }
+
+    // Restore the persisted values expected by the type-specific checks below.
+    driver1Frequency1->setValue(2000.0);
+    driver1Q->setValue(0.707);
+    driver1Gain->setValue(-3.5);
+    driver1Delay->setValue(0.625);
 
     driver1Table->selectRow(0);
     driver1Table->setCurrentCell(0, 1);
@@ -235,9 +291,13 @@ int main(int argc, char **argv)
     auto *driver4Frequency1 = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterFrequency1Spin4"));
     auto *driver4Frequency2 = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterFrequency2Spin4"));
     auto *driver4Q = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterQSpin4"));
-    if (driver4Table == nullptr || driver4Table->rowCount() != 2 ||
+    auto *driver4Gain = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterGainSpin4"));
+    auto *driver4Delay = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterDelaySpin4"));
+    auto *driver4Polarity = dialog.findChild<QComboBox *>(QStringLiteral("activeFilterPolarityCombo4"));
+    if (driver4Table == nullptr || driver4Table->rowCount() != 5 ||
         driver4Characteristic == nullptr || driver4Order == nullptr ||
-        driver4Frequency1 == nullptr || driver4Frequency2 == nullptr || driver4Q == nullptr) {
+        driver4Frequency1 == nullptr || driver4Frequency2 == nullptr || driver4Q == nullptr ||
+        driver4Gain == nullptr || driver4Delay == nullptr || driver4Polarity == nullptr) {
         std::cerr << "Band-pass dialog controls are missing\n";
         return 3;
     }
@@ -250,6 +310,52 @@ int main(int argc, char **argv)
         !near(driver4Frequency1->value(), 300.0) ||
         !near(driver4Frequency2->value(), 3200.0)) {
         std::cerr << "Butterworth Band-pass editor does not expose lower/upper cutoff and order correctly\n";
+        return 3;
+    }
+
+    driver4Table->selectRow(2);
+    driver4Table->setCurrentCell(2, 1);
+    QApplication::processEvents();
+    if (driver4Table->item(2, 1) == nullptr ||
+        driver4Table->item(2, 1)->text() != QStringLiteral("Parametric / Peaking EQ") ||
+        driver4Characteristic->isEnabled() || driver4Order->isEnabled() ||
+        !driver4Frequency1->isEnabled() || driver4Frequency2->isEnabled() ||
+        !driver4Q->isEnabled() || !driver4Gain->isEnabled() ||
+        driver4Delay->isEnabled() || driver4Polarity->isEnabled() ||
+        !near(driver4Frequency1->value(), 1800.0) ||
+        !near(driver4Q->value(), 2.25) || !near(driver4Gain->value(), 5.5)) {
+        std::cerr << "Peaking-EQ editor must expose exactly Frequency 1, Q and Gain\n";
+        return 3;
+    }
+
+    driver4Table->selectRow(3);
+    driver4Table->setCurrentCell(3, 1);
+    QApplication::processEvents();
+    if (driver4Table->item(3, 1) == nullptr ||
+        driver4Table->item(3, 1)->text() != QStringLiteral("Low Shelf") ||
+        driver4Characteristic->isEnabled() || driver4Order->isEnabled() ||
+        !driver4Frequency1->isEnabled() || driver4Frequency2->isEnabled() ||
+        !driver4Q->isEnabled() || !driver4Gain->isEnabled() ||
+        driver4Delay->isEnabled() || driver4Polarity->isEnabled() ||
+        !near(driver4Frequency1->value(), 250.0) ||
+        !near(driver4Q->value(), 0.8) || !near(driver4Gain->value(), 4.0) ||
+        !driver4Gain->toolTip().contains(QStringLiteral("halfway"))) {
+        std::cerr << "Low-Shelf editor must expose exactly Frequency 1, Q and Gain\n";
+        return 3;
+    }
+
+    driver4Table->selectRow(4);
+    driver4Table->setCurrentCell(4, 1);
+    QApplication::processEvents();
+    if (driver4Table->item(4, 1) == nullptr ||
+        driver4Table->item(4, 1)->text() != QStringLiteral("High Shelf") ||
+        driver4Characteristic->isEnabled() || driver4Order->isEnabled() ||
+        !driver4Frequency1->isEnabled() || driver4Frequency2->isEnabled() ||
+        !driver4Q->isEnabled() || !driver4Gain->isEnabled() ||
+        driver4Delay->isEnabled() || driver4Polarity->isEnabled() ||
+        !near(driver4Frequency1->value(), 7200.0) ||
+        !near(driver4Q->value(), 0.65) || !near(driver4Gain->value(), -3.5)) {
+        std::cerr << "High-Shelf editor must expose exactly Frequency 1, Q and Gain\n";
         return 3;
     }
 
@@ -267,8 +373,20 @@ int main(int argc, char **argv)
         order->value() != 4 || !near(frequency1->value(), 80.0) ||
         !characteristic->isEnabled() || !order->isEnabled() || !frequency1->isEnabled() || q->isEnabled() ||
         !order->toolTip().contains(QStringLiteral("LR2")) ||
-        !order->toolTip().contains(QStringLiteral("LR4"))) {
+        !order->toolTip().contains(QStringLiteral("LR4")) ||
+        !order->toolTip().contains(QStringLiteral("LR6")) ||
+        !order->toolTip().contains(QStringLiteral("LR8"))) {
         std::cerr << "Linkwitz-Riley editor state was not loaded correctly\n";
+        return 3;
+    }
+
+    // Patch 210: LR8 must be selectable in the same existing order control and
+    // immediately remain a valid active-filter chain.
+    order->setValue(8);
+    QApplication::processEvents();
+    if (!responseStatus->text().contains(QStringLiteral("valid and applied")) ||
+        std::get<ActiveFilterHighPassParameters>(driver3.section(0).parameters()).order != 8) {
+        std::cerr << "LR8 was not accepted as a supported Linkwitz-Riley order\n";
         return 3;
     }
 

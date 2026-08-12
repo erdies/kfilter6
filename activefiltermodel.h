@@ -20,7 +20,10 @@ enum class ActiveFilterType
     AllPass,
     Gain,
     Delay,
-    Polarity
+    Polarity,
+    PeakingEq,
+    LowShelf,
+    HighShelf
 };
 
 enum class ActiveFilterCharacteristic
@@ -63,6 +66,27 @@ struct ActiveFilterNotchParameters
     double gainDb = 0.0;
 };
 
+struct ActiveFilterPeakingEqParameters
+{
+    double centerFrequencyHz = 2000.0;
+    double q = 0.707;
+    double gainDb = 0.0;
+};
+
+struct ActiveFilterLowShelfParameters
+{
+    double transitionFrequencyHz = 2000.0;
+    double q = 0.707;
+    double gainDb = 0.0;
+};
+
+struct ActiveFilterHighShelfParameters
+{
+    double transitionFrequencyHz = 2000.0;
+    double q = 0.707;
+    double gainDb = 0.0;
+};
+
 struct ActiveFilterAllPassParameters
 {
     int order = 2;
@@ -89,6 +113,9 @@ using ActiveFilterParameters = std::variant<ActiveFilterLowPassParameters,
                                             ActiveFilterHighPassParameters,
                                             ActiveFilterBandPassParameters,
                                             ActiveFilterNotchParameters,
+                                            ActiveFilterPeakingEqParameters,
+                                            ActiveFilterLowShelfParameters,
+                                            ActiveFilterHighShelfParameters,
                                             ActiveFilterAllPassParameters,
                                             ActiveFilterGainParameters,
                                             ActiveFilterDelayParameters,

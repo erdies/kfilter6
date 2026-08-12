@@ -658,8 +658,10 @@ bool checkActiveFilterSimulationIntegration()
     ActiveFilterChain& unsupportedChain = unsupportedDocument.activeFilterChain(0);
     unsupportedChain.setEnabled(true);
     unsupportedChain.addSection(ActiveFilterType::LowPass);
-    std::get<ActiveFilterLowPassParameters>(unsupportedChain.section(0).parameters()).characteristic =
-        ActiveFilterCharacteristic::Bessel;
+    auto& unsupportedParameters =
+        std::get<ActiveFilterLowPassParameters>(unsupportedChain.section(0).parameters());
+    unsupportedParameters.characteristic = ActiveFilterCharacteristic::GenericQ;
+    unsupportedParameters.order = 4;
     if (unsupportedDocument.activeFilterResponse(0).status !=
             ActiveFilterResponseStatus::Unsupported) {
         QTextStream(stderr) << "Unsupported active-filter chain was not reported\n";

@@ -499,6 +499,12 @@ QString activeFilterTypeToString(ActiveFilterType type)
         return QStringLiteral("delay");
     case ActiveFilterType::Polarity:
         return QStringLiteral("polarity");
+    case ActiveFilterType::PeakingEq:
+        return QStringLiteral("peakingEq");
+    case ActiveFilterType::LowShelf:
+        return QStringLiteral("lowShelf");
+    case ActiveFilterType::HighShelf:
+        return QStringLiteral("highShelf");
     }
 
     return {};
@@ -522,6 +528,12 @@ bool activeFilterTypeFromString(const QString& value, ActiveFilterType& type)
         type = ActiveFilterType::Delay;
     } else if (value == QStringLiteral("polarity")) {
         type = ActiveFilterType::Polarity;
+    } else if (value == QStringLiteral("peakingEq")) {
+        type = ActiveFilterType::PeakingEq;
+    } else if (value == QStringLiteral("lowShelf")) {
+        type = ActiveFilterType::LowShelf;
+    } else if (value == QStringLiteral("highShelf")) {
+        type = ActiveFilterType::HighShelf;
     } else {
         return false;
     }
@@ -649,6 +661,60 @@ bool jsonToActiveFilterParameters(const QJsonObject& parameters,
         if (!readRequiredDouble(parameters,
                                 QStringLiteral("centerFrequencyHz"),
                                 parsed.centerFrequencyHz,
+                                context,
+                                errorMessage) ||
+            !readRequiredDouble(parameters, QStringLiteral("q"), parsed.q, context, errorMessage) ||
+            !readRequiredDouble(parameters,
+                                QStringLiteral("gainDb"),
+                                parsed.gainDb,
+                                context,
+                                errorMessage)) {
+            return false;
+        }
+        target = parsed;
+        return true;
+    }
+    case ActiveFilterType::PeakingEq: {
+        ActiveFilterPeakingEqParameters parsed;
+        if (!readRequiredDouble(parameters,
+                                QStringLiteral("centerFrequencyHz"),
+                                parsed.centerFrequencyHz,
+                                context,
+                                errorMessage) ||
+            !readRequiredDouble(parameters, QStringLiteral("q"), parsed.q, context, errorMessage) ||
+            !readRequiredDouble(parameters,
+                                QStringLiteral("gainDb"),
+                                parsed.gainDb,
+                                context,
+                                errorMessage)) {
+            return false;
+        }
+        target = parsed;
+        return true;
+    }
+    case ActiveFilterType::LowShelf: {
+        ActiveFilterLowShelfParameters parsed;
+        if (!readRequiredDouble(parameters,
+                                QStringLiteral("transitionFrequencyHz"),
+                                parsed.transitionFrequencyHz,
+                                context,
+                                errorMessage) ||
+            !readRequiredDouble(parameters, QStringLiteral("q"), parsed.q, context, errorMessage) ||
+            !readRequiredDouble(parameters,
+                                QStringLiteral("gainDb"),
+                                parsed.gainDb,
+                                context,
+                                errorMessage)) {
+            return false;
+        }
+        target = parsed;
+        return true;
+    }
+    case ActiveFilterType::HighShelf: {
+        ActiveFilterHighShelfParameters parsed;
+        if (!readRequiredDouble(parameters,
+                                QStringLiteral("transitionFrequencyHz"),
+                                parsed.transitionFrequencyHz,
                                 context,
                                 errorMessage) ||
             !readRequiredDouble(parameters, QStringLiteral("q"), parsed.q, context, errorMessage) ||
@@ -1397,6 +1463,27 @@ QJsonObject activeFilterParametersToJson(const ActiveFilterSection& section)
         parameters.insert(QStringLiteral("gainDb"), value.gainDb);
         break;
     }
+    case ActiveFilterType::PeakingEq: {
+        const auto& value = std::get<ActiveFilterPeakingEqParameters>(section.parameters());
+        parameters.insert(QStringLiteral("centerFrequencyHz"), value.centerFrequencyHz);
+        parameters.insert(QStringLiteral("q"), value.q);
+        parameters.insert(QStringLiteral("gainDb"), value.gainDb);
+        break;
+    }
+    case ActiveFilterType::LowShelf: {
+        const auto& value = std::get<ActiveFilterLowShelfParameters>(section.parameters());
+        parameters.insert(QStringLiteral("transitionFrequencyHz"), value.transitionFrequencyHz);
+        parameters.insert(QStringLiteral("q"), value.q);
+        parameters.insert(QStringLiteral("gainDb"), value.gainDb);
+        break;
+    }
+    case ActiveFilterType::HighShelf: {
+        const auto& value = std::get<ActiveFilterHighShelfParameters>(section.parameters());
+        parameters.insert(QStringLiteral("transitionFrequencyHz"), value.transitionFrequencyHz);
+        parameters.insert(QStringLiteral("q"), value.q);
+        parameters.insert(QStringLiteral("gainDb"), value.gainDb);
+        break;
+    }
     case ActiveFilterType::AllPass: {
         const auto& value = std::get<ActiveFilterAllPassParameters>(section.parameters());
         parameters.insert(QStringLiteral("order"), value.order);
@@ -1557,6 +1644,24 @@ bool validateActiveFilterSection(const ActiveFilterSection& section,
     case ActiveFilterType::Notch: {
         const auto& value = std::get<ActiveFilterNotchParameters>(section.parameters());
         return requireFinite(value.centerFrequencyHz, QStringLiteral("centerFrequencyHz")) &&
+               requireFinite(value.q, QStringLiteral("q")) &&
+               requireFinite(value.gainDb, QStringLiteral("gainDb"));
+    }
+    case ActiveFilterType::PeakingEq: {
+        const auto& value = std::get<ActiveFilterPeakingEqParameters>(section.parameters());
+        return requireFinite(value.centerFrequencyHz, QStringLiteral("centerFrequencyHz")) &&
+               requireFinite(value.q, QStringLiteral("q")) &&
+               requireFinite(value.gainDb, QStringLiteral("gainDb"));
+    }
+    case ActiveFilterType::LowShelf: {
+        const auto& value = std::get<ActiveFilterLowShelfParameters>(section.parameters());
+        return requireFinite(value.transitionFrequencyHz, QStringLiteral("transitionFrequencyHz")) &&
+               requireFinite(value.q, QStringLiteral("q")) &&
+               requireFinite(value.gainDb, QStringLiteral("gainDb"));
+    }
+    case ActiveFilterType::HighShelf: {
+        const auto& value = std::get<ActiveFilterHighShelfParameters>(section.parameters());
+        return requireFinite(value.transitionFrequencyHz, QStringLiteral("transitionFrequencyHz")) &&
                requireFinite(value.q, QStringLiteral("q")) &&
                requireFinite(value.gainDb, QStringLiteral("gainDb"));
     }

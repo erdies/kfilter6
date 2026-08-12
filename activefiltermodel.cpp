@@ -21,6 +21,12 @@ ActiveFilterParameters defaultParameters(ActiveFilterType type)
         return ActiveFilterBandPassParameters{};
     case ActiveFilterType::Notch:
         return ActiveFilterNotchParameters{};
+    case ActiveFilterType::PeakingEq:
+        return ActiveFilterPeakingEqParameters{};
+    case ActiveFilterType::LowShelf:
+        return ActiveFilterLowShelfParameters{};
+    case ActiveFilterType::HighShelf:
+        return ActiveFilterHighShelfParameters{};
     case ActiveFilterType::AllPass:
         return ActiveFilterAllPassParameters{};
     case ActiveFilterType::Gain:
@@ -67,6 +73,15 @@ bool parametersEquivalent(const ActiveFilterParameters& first,
             // variants, but it does not affect the current transfer function/cache.
             return firstParameters.centerFrequencyHz == secondParameters.centerFrequencyHz &&
                    firstParameters.q == secondParameters.q;
+        } else if constexpr (std::is_same_v<First, ActiveFilterPeakingEqParameters>) {
+            return firstParameters.centerFrequencyHz == secondParameters.centerFrequencyHz &&
+                   firstParameters.q == secondParameters.q &&
+                   firstParameters.gainDb == secondParameters.gainDb;
+        } else if constexpr (std::is_same_v<First, ActiveFilterLowShelfParameters> ||
+                             std::is_same_v<First, ActiveFilterHighShelfParameters>) {
+            return firstParameters.transitionFrequencyHz == secondParameters.transitionFrequencyHz &&
+                   firstParameters.q == secondParameters.q &&
+                   firstParameters.gainDb == secondParameters.gainDb;
         } else if constexpr (std::is_same_v<First, ActiveFilterAllPassParameters>) {
             return firstParameters.order == secondParameters.order &&
                    firstParameters.frequencyHz == secondParameters.frequencyHz &&
@@ -110,6 +125,12 @@ ActiveFilterType ActiveFilterSection::type() const
             return ActiveFilterType::BandPass;
         } else if constexpr (std::is_same_v<Parameters, ActiveFilterNotchParameters>) {
             return ActiveFilterType::Notch;
+        } else if constexpr (std::is_same_v<Parameters, ActiveFilterPeakingEqParameters>) {
+            return ActiveFilterType::PeakingEq;
+        } else if constexpr (std::is_same_v<Parameters, ActiveFilterLowShelfParameters>) {
+            return ActiveFilterType::LowShelf;
+        } else if constexpr (std::is_same_v<Parameters, ActiveFilterHighShelfParameters>) {
+            return ActiveFilterType::HighShelf;
         } else if constexpr (std::is_same_v<Parameters, ActiveFilterAllPassParameters>) {
             return ActiveFilterType::AllPass;
         } else if constexpr (std::is_same_v<Parameters, ActiveFilterGainParameters>) {

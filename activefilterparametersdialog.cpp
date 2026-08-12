@@ -7,8 +7,10 @@
 #include "activefilterparametersdialog.h"
 
 #include "activefilterresponse.h"
+#include "networkvalueutils.h"
 
 #include <QAbstractItemView>
+#include <QAbstractSpinBox>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -25,10 +27,12 @@
 #include <QTableWidgetItem>
 #include <QTabWidget>
 #include <QVBoxLayout>
+#include <QValidator>
 #include <QWidget>
 
 #include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <variant>
 
 namespace
@@ -48,9 +52,124 @@ QTableWidgetItem *readOnlyItem(const QString& text = QString())
     return item;
 }
 
+QString stripSpinBoxAffixes(const QDoubleSpinBox *spinBox, const QString& text)
+{
+    QString stripped = text.trimmed();
+
+    const QString prefix = spinBox->prefix();
+    if (!prefix.isEmpty() && stripped.startsWith(prefix)) {
+        stripped.remove(0, prefix.size());
+        stripped = stripped.trimmed();
+    }
+
+    const QString suffix = spinBox->suffix();
+    if (!suffix.isEmpty() && stripped.endsWith(suffix)) {
+        stripped.chop(suffix.size());
+        stripped = stripped.trimmed();
+    } else {
+        const QString trimmedSuffix = suffix.trimmed();
+        if (!trimmedSuffix.isEmpty() && stripped.endsWith(trimmedSuffix)) {
+            stripped.chop(trimmedSuffix.size());
+            stripped = stripped.trimmed();
+        }
+    }
+
+    return stripped;
+}
+
+bool parseSpinBoxText(const QDoubleSpinBox *spinBox,
+                      const QString& text,
+                      double& value,
+                      double minimum,
+                      double maximum)
+{
+    return NetworkValueUtils::parseDisplayValue(stripSpinBoxAffixes(spinBox, text),
+                                                value,
+                                                minimum,
+                                                maximum);
+}
+
+bool isIncompleteNumber(const QString& text, double minimum)
+{
+    if (text.isEmpty()) {
+        return true;
+    }
+
+    if (text == QLatin1String("+") || text == QLatin1String(".") || text == QLatin1String(",")) {
+        return true;
+    }
+
+    if (text == QLatin1String("-")) {
+        return minimum < 0.0;
+    }
+
+    if (text == QLatin1String("+.") || text == QLatin1String("+,")) {
+        return true;
+    }
+
+    if (text == QLatin1String("-.") || text == QLatin1String("-,")) {
+        return minimum < 0.0;
+    }
+
+    if (text.endsWith(QLatin1Char('.')) || text.endsWith(QLatin1Char(','))) {
+        double parsedPrefix = 0.0;
+        return NetworkValueUtils::parseDisplayValue(text.left(text.size() - 1),
+                                                    parsedPrefix,
+                                                    -std::numeric_limits<double>::max(),
+                                                    std::numeric_limits<double>::max());
+    }
+
+    return false;
+}
+
+class ActiveFilterValueSpinBox : public QDoubleSpinBox
+{
+public:
+    explicit ActiveFilterValueSpinBox(QWidget *parent = nullptr)
+        : QDoubleSpinBox(parent)
+    {
+        setCorrectionMode(QAbstractSpinBox::CorrectToPreviousValue);
+    }
+
+protected:
+    double valueFromText(const QString& text) const override
+    {
+        double parsed = 0.0;
+        if (parseSpinBoxText(this, text, parsed, minimum(), maximum())) {
+            return parsed;
+        }
+        return value();
+    }
+
+    QValidator::State validate(QString& input, int& pos) const override
+    {
+        Q_UNUSED(pos);
+
+        const QString stripped = stripSpinBoxAffixes(this, input);
+        if (isIncompleteNumber(stripped, minimum())) {
+            return QValidator::Intermediate;
+        }
+
+        double parsed = 0.0;
+        if (parseSpinBoxText(this, input, parsed, minimum(), maximum())) {
+            return QValidator::Acceptable;
+        }
+
+        if (parseSpinBoxText(this,
+                             input,
+                             parsed,
+                             -std::numeric_limits<double>::max(),
+                             std::numeric_limits<double>::max())) {
+            return QValidator::Intermediate;
+        }
+
+        return QValidator::Invalid;
+    }
+};
+
 QDoubleSpinBox *frequencySpinBox(QWidget *parent)
 {
-    auto *spinBox = new QDoubleSpinBox(parent);
+    auto *spinBox = new ActiveFilterValueSpinBox(parent);
     spinBox->setRange(1.0, 200000.0);
     spinBox->setDecimals(1);
     spinBox->setSingleStep(100.0);
@@ -82,8 +201,8 @@ ActiveFilterParametersDialog::ActiveFilterParametersDialog(ActiveFilterChains& c
 
     auto *prototypeNotice = new QLabel(
         tr("Active-filter changes are previewed live in the diagnostic plot and, for supported "
-           "Butterworth low-pass/high-pass/band-pass, Linkwitz-Riley LR2/LR4 low-pass/high-pass, "
-           "first-/second-order All-pass, second-order Notch, Gain, Delay, and Polarity sections, in the driver simulation. "
+           "Butterworth low-pass/high-pass/band-pass, Linkwitz-Riley LR2/LR4/LR6/LR8 low-pass/high-pass, "
+           "first-/second-order All-pass, second-order Notch, Parametric / Peaking EQ, Low Shelf, High Shelf, Gain, Delay, and Polarity sections, in the driver simulation. "
            "Apply/OK commits the edited project state; Cancel restores the last applied state. "
            "Active-filter metadata is saved in .kfp projects."),
         this);
@@ -214,9 +333,9 @@ QWidget *ActiveFilterParametersDialog::createDriverPage(int driverIndex)
     page.order = new QSpinBox(page.editorGroup);
     page.frequency1 = frequencySpinBox(page.editorGroup);
     page.frequency2 = frequencySpinBox(page.editorGroup);
-    page.q = new QDoubleSpinBox(page.editorGroup);
-    page.gain = new QDoubleSpinBox(page.editorGroup);
-    page.delay = new QDoubleSpinBox(page.editorGroup);
+    page.q = new ActiveFilterValueSpinBox(page.editorGroup);
+    page.gain = new ActiveFilterValueSpinBox(page.editorGroup);
+    page.delay = new ActiveFilterValueSpinBox(page.editorGroup);
     page.polarity = new QComboBox(page.editorGroup);
 
     page.sectionEnabled->setObjectName(
@@ -244,6 +363,9 @@ QWidget *ActiveFilterParametersDialog::createDriverPage(int driverIndex)
     page.type->addItem(tr("High-pass"), static_cast<int>(ActiveFilterType::HighPass));
     page.type->addItem(tr("Band-pass"), static_cast<int>(ActiveFilterType::BandPass));
     page.type->addItem(tr("Notch"), static_cast<int>(ActiveFilterType::Notch));
+    page.type->addItem(tr("Parametric / Peaking EQ"), static_cast<int>(ActiveFilterType::PeakingEq));
+    page.type->addItem(tr("Low Shelf"), static_cast<int>(ActiveFilterType::LowShelf));
+    page.type->addItem(tr("High Shelf"), static_cast<int>(ActiveFilterType::HighShelf));
     page.type->addItem(tr("All-pass"), static_cast<int>(ActiveFilterType::AllPass));
     page.type->addItem(tr("Gain"), static_cast<int>(ActiveFilterType::Gain));
     page.type->addItem(tr("Delay"), static_cast<int>(ActiveFilterType::Delay));
@@ -323,8 +445,8 @@ QWidget *ActiveFilterParametersDialog::createDriverPage(int driverIndex)
         QStringLiteral("activeFilterShowResponse%1").arg(driverIndex + 1));
     page.showResponse->setToolTip(
         tr("Show the combined transfer magnitude of all enabled supported sections, including "
-           "Butterworth low-pass/high-pass/band-pass, Linkwitz-Riley LR2/LR4 low-pass/high-pass, "
-           "first-/second-order All-pass, second-order Notch, Gain, Delay, and Polarity. If any enabled section is not implemented "
+           "Butterworth low-pass/high-pass/band-pass, Linkwitz-Riley LR2/LR4/LR6/LR8 low-pass/high-pass, "
+           "first-/second-order All-pass, second-order Notch, Parametric / Peaking EQ, Low Shelf, High Shelf, Gain, Delay, and Polarity. If any enabled section is not implemented "
            "yet, no active-filter "
            "overlay is drawn for this driver."));
     visualizationLayout->addWidget(page.showResponse);
@@ -398,9 +520,12 @@ void ActiveFilterParametersDialog::connectEditorSignals(int driverIndex)
                     static_cast<int>(ActiveFilterCharacteristic::LinkwitzRiley);
                 if (linkwitzRiley &&
                     (type == ActiveFilterType::LowPass || type == ActiveFilterType::HighPass) &&
-                    page.order->value() != 2 && page.order->value() != 4) {
+                    (page.order->value() < 2 || page.order->value() > 8 ||
+                     (page.order->value() % 2) != 0)) {
                     const QSignalBlocker blocker(page.order);
-                    page.order->setValue(page.order->value() < 3 ? 2 : 4);
+                    const int currentOrder = page.order->value();
+                    page.order->setValue(currentOrder < 2 ? 2
+                                                         : std::min(8, currentOrder + 1));
                 }
                 updateEditorControlState(driverIndex);
                 changed();
@@ -618,6 +743,27 @@ void ActiveFilterParametersDialog::writeEditorToSelectedSection(int driverIndex)
         parameters.gainDb = page.gain->value();
         break;
     }
+    case ActiveFilterType::PeakingEq: {
+        auto& parameters = std::get<ActiveFilterPeakingEqParameters>(section.parameters());
+        parameters.centerFrequencyHz = page.frequency1->value();
+        parameters.q = page.q->value();
+        parameters.gainDb = page.gain->value();
+        break;
+    }
+    case ActiveFilterType::LowShelf: {
+        auto& parameters = std::get<ActiveFilterLowShelfParameters>(section.parameters());
+        parameters.transitionFrequencyHz = page.frequency1->value();
+        parameters.q = page.q->value();
+        parameters.gainDb = page.gain->value();
+        break;
+    }
+    case ActiveFilterType::HighShelf: {
+        auto& parameters = std::get<ActiveFilterHighShelfParameters>(section.parameters());
+        parameters.transitionFrequencyHz = page.frequency1->value();
+        parameters.q = page.q->value();
+        parameters.gainDb = page.gain->value();
+        break;
+    }
     case ActiveFilterType::AllPass: {
         auto& parameters = std::get<ActiveFilterAllPassParameters>(section.parameters());
         parameters.order = page.order->value();
@@ -700,6 +846,27 @@ void ActiveFilterParametersDialog::loadEditorFromSelectedSection(int driverIndex
         page.gain->setValue(parameters.gainDb);
         break;
     }
+    case ActiveFilterType::PeakingEq: {
+        const auto& parameters = std::get<ActiveFilterPeakingEqParameters>(section.parameters());
+        page.frequency1->setValue(parameters.centerFrequencyHz);
+        page.q->setValue(parameters.q);
+        page.gain->setValue(parameters.gainDb);
+        break;
+    }
+    case ActiveFilterType::LowShelf: {
+        const auto& parameters = std::get<ActiveFilterLowShelfParameters>(section.parameters());
+        page.frequency1->setValue(parameters.transitionFrequencyHz);
+        page.q->setValue(parameters.q);
+        page.gain->setValue(parameters.gainDb);
+        break;
+    }
+    case ActiveFilterType::HighShelf: {
+        const auto& parameters = std::get<ActiveFilterHighShelfParameters>(section.parameters());
+        page.frequency1->setValue(parameters.transitionFrequencyHz);
+        page.q->setValue(parameters.q);
+        page.gain->setValue(parameters.gainDb);
+        break;
+    }
     case ActiveFilterType::AllPass: {
         const auto& parameters = std::get<ActiveFilterAllPassParameters>(section.parameters());
         page.order->setValue(parameters.order);
@@ -737,7 +904,7 @@ void ActiveFilterParametersDialog::updatePageState(int driverIndex)
     page.editorGroup->setEnabled(haveSelection);
 
     const QString bypassHint = page.activeProcessing->isChecked()
-        ? tr("The active-filter chain is enabled. Supported Butterworth low-pass/high-pass/band-pass, Linkwitz-Riley LR2/LR4 low-pass/high-pass, first-/second-order All-pass, second-order Notch, Gain, Delay, and Polarity sections are applied to the driver simulation.")
+        ? tr("The active-filter chain is enabled. Supported Butterworth low-pass/high-pass/band-pass, Linkwitz-Riley LR2/LR4/LR6/LR8 low-pass/high-pass, first-/second-order All-pass, second-order Notch, Parametric / Peaking EQ, Low Shelf, High Shelf, Gain, Delay, and Polarity sections are applied to the driver simulation.")
         : tr("The active-filter chain is bypassed. Sections remain editable while bypassed.");
     page.activeProcessing->setToolTip(bypassHint);
     updateResponseStatus(driverIndex);
@@ -798,11 +965,17 @@ void ActiveFilterParametersDialog::updateEditorControlState(int driverIndex)
     const bool crossover = isCrossoverType(type);
     const bool frequencyBased = crossover ||
                                 type == ActiveFilterType::Notch ||
+                                type == ActiveFilterType::PeakingEq ||
+                                type == ActiveFilterType::LowShelf ||
+                                type == ActiveFilterType::HighShelf ||
                                 type == ActiveFilterType::AllPass;
     const bool twoFrequencies = type == ActiveFilterType::BandPass;
     const ActiveFilterCharacteristic characteristic =
         static_cast<ActiveFilterCharacteristic>(page.characteristic->currentData().toInt());
     const bool qBased = type == ActiveFilterType::Notch ||
+                        type == ActiveFilterType::PeakingEq ||
+                        type == ActiveFilterType::LowShelf ||
+                        type == ActiveFilterType::HighShelf ||
                         (type == ActiveFilterType::AllPass && page.order->value() == 2) ||
                         (crossover && characteristic == ActiveFilterCharacteristic::GenericQ);
     const bool linkwitzRiley =
@@ -813,7 +986,11 @@ void ActiveFilterParametersDialog::updateEditorControlState(int driverIndex)
     page.order->setEnabled(crossover || type == ActiveFilterType::AllPass);
     if (linkwitzRiley) {
         page.order->setToolTip(
-            tr("Linkwitz-Riley is currently implemented for orders 2 (LR2) and 4 (LR4)."));
+            tr("Linkwitz-Riley is implemented for orders 2 (LR2), 4 (LR4), 6 (LR6), and 8 (LR8)."));
+    } else if ((type == ActiveFilterType::LowPass || type == ActiveFilterType::HighPass) &&
+               characteristic == ActiveFilterCharacteristic::GenericQ) {
+        page.order->setToolTip(
+            tr("Generic / Q-based Low-pass and High-pass are currently implemented only for order 2."));
     } else if (type == ActiveFilterType::AllPass) {
         page.order->setToolTip(
             tr("All-pass is implemented for orders 1 (AP1) and 2 (AP2). Q is used only by AP2."));
@@ -823,12 +1000,37 @@ void ActiveFilterParametersDialog::updateEditorControlState(int driverIndex)
     page.frequency1->setEnabled(frequencyBased);
     page.frequency2->setEnabled(twoFrequencies);
     page.q->setEnabled(qBased);
-    page.q->setToolTip(type == ActiveFilterType::AllPass
-        ? tr("Quality factor for second-order All-pass (AP2); not used by AP1.")
-        : QString());
+    if (type == ActiveFilterType::PeakingEq) {
+        page.q->setToolTip(
+            tr("Quality factor of the Parametric / Peaking EQ; higher Q makes the boost/cut narrower."));
+    } else if (type == ActiveFilterType::LowShelf || type == ActiveFilterType::HighShelf) {
+        page.q->setToolTip(
+            tr("Quality factor of the second-order shelf; higher Q makes the transition more pronounced and can introduce overshoot."));
+    } else if (type == ActiveFilterType::AllPass) {
+        page.q->setToolTip(
+            tr("Quality factor for second-order All-pass (AP2); not used by AP1."));
+    } else if ((type == ActiveFilterType::LowPass || type == ActiveFilterType::HighPass) &&
+               characteristic == ActiveFilterCharacteristic::GenericQ) {
+        page.q->setToolTip(
+            tr("Quality factor of the second-order Generic crossover section. At Frequency, |H| = Q."));
+    } else {
+        page.q->setToolTip(QString());
+    }
     // The canonical Patch-182 notch is always full-depth; gainDb is retained only
     // as persisted forward-compatible metadata and is intentionally not editable here.
-    page.gain->setEnabled(type == ActiveFilterType::Gain);
+    page.gain->setEnabled(type == ActiveFilterType::Gain ||
+                          type == ActiveFilterType::PeakingEq ||
+                          type == ActiveFilterType::LowShelf ||
+                          type == ActiveFilterType::HighShelf);
+    if (type == ActiveFilterType::PeakingEq) {
+        page.gain->setToolTip(
+            tr("Gain at the Peaking-EQ center frequency; 0 dB is exactly neutral."));
+    } else if (type == ActiveFilterType::LowShelf || type == ActiveFilterType::HighShelf) {
+        page.gain->setToolTip(
+            tr("Gain of the affected shelf plateau; at Frequency 1 the response is halfway to this gain in dB. 0 dB is exactly neutral."));
+    } else {
+        page.gain->setToolTip(QString());
+    }
     page.delay->setEnabled(type == ActiveFilterType::Delay);
     page.polarity->setEnabled(type == ActiveFilterType::Polarity);
 }
@@ -879,6 +1081,12 @@ QString ActiveFilterParametersDialog::sectionTypeText(ActiveFilterType type) con
         return tr("Band-pass");
     case ActiveFilterType::Notch:
         return tr("Notch");
+    case ActiveFilterType::PeakingEq:
+        return tr("Parametric / Peaking EQ");
+    case ActiveFilterType::LowShelf:
+        return tr("Low Shelf");
+    case ActiveFilterType::HighShelf:
+        return tr("High Shelf");
     case ActiveFilterType::AllPass:
         return tr("All-pass");
     case ActiveFilterType::Gain:
@@ -951,6 +1159,12 @@ QString ActiveFilterParametersDialog::frequencySummary(const ActiveFilterSection
     }
     case ActiveFilterType::Notch:
         return tr("%1 Hz").arg(std::get<ActiveFilterNotchParameters>(section.parameters()).centerFrequencyHz, 0, 'f', 1);
+    case ActiveFilterType::PeakingEq:
+        return tr("%1 Hz").arg(std::get<ActiveFilterPeakingEqParameters>(section.parameters()).centerFrequencyHz, 0, 'f', 1);
+    case ActiveFilterType::LowShelf:
+        return tr("%1 Hz").arg(std::get<ActiveFilterLowShelfParameters>(section.parameters()).transitionFrequencyHz, 0, 'f', 1);
+    case ActiveFilterType::HighShelf:
+        return tr("%1 Hz").arg(std::get<ActiveFilterHighShelfParameters>(section.parameters()).transitionFrequencyHz, 0, 'f', 1);
     case ActiveFilterType::AllPass:
         return tr("%1 Hz").arg(std::get<ActiveFilterAllPassParameters>(section.parameters()).frequencyHz, 0, 'f', 1);
     default:
@@ -982,6 +1196,24 @@ QString ActiveFilterParametersDialog::extraSummary(const ActiveFilterSection& se
     case ActiveFilterType::Notch: {
         const auto& parameters = std::get<ActiveFilterNotchParameters>(section.parameters());
         return tr("Q %1").arg(parameters.q, 0, 'f', 3);
+    }
+    case ActiveFilterType::PeakingEq: {
+        const auto& parameters = std::get<ActiveFilterPeakingEqParameters>(section.parameters());
+        return tr("Q %1 / %2 dB")
+            .arg(parameters.q, 0, 'f', 3)
+            .arg(parameters.gainDb, 0, 'f', 2);
+    }
+    case ActiveFilterType::LowShelf: {
+        const auto& parameters = std::get<ActiveFilterLowShelfParameters>(section.parameters());
+        return tr("Q %1 / %2 dB")
+            .arg(parameters.q, 0, 'f', 3)
+            .arg(parameters.gainDb, 0, 'f', 2);
+    }
+    case ActiveFilterType::HighShelf: {
+        const auto& parameters = std::get<ActiveFilterHighShelfParameters>(section.parameters());
+        return tr("Q %1 / %2 dB")
+            .arg(parameters.q, 0, 'f', 3)
+            .arg(parameters.gainDb, 0, 'f', 2);
     }
     case ActiveFilterType::AllPass: {
         const auto& parameters = std::get<ActiveFilterAllPassParameters>(section.parameters());

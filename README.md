@@ -113,11 +113,13 @@ The current active-filter engine supports these transfer sections:
 
 - Butterworth low-pass, orders 1 through 8;
 - Butterworth high-pass, orders 1 through 8;
-- Linkwitz-Riley low-pass/high-pass as LR2 or LR4;
+- Linkwitz-Riley low-pass/high-pass as LR2, LR4, LR6, or LR8;
 - Butterworth band-pass, defined as high-pass at the lower cutoff multiplied by
   low-pass at the upper cutoff, with the selected order applied independently
   to both flanks;
 - full-depth second-order Notch with center frequency `f0` and quality factor `Q`;
+- Parametric / Peaking EQ with center frequency `f0`, quality factor `Q`, and gain in dB;
+- second-order Low Shelf and High Shelf with transition frequency `f0`, quality factor `Q`, and plateau gain in dB;
 - Gain as a frequency-independent dB multiplier;
 - Delay as a pure time delay with unity magnitude;
 - Polarity as normal (`+1`) or inverted (`-1`) phase;
@@ -134,13 +136,16 @@ H_band(f) = H_highpass(f, f_lower) * H_lowpass(f, f_upper)
 
 so magnitude and phase from both flanks are preserved.
 
-Linkwitz-Riley LR2/LR4 low-pass and high-pass sections use
+Linkwitz-Riley LR2/LR4/LR6/LR8 low-pass and high-pass sections use
 
 ```text
 H_LR,N(f) = H_BW,N/2(f)^2
 ```
 
-so each branch is -6.0206 dB at its crossover frequency.
+so each branch is -6.0206 dB at its crossover frequency. For ideal matched
+electrical branches, LR4 and LR8 low-/high-pass responses are in phase at the
+crossover, while LR2 and LR6 differ by 180 degrees and therefore require a
+relative polarity inversion for flat acoustic summation.
 
 Gain, Delay, and Polarity are elementary complex multipliers:
 
@@ -166,6 +171,34 @@ s = j*f/f0
 AP1 uses only `frequencyHz`; its stored Q value is ignored. AP2 uses both
 `frequencyHz` and a positive Q. Only orders 1 and 2 are supported for All-pass.
 Both variants preserve `|H(f)| = 1` and affect only phase.
+
+Parametric / Peaking EQ uses the normalized analog peaking-biquad prototype
+
+```text
+A = 10^(gainDb/40)
+H(s) = (s^2 + (A/Q)*s + 1) / (s^2 + s/(A*Q) + 1)
+s = j*f/f0
+```
+
+At `f0`, the magnitude is exactly `10^(gainDb/20)`. A gain of `0 dB` is
+therefore exactly neutral at every frequency. Positive and negative gains of the
+same magnitude are reciprocal complex responses, and increasing `Q` narrows the
+boost/cut region.
+
+Low Shelf and High Shelf use a symmetric normalized second-order analog shelving
+prototype. With `A = 10^(gainDb/40)` and `s = j*f/f0`, Low Shelf is
+
+```text
+H_LS(s) = (s^2 + sqrt(A)/Q*s + A) /
+          (s^2 + s/(sqrt(A)*Q) + 1/A)
+```
+
+and High Shelf is its frequency-inverted counterpart `H_HS(s) = H_LS(1/s)`.
+For Low Shelf, the low-frequency plateau is `10^(gainDb/20)` and the
+high-frequency plateau is unity; High Shelf reverses those plateaus. At `f0`
+the magnitude is exactly `A`, so the response is halfway to the requested
+plateau gain in dB. A gain of `0 dB` is exactly neutral. Equal positive and
+negative gains are reciprocal complex responses, including phase.
 
 The Notch response is
 

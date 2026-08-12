@@ -306,7 +306,7 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     page.title = new QLineEdit(page.page);
     page.rdc = createSpinBox(0.001, 1000.0, 4, 0.1, tr(" Ohm"));
     page.lspMilliHenry = createSpinBox(0.0, 1000.0, 6, 0.01, tr(" mH"));
-    page.f0 = createSpinBox(0.001, 100000.0, 3, 1.0, tr(" Hz"));
+    page.f0 = createSpinBox(0.0, 100000.0, 3, 1.0, tr(" Hz"));
     page.qts = createSpinBox(0.001, 1000.0, 5, 0.01);
     page.qes = createSpinBox(0.001, 1000.0, 5, 0.01);
     page.qms = createSpinBox(0.001, 1000.0, 5, 0.01);

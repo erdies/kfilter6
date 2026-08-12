@@ -101,6 +101,30 @@ QString activeFilterSectionLabel(const ActiveFilterSection& section)
                 .arg(compactFrequency(parameters->centerFrequencyHz), compactNumber(parameters->q));
         }
         break;
+    case ActiveFilterType::PeakingEq:
+        if (const auto *parameters = std::get_if<ActiveFilterPeakingEqParameters>(&section.parameters())) {
+            return QStringLiteral("PEQ %1 Q%2 %3 dB")
+                .arg(compactFrequency(parameters->centerFrequencyHz),
+                     compactNumber(parameters->q),
+                     compactNumber(parameters->gainDb));
+        }
+        break;
+    case ActiveFilterType::LowShelf:
+        if (const auto *parameters = std::get_if<ActiveFilterLowShelfParameters>(&section.parameters())) {
+            return QStringLiteral("LS %1 Q%2 %3 dB")
+                .arg(compactFrequency(parameters->transitionFrequencyHz),
+                     compactNumber(parameters->q),
+                     compactNumber(parameters->gainDb));
+        }
+        break;
+    case ActiveFilterType::HighShelf:
+        if (const auto *parameters = std::get_if<ActiveFilterHighShelfParameters>(&section.parameters())) {
+            return QStringLiteral("HS %1 Q%2 %3 dB")
+                .arg(compactFrequency(parameters->transitionFrequencyHz),
+                     compactNumber(parameters->q),
+                     compactNumber(parameters->gainDb));
+        }
+        break;
     case ActiveFilterType::AllPass:
         if (const auto *parameters = std::get_if<ActiveFilterAllPassParameters>(&section.parameters())) {
             if (parameters->order == 2) {

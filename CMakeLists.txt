@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(kfilter VERSION 0.1.0 LANGUAGES CXX)
 
-set(KFILTER_PATCH_LEVEL "202")
+set(KFILTER_PATCH_LEVEL "210")
 set(KFILTER_LICENSE_STRING "GPL-3.0-or-later")
 
 set(CMAKE_CXX_STANDARD 17)
@@ -124,6 +124,8 @@ if(KFILTER_BUILD_QT6_APP)
             tools/activefilter_dialog_smoketest.cpp
             activefilterparametersdialog.cpp
             activefilterparametersdialog.h
+            networkvalueutils.cpp
+            networkvalueutils.h
         )
         target_link_libraries(kfilter_active_filter_dialog_smoketest
             PRIVATE
