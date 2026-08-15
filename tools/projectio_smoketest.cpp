@@ -367,6 +367,20 @@ void populateBaffleSettings(KFilterProjectIo::BaffleSettingsPerDriver& settings)
     settings[2].driverYmm = 245.0;
     settings[2].showResponseInPlot = false;
     settings[2].edgeSourceCount = 320;
+    settings[2].leftEdgeTreatment = BaffleSideEdgeTreatment::Chamfer45;
+    settings[2].leftChamferSetbackMm = 25.0;
+    settings[2].rightEdgeTreatment = BaffleSideEdgeTreatment::Chamfer45;
+    settings[2].rightChamferSetbackMm = 30.0;
+
+    settings[3].enabled = true;
+    settings[3].model = BaffleModel::RectangularEdgeDiffraction;
+    settings[3].widthMm = 231.0;
+    settings[3].heightMm = 965.0;
+    settings[3].driverXmm = 115.5;
+    settings[3].driverYmm = 868.5;
+    settings[3].boundaryCondition =
+        BaffleBoundaryCondition::RigidFloorContactDiffractionOnly;
+    settings[3].edgeSourceCount = 200;
 }
 
 bool compareBaffleSettings(const KFilterProjectIo::BaffleSettingsPerDriver& expected,
@@ -382,8 +396,13 @@ bool compareBaffleSettings(const KFilterProjectIo::BaffleSettingsPerDriver& expe
             !fuzzyEqual(left.heightMm, right.heightMm) ||
             !fuzzyEqual(left.driverXmm, right.driverXmm) ||
             !fuzzyEqual(left.driverYmm, right.driverYmm) ||
+            left.boundaryCondition != right.boundaryCondition ||
             left.showResponseInPlot != right.showResponseInPlot ||
-            left.edgeSourceCount != right.edgeSourceCount) {
+            left.edgeSourceCount != right.edgeSourceCount ||
+            left.leftEdgeTreatment != right.leftEdgeTreatment ||
+            !fuzzyEqual(left.leftChamferSetbackMm, right.leftChamferSetbackMm) ||
+            left.rightEdgeTreatment != right.rightEdgeTreatment ||
+            !fuzzyEqual(left.rightChamferSetbackMm, right.rightChamferSetbackMm)) {
             error = QStringLiteral("Baffle settings mismatch for driver %1").arg(driverIndex + 1);
             return false;
         }
@@ -400,8 +419,74 @@ bool baffleSettingsAreDefault(const KFilterProjectIo::BaffleSettingsPerDriver& s
                fuzzyEqual(value.heightMm, defaults.heightMm) &&
                fuzzyEqual(value.driverXmm, defaults.driverXmm) &&
                fuzzyEqual(value.driverYmm, defaults.driverYmm) &&
+               value.boundaryCondition == defaults.boundaryCondition &&
                value.showResponseInPlot == defaults.showResponseInPlot &&
-               value.edgeSourceCount == defaults.edgeSourceCount;
+               value.edgeSourceCount == defaults.edgeSourceCount &&
+               value.leftEdgeTreatment == defaults.leftEdgeTreatment &&
+               fuzzyEqual(value.leftChamferSetbackMm, defaults.leftChamferSetbackMm) &&
+               value.rightEdgeTreatment == defaults.rightEdgeTreatment &&
+               fuzzyEqual(value.rightChamferSetbackMm, defaults.rightChamferSetbackMm);
+    });
+}
+
+void populateFloorReflectionSettings(
+    KFilterProjectIo::FloorReflectionSettingsPerDriver& settings)
+{
+    settings[0].enabled = true;
+    settings[0].cabinetBottomAboveFloorMm = 120.0;
+    settings[0].listenerHeightAboveFloorMm = 1075.5;
+    settings[0].horizontalDistanceMm = 2450.25;
+    settings[0].surfacePreset = FloorSurfacePreset::HardRigid;
+
+    settings[1].enabled = false;
+    settings[1].cabinetBottomAboveFloorMm = 310.0;
+    settings[1].listenerHeightAboveFloorMm = 980.0;
+    settings[1].horizontalDistanceMm = 1800.0;
+
+    settings[2].enabled = true;
+    settings[2].cabinetBottomAboveFloorMm = 0.0;
+    settings[2].listenerHeightAboveFloorMm = 1150.0;
+    settings[2].horizontalDistanceMm = 3200.0;
+    settings[2].surfacePreset = FloorSurfacePreset::MikiReference10mm100k;
+
+    settings[3].enabled = true;
+    settings[3].cabinetBottomAboveFloorMm = 45.0;
+    settings[3].listenerHeightAboveFloorMm = 1030.0;
+    settings[3].horizontalDistanceMm = 2750.0;
+}
+
+bool compareFloorReflectionSettings(
+    const KFilterProjectIo::FloorReflectionSettingsPerDriver& expected,
+    const KFilterProjectIo::FloorReflectionSettingsPerDriver& actual,
+    QString& error)
+{
+    for (int driverIndex = 0; driverIndex < KFilterProjectIo::DriverCount; ++driverIndex) {
+        const std::size_t index = static_cast<std::size_t>(driverIndex);
+        const FloorReflectionSettings& left = expected[index];
+        const FloorReflectionSettings& right = actual[index];
+        if (left.enabled != right.enabled ||
+            !fuzzyEqual(left.cabinetBottomAboveFloorMm, right.cabinetBottomAboveFloorMm) ||
+            !fuzzyEqual(left.listenerHeightAboveFloorMm, right.listenerHeightAboveFloorMm) ||
+            !fuzzyEqual(left.horizontalDistanceMm, right.horizontalDistanceMm) ||
+            left.surfacePreset != right.surfacePreset) {
+            error = QStringLiteral("Floor-reflection settings mismatch for driver %1")
+                        .arg(driverIndex + 1);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool floorReflectionSettingsAreDefault(
+    const KFilterProjectIo::FloorReflectionSettingsPerDriver& settings)
+{
+    const FloorReflectionSettings defaults;
+    return std::all_of(settings.cbegin(), settings.cend(), [&](const FloorReflectionSettings& value) {
+        return value.enabled == defaults.enabled &&
+               fuzzyEqual(value.cabinetBottomAboveFloorMm, defaults.cabinetBottomAboveFloorMm) &&
+               fuzzyEqual(value.listenerHeightAboveFloorMm, defaults.listenerHeightAboveFloorMm) &&
+               fuzzyEqual(value.horizontalDistanceMm, defaults.horizontalDistanceMm) &&
+               value.surfacePreset == defaults.surfacePreset;
     });
 }
 
@@ -517,6 +602,9 @@ int main(int argc, char** argv)
     populateActiveFilters(originalActiveFilters);
     KFilterProjectIo::BaffleSettingsPerDriver originalBaffleSettings{};
     populateBaffleSettings(originalBaffleSettings);
+    KFilterProjectIo::FloorReflectionSettingsPerDriver originalFloorReflectionSettings{};
+    populateFloorReflectionSettings(originalFloorReflectionSettings);
+    KFilterProjectIo::FloorReflectionSettingsPerDriver scratchFloorReflectionSettings{};
 
     if (!KFilterProjectIo::saveToFile(jsonFilePath,
                                       original,
@@ -525,6 +613,7 @@ int main(int argc, char** argv)
                                       originalHiddenStates,
                                       originalActiveFilters,
                                       originalBaffleSettings,
+                                      originalFloorReflectionSettings,
                                       &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -557,6 +646,16 @@ int main(int argc, char** argv)
         firstLowPass.value(QStringLiteral("parameters")).toObject();
     const QJsonObject firstBaffle =
         jsonDrivers.at(0).toObject().value(QStringLiteral("baffle")).toObject();
+    const QJsonObject thirdBaffle =
+        jsonDrivers.at(2).toObject().value(QStringLiteral("baffle")).toObject();
+    const QJsonObject fourthBaffle =
+        jsonDrivers.at(3).toObject().value(QStringLiteral("baffle")).toObject();
+    const QJsonObject firstFloorReflection =
+        jsonDrivers.at(0).toObject().value(QStringLiteral("floorReflection")).toObject();
+    const QJsonObject secondFloorReflection =
+        jsonDrivers.at(1).toObject().value(QStringLiteral("floorReflection")).toObject();
+    const QJsonObject thirdFloorReflection =
+        jsonDrivers.at(2).toObject().value(QStringLiteral("floorReflection")).toObject();
     if (validRoot.value(QStringLiteral("format")).toString() != QStringLiteral("KFilter project") ||
         validRoot.value(QStringLiteral("formatVersion")).toInt(-1) != KFilterProjectIo::JsonFormatVersion ||
         jsonDrivers.size() != KFilterProjectIo::DriverCount ||
@@ -575,10 +674,30 @@ int main(int argc, char** argv)
         !fuzzyEqual(firstLowPassParameters.value(QStringLiteral("q")).toDouble(), 0.8123) ||
         !firstBaffle.value(QStringLiteral("enabled")).toBool(false) ||
         firstBaffle.value(QStringLiteral("model")).toString() != QStringLiteral("simpleBaffleStep") ||
+        firstBaffle.value(QStringLiteral("boundaryCondition")).toString() != QStringLiteral("freeField") ||
         !fuzzyEqual(firstBaffle.value(QStringLiteral("widthMm")).toDouble(), 231.0) ||
         !firstBaffle.value(QStringLiteral("showResponseInPlot")).toBool(false) ||
-        firstBaffle.value(QStringLiteral("edgeSourceCount")).toInt() != 200) {
-        QTextStream(stderr) << "Saved JSON project metadata, measurements, active filters, baffle settings or driver count is invalid\n";
+        firstBaffle.value(QStringLiteral("edgeSourceCount")).toInt() != 200 ||
+        firstBaffle.value(QStringLiteral("leftEdgeTreatment")).toString() != QStringLiteral("sharp") ||
+        firstBaffle.value(QStringLiteral("rightEdgeTreatment")).toString() != QStringLiteral("sharp") ||
+        !fuzzyEqual(firstBaffle.value(QStringLiteral("leftChamferSetbackMm")).toDouble(), 20.0) ||
+        !fuzzyEqual(firstBaffle.value(QStringLiteral("rightChamferSetbackMm")).toDouble(), 20.0) ||
+        thirdBaffle.value(QStringLiteral("leftEdgeTreatment")).toString() != QStringLiteral("chamfer45") ||
+        thirdBaffle.value(QStringLiteral("rightEdgeTreatment")).toString() != QStringLiteral("chamfer45") ||
+        !fuzzyEqual(thirdBaffle.value(QStringLiteral("leftChamferSetbackMm")).toDouble(), 25.0) ||
+        !fuzzyEqual(thirdBaffle.value(QStringLiteral("rightChamferSetbackMm")).toDouble(), 30.0) ||
+        thirdBaffle.value(QStringLiteral("boundaryCondition")).toString() != QStringLiteral("freeField") ||
+        fourthBaffle.value(QStringLiteral("boundaryCondition")).toString() !=
+            QStringLiteral("rigidFloorContactDiffractionOnly") ||
+        !firstFloorReflection.value(QStringLiteral("enabled")).toBool(false) ||
+        !fuzzyEqual(firstFloorReflection.value(QStringLiteral("cabinetBottomAboveFloorMm")).toDouble(), 120.0) ||
+        !fuzzyEqual(firstFloorReflection.value(QStringLiteral("listenerHeightAboveFloorMm")).toDouble(), 1075.5) ||
+        !fuzzyEqual(firstFloorReflection.value(QStringLiteral("horizontalDistanceMm")).toDouble(), 2450.25) ||
+        firstFloorReflection.value(QStringLiteral("surfacePreset")).toString() != QStringLiteral("hardRigid") ||
+        secondFloorReflection.value(QStringLiteral("enabled")).toBool(true) ||
+        thirdFloorReflection.value(QStringLiteral("surfacePreset")).toString() !=
+            QStringLiteral("mikiReference10mm100k")) {
+        QTextStream(stderr) << "Saved JSON project metadata, measurements, active filters, baffle/floor settings or driver count is invalid\n";
         return 1;
     }
 
@@ -588,6 +707,7 @@ int main(int argc, char** argv)
     KFilterProjectIo::MeasurementHiddenStates jsonLoadedHiddenStates{};
     KFilterProjectIo::ActiveFilterChains jsonLoadedActiveFilters{};
     KFilterProjectIo::BaffleSettingsPerDriver jsonLoadedBaffleSettings{};
+    KFilterProjectIo::FloorReflectionSettingsPerDriver jsonLoadedFloorReflectionSettings{};
     if (!KFilterProjectIo::loadFromFile(jsonFilePath,
                                         jsonLoaded,
                                         jsonLoadedMeasurements,
@@ -595,6 +715,7 @@ int main(int argc, char** argv)
                                         jsonLoadedHiddenStates,
                                         jsonLoadedActiveFilters,
                                         jsonLoadedBaffleSettings,
+                                        jsonLoadedFloorReflectionSettings,
                                         &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -605,6 +726,9 @@ int main(int argc, char** argv)
         !compareMeasurementHiddenStates(originalHiddenStates, jsonLoadedHiddenStates, errorMessage) ||
         !compareActiveFilters(originalActiveFilters, jsonLoadedActiveFilters, errorMessage) ||
         !compareBaffleSettings(originalBaffleSettings, jsonLoadedBaffleSettings, errorMessage) ||
+        !compareFloorReflectionSettings(originalFloorReflectionSettings,
+                                        jsonLoadedFloorReflectionSettings,
+                                        errorMessage) ||
         !jsonLoadedMergeEnabled) {
         QTextStream(stderr) << (errorMessage.isEmpty()
                                     ? QStringLiteral("Measurement merge/per-driver hide state was not restored")
@@ -630,6 +754,8 @@ int main(int argc, char** argv)
     populateActiveFilters(legacyActiveFilters);
     KFilterProjectIo::BaffleSettingsPerDriver legacyBaffleSettings{};
     populateBaffleSettings(legacyBaffleSettings);
+    KFilterProjectIo::FloorReflectionSettingsPerDriver legacyFloorReflectionSettings{};
+    populateFloorReflectionSettings(legacyFloorReflectionSettings);
     if (!KFilterProjectIo::loadFromFile(legacyFilePath,
                                         legacyLoaded,
                                         legacyMeasurements,
@@ -637,6 +763,7 @@ int main(int argc, char** argv)
                                         legacyHiddenStates,
                                         legacyActiveFilters,
                                         legacyBaffleSettings,
+                                        legacyFloorReflectionSettings,
                                         &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -650,7 +777,8 @@ int main(int argc, char** argv)
         std::any_of(legacyHiddenStates.cbegin(), legacyHiddenStates.cend(),
                     [](bool hidden) { return hidden; }) ||
         !activeFiltersAreDefault(legacyActiveFilters) ||
-        !baffleSettingsAreDefault(legacyBaffleSettings)) {
+        !baffleSettingsAreDefault(legacyBaffleSettings) ||
+        !floorReflectionSettingsAreDefault(legacyFloorReflectionSettings)) {
         QTextStream(stderr) << (errorMessage.isEmpty()
                                     ? QStringLiteral("Legacy load did not reset measurement state")
                                     : errorMessage)
@@ -665,6 +793,7 @@ int main(int argc, char** argv)
                                       legacyHiddenStates,
                                       legacyActiveFilters,
                                       legacyBaffleSettings,
+                                      legacyFloorReflectionSettings,
                                       &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -697,6 +826,7 @@ int main(int argc, char** argv)
                                         oldLegacyHiddenStates,
                                         oldLegacyActiveFilters,
                                         oldLegacyBaffleSettings,
+                                        scratchFloorReflectionSettings,
                                         &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -711,8 +841,9 @@ int main(int argc, char** argv)
     }
 
     if (!activeFiltersAreDefault(oldLegacyActiveFilters) ||
-        !baffleSettingsAreDefault(oldLegacyBaffleSettings)) {
-        QTextStream(stderr) << "Old legacy file did not reset active-filter/Baffle metadata\n";
+        !baffleSettingsAreDefault(oldLegacyBaffleSettings) ||
+        !floorReflectionSettingsAreDefault(scratchFloorReflectionSettings)) {
+        QTextStream(stderr) << "Old legacy file did not reset active-filter/Baffle/Floor metadata\n";
         return 1;
     }
 
@@ -752,6 +883,7 @@ int main(int argc, char** argv)
                                         patch155HiddenStates,
                                         patch155ActiveFilters,
                                         patch155BaffleSettings,
+                                        scratchFloorReflectionSettings,
                                         &errorMessage) ||
         !compareDrivers(original, patch155Loaded, true, errorMessage) ||
         !std::all_of(patch155Measurements.cbegin(),
@@ -761,8 +893,219 @@ int main(int argc, char** argv)
         std::any_of(patch155HiddenStates.cbegin(), patch155HiddenStates.cend(),
                     [](bool hidden) { return hidden; }) ||
         !activeFiltersAreDefault(patch155ActiveFilters) ||
-        !baffleSettingsAreDefault(patch155BaffleSettings)) {
+        !baffleSettingsAreDefault(patch155BaffleSettings) ||
+        !floorReflectionSettingsAreDefault(scratchFloorReflectionSettings)) {
         QTextStream(stderr) << "Patch 155 JSON compatibility failed: " << errorMessage << '\n';
+        return 1;
+    }
+
+    // Format version 9 is the immediate predecessor of Patch 229. It already
+    // contains Floor Reflection but could persist only HardRigid. Loading it
+    // must preserve all placement metadata and the rigid preset unchanged.
+    QJsonObject version9Root = validRoot;
+    version9Root.insert(QStringLiteral("formatVersion"), 9);
+    QJsonObject version9Project = version9Root.value(QStringLiteral("project")).toObject();
+    QJsonArray version9Drivers = version9Project.value(QStringLiteral("drivers")).toArray();
+    for (int index = 0; index < version9Drivers.size(); ++index) {
+        QJsonObject driverObject = version9Drivers.at(index).toObject();
+        QJsonObject floorObject = driverObject.value(QStringLiteral("floorReflection")).toObject();
+        floorObject.insert(QStringLiteral("surfacePreset"), QStringLiteral("hardRigid"));
+        driverObject.insert(QStringLiteral("floorReflection"), floorObject);
+        version9Drivers[index] = driverObject;
+    }
+    version9Project.insert(QStringLiteral("drivers"), version9Drivers);
+    version9Root.insert(QStringLiteral("project"), version9Project);
+    if (!writeTextFile(invalidFilePath,
+                       QString::fromUtf8(QJsonDocument(version9Root).toJson(QJsonDocument::Indented)),
+                       errorMessage)) {
+        QTextStream(stderr) << errorMessage << '\n';
+        return 1;
+    }
+
+    driver version9Loaded[KFilterProjectIo::DriverCount];
+    KFilterProjectIo::MeasurementCurves version9Measurements;
+    bool version9MergeEnabled = false;
+    KFilterProjectIo::MeasurementHiddenStates version9HiddenStates{};
+    KFilterProjectIo::ActiveFilterChains version9ActiveFilters{};
+    KFilterProjectIo::BaffleSettingsPerDriver version9BaffleSettings{};
+    KFilterProjectIo::FloorReflectionSettingsPerDriver version9FloorReflectionSettings{};
+    if (!KFilterProjectIo::loadFromFile(invalidFilePath,
+                                        version9Loaded, version9Measurements,
+                                        version9MergeEnabled, version9HiddenStates,
+                                        version9ActiveFilters, version9BaffleSettings,
+                                        version9FloorReflectionSettings, &errorMessage)) {
+        QTextStream(stderr) << "Format version 9 compatibility failed: "
+                            << errorMessage << '\n';
+        return 1;
+    }
+    for (const FloorReflectionSettings& value : version9FloorReflectionSettings) {
+        if (value.surfacePreset != FloorSurfacePreset::HardRigid) {
+            QTextStream(stderr) << "Format version 9 surface preset did not remain HardRigid\n";
+            return 1;
+        }
+    }
+
+    // Format version 8 is the immediate predecessor of Patch 225. It contains
+    // the complete Baffle boundary metadata but no Floor Reflection object.
+    // Every new per-driver FloorReflectionSettings entry must default exactly.
+    QJsonObject version8Root = validRoot;
+    version8Root.insert(QStringLiteral("formatVersion"), 8);
+    QJsonObject version8Project = version8Root.value(QStringLiteral("project")).toObject();
+    QJsonArray version8Drivers = version8Project.value(QStringLiteral("drivers")).toArray();
+    for (int index = 0; index < version8Drivers.size(); ++index) {
+        QJsonObject driverObject = version8Drivers.at(index).toObject();
+        driverObject.remove(QStringLiteral("floorReflection"));
+        version8Drivers[index] = driverObject;
+    }
+    version8Project.insert(QStringLiteral("drivers"), version8Drivers);
+    version8Root.insert(QStringLiteral("project"), version8Project);
+    if (!writeTextFile(invalidFilePath,
+                       QString::fromUtf8(QJsonDocument(version8Root).toJson(QJsonDocument::Indented)),
+                       errorMessage)) {
+        QTextStream(stderr) << errorMessage << '\n';
+        return 1;
+    }
+
+    driver version8Loaded[KFilterProjectIo::DriverCount];
+    KFilterProjectIo::MeasurementCurves version8Measurements;
+    bool version8MergeEnabled = false;
+    KFilterProjectIo::MeasurementHiddenStates version8HiddenStates{};
+    KFilterProjectIo::ActiveFilterChains version8ActiveFilters{};
+    KFilterProjectIo::BaffleSettingsPerDriver version8BaffleSettings{};
+    KFilterProjectIo::FloorReflectionSettingsPerDriver version8FloorReflectionSettings{};
+    populateFloorReflectionSettings(version8FloorReflectionSettings);
+    if (!KFilterProjectIo::loadFromFile(invalidFilePath,
+                                        version8Loaded,
+                                        version8Measurements,
+                                        version8MergeEnabled,
+                                        version8HiddenStates,
+                                        version8ActiveFilters,
+                                        version8BaffleSettings,
+                                        version8FloorReflectionSettings,
+                                        &errorMessage) ||
+        !compareDrivers(original, version8Loaded, true, errorMessage) ||
+        !compareMeasurements(originalMeasurements, version8Measurements, errorMessage) ||
+        !compareMeasurementHiddenStates(originalHiddenStates, version8HiddenStates, errorMessage) ||
+        !compareActiveFilters(originalActiveFilters, version8ActiveFilters, errorMessage) ||
+        !compareBaffleSettings(originalBaffleSettings, version8BaffleSettings, errorMessage) ||
+        !floorReflectionSettingsAreDefault(version8FloorReflectionSettings) ||
+        !version8MergeEnabled) {
+        QTextStream(stderr) << "Format version 8 Floor Reflection compatibility failed: "
+                            << errorMessage << '\n';
+        return 1;
+    }
+
+    // Format version 7 contains side-chamfer persistence but predates the
+    // Patch-220 boundary-condition field. All existing Baffle data must load
+    // while the new boundary condition defaults to Free field.
+    QJsonObject version7Root = validRoot;
+    version7Root.insert(QStringLiteral("formatVersion"), 7);
+    QJsonObject version7Project = version7Root.value(QStringLiteral("project")).toObject();
+    QJsonArray version7Drivers = version7Project.value(QStringLiteral("drivers")).toArray();
+    for (int index = 0; index < version7Drivers.size(); ++index) {
+        QJsonObject driverObject = version7Drivers.at(index).toObject();
+        QJsonObject baffle = driverObject.value(QStringLiteral("baffle")).toObject();
+        baffle.remove(QStringLiteral("boundaryCondition"));
+        driverObject.insert(QStringLiteral("baffle"), baffle);
+        version7Drivers[index] = driverObject;
+    }
+    version7Project.insert(QStringLiteral("drivers"), version7Drivers);
+    version7Root.insert(QStringLiteral("project"), version7Project);
+    if (!writeTextFile(invalidFilePath,
+                       QString::fromUtf8(QJsonDocument(version7Root).toJson(QJsonDocument::Indented)),
+                       errorMessage)) {
+        QTextStream(stderr) << errorMessage << '\n';
+        return 1;
+    }
+
+    driver version7Loaded[KFilterProjectIo::DriverCount];
+    KFilterProjectIo::MeasurementCurves version7Measurements;
+    bool version7MergeEnabled = false;
+    KFilterProjectIo::MeasurementHiddenStates version7HiddenStates{};
+    KFilterProjectIo::ActiveFilterChains version7ActiveFilters{};
+    KFilterProjectIo::BaffleSettingsPerDriver version7BaffleSettings{};
+    KFilterProjectIo::BaffleSettingsPerDriver version7ExpectedBaffle = originalBaffleSettings;
+    for (BaffleSettings& settings : version7ExpectedBaffle) {
+        settings.boundaryCondition = BaffleBoundaryCondition::FreeField;
+    }
+    if (!KFilterProjectIo::loadFromFile(invalidFilePath,
+                                        version7Loaded,
+                                        version7Measurements,
+                                        version7MergeEnabled,
+                                        version7HiddenStates,
+                                        version7ActiveFilters,
+                                        version7BaffleSettings,
+                                        scratchFloorReflectionSettings,
+                                        &errorMessage) ||
+        !compareDrivers(original, version7Loaded, true, errorMessage) ||
+        !compareMeasurements(originalMeasurements, version7Measurements, errorMessage) ||
+        !compareMeasurementHiddenStates(originalHiddenStates, version7HiddenStates, errorMessage) ||
+        !compareActiveFilters(originalActiveFilters, version7ActiveFilters, errorMessage) ||
+        !compareBaffleSettings(version7ExpectedBaffle, version7BaffleSettings, errorMessage) ||
+        !version7MergeEnabled) {
+        QTextStream(stderr) << "Format version 7 Free-field Baffle compatibility failed: "
+                            << errorMessage << '\n';
+        return 1;
+    }
+
+    // Format version 6 contains the original sharp rectangular Baffle fields
+    // but predates side-edge treatment and boundary-condition persistence. It
+    // must load existing geometry while defaulting both additions.
+    QJsonObject version6Root = validRoot;
+    version6Root.insert(QStringLiteral("formatVersion"), 6);
+    QJsonObject version6Project = version6Root.value(QStringLiteral("project")).toObject();
+    QJsonArray version6Drivers = version6Project.value(QStringLiteral("drivers")).toArray();
+    for (int index = 0; index < version6Drivers.size(); ++index) {
+        QJsonObject driverObject = version6Drivers.at(index).toObject();
+        QJsonObject baffle = driverObject.value(QStringLiteral("baffle")).toObject();
+        baffle.remove(QStringLiteral("leftEdgeTreatment"));
+        baffle.remove(QStringLiteral("leftChamferSetbackMm"));
+        baffle.remove(QStringLiteral("rightEdgeTreatment"));
+        baffle.remove(QStringLiteral("rightChamferSetbackMm"));
+        baffle.remove(QStringLiteral("boundaryCondition"));
+        driverObject.insert(QStringLiteral("baffle"), baffle);
+        version6Drivers[index] = driverObject;
+    }
+    version6Project.insert(QStringLiteral("drivers"), version6Drivers);
+    version6Root.insert(QStringLiteral("project"), version6Project);
+    if (!writeTextFile(invalidFilePath,
+                       QString::fromUtf8(QJsonDocument(version6Root).toJson(QJsonDocument::Indented)),
+                       errorMessage)) {
+        QTextStream(stderr) << errorMessage << '\n';
+        return 1;
+    }
+
+    driver version6Loaded[KFilterProjectIo::DriverCount];
+    KFilterProjectIo::MeasurementCurves version6Measurements;
+    bool version6MergeEnabled = false;
+    KFilterProjectIo::MeasurementHiddenStates version6HiddenStates{};
+    KFilterProjectIo::ActiveFilterChains version6ActiveFilters{};
+    KFilterProjectIo::BaffleSettingsPerDriver version6BaffleSettings{};
+    KFilterProjectIo::BaffleSettingsPerDriver version6ExpectedBaffle = originalBaffleSettings;
+    for (BaffleSettings& settings : version6ExpectedBaffle) {
+        settings.boundaryCondition = BaffleBoundaryCondition::FreeField;
+        settings.leftEdgeTreatment = BaffleSideEdgeTreatment::Sharp;
+        settings.leftChamferSetbackMm = BaffleSettings{}.leftChamferSetbackMm;
+        settings.rightEdgeTreatment = BaffleSideEdgeTreatment::Sharp;
+        settings.rightChamferSetbackMm = BaffleSettings{}.rightChamferSetbackMm;
+    }
+    if (!KFilterProjectIo::loadFromFile(invalidFilePath,
+                                        version6Loaded,
+                                        version6Measurements,
+                                        version6MergeEnabled,
+                                        version6HiddenStates,
+                                        version6ActiveFilters,
+                                        version6BaffleSettings,
+                                        scratchFloorReflectionSettings,
+                                        &errorMessage) ||
+        !compareDrivers(original, version6Loaded, true, errorMessage) ||
+        !compareMeasurements(originalMeasurements, version6Measurements, errorMessage) ||
+        !compareMeasurementHiddenStates(originalHiddenStates, version6HiddenStates, errorMessage) ||
+        !compareActiveFilters(originalActiveFilters, version6ActiveFilters, errorMessage) ||
+        !compareBaffleSettings(version6ExpectedBaffle, version6BaffleSettings, errorMessage) ||
+        !version6MergeEnabled) {
+        QTextStream(stderr) << "Format version 6 sharp-edge Baffle compatibility failed: "
+                            << errorMessage << '\n';
         return 1;
     }
 
@@ -801,6 +1144,7 @@ int main(int argc, char** argv)
                                         version5HiddenStates,
                                         version5ActiveFilters,
                                         version5BaffleSettings,
+                                        scratchFloorReflectionSettings,
                                         &errorMessage) ||
         !compareDrivers(original, version5Loaded, true, errorMessage) ||
         !compareMeasurements(originalMeasurements, version5Measurements, errorMessage) ||
@@ -849,6 +1193,7 @@ int main(int argc, char** argv)
                                         version4HiddenStates,
                                         version4ActiveFilters,
                                         version4BaffleSettings,
+                                        scratchFloorReflectionSettings,
                                         &errorMessage) ||
         !compareDrivers(original, version4Loaded, true, errorMessage) ||
         !compareMeasurements(originalMeasurements, version4Measurements, errorMessage) ||
@@ -893,6 +1238,7 @@ int main(int argc, char** argv)
                                         version3HiddenStates,
                                         version3ActiveFilters,
                                         version3BaffleSettings,
+                                        scratchFloorReflectionSettings,
                                         &errorMessage) ||
         !compareDrivers(original, version3Loaded, true, errorMessage) ||
         !compareMeasurements(originalMeasurements, version3Measurements, errorMessage) ||
@@ -938,6 +1284,7 @@ int main(int argc, char** argv)
                                         version2HiddenStates,
                                         version2ActiveFilters,
                                         version2BaffleSettings,
+                                        scratchFloorReflectionSettings,
                                         &errorMessage) ||
         !compareDrivers(original, version2Loaded, true, errorMessage) ||
         !compareMeasurements(originalMeasurements, version2Measurements, errorMessage) ||
@@ -990,14 +1337,19 @@ int main(int argc, char** argv)
     KFilterProjectIo::BaffleSettingsPerDriver unchangedBaffleSettings{};
     populateBaffleSettings(unchangedBaffleSettings);
     const KFilterProjectIo::BaffleSettingsPerDriver unchangedBaffleSettingsExpected = unchangedBaffleSettings;
+    KFilterProjectIo::FloorReflectionSettingsPerDriver unchangedFloorReflectionSettings{};
+    populateFloorReflectionSettings(unchangedFloorReflectionSettings);
+    const KFilterProjectIo::FloorReflectionSettingsPerDriver unchangedFloorReflectionSettingsExpected =
+        unchangedFloorReflectionSettings;
     if (KFilterProjectIo::loadFromFile(invalidFilePath,
-                                       unchanged,
-                                       unchangedMeasurements,
-                                       unchangedMergeEnabled,
-                                       unchangedHiddenStates,
-                                       unchangedActiveFilters,
-                                       unchangedBaffleSettings,
-                                       &errorMessage)) {
+                                        unchanged,
+                                        unchangedMeasurements,
+                                        unchangedMergeEnabled,
+                                        unchangedHiddenStates,
+                                        unchangedActiveFilters,
+                                        unchangedBaffleSettings,
+                                        unchangedFloorReflectionSettings,
+                                        &errorMessage)) {
         QTextStream(stderr) << "Invalid measurement point ordering was accepted\n";
         return 1;
     }
@@ -1008,7 +1360,10 @@ int main(int argc, char** argv)
         !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
                      [](bool hidden) { return hidden; }) ||
         !compareActiveFilters(unchangedActiveFiltersExpected, unchangedActiveFilters, errorMessage) ||
-        !compareBaffleSettings(unchangedBaffleSettingsExpected, unchangedBaffleSettings, errorMessage)) {
+        !compareBaffleSettings(unchangedBaffleSettingsExpected, unchangedBaffleSettings, errorMessage) ||
+        !compareFloorReflectionSettings(unchangedFloorReflectionSettingsExpected,
+                                        unchangedFloorReflectionSettings,
+                                        errorMessage)) {
         QTextStream(stderr) << "Failed measurement load modified the destination project state\n";
         return 1;
     }
@@ -1037,13 +1392,14 @@ int main(int argc, char** argv)
     }
 
     if (KFilterProjectIo::loadFromFile(invalidFilePath,
-                                       unchanged,
-                                       unchangedMeasurements,
-                                       unchangedMergeEnabled,
-                                       unchangedHiddenStates,
-                                       unchangedActiveFilters,
-                                       unchangedBaffleSettings,
-                                       &errorMessage)) {
+                                        unchanged,
+                                        unchangedMeasurements,
+                                        unchangedMergeEnabled,
+                                        unchangedHiddenStates,
+                                        unchangedActiveFilters,
+                                        unchangedBaffleSettings,
+                                        unchangedFloorReflectionSettings,
+                                        &errorMessage)) {
         QTextStream(stderr) << "Invalid per-driver hidden value was accepted\n";
         return 1;
     }
@@ -1053,7 +1409,10 @@ int main(int argc, char** argv)
         !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
                      [](bool hidden) { return hidden; }) ||
         !compareActiveFilters(unchangedActiveFiltersExpected, unchangedActiveFilters, errorMessage) ||
-        !compareBaffleSettings(unchangedBaffleSettingsExpected, unchangedBaffleSettings, errorMessage)) {
+        !compareBaffleSettings(unchangedBaffleSettingsExpected, unchangedBaffleSettings, errorMessage) ||
+        !compareFloorReflectionSettings(unchangedFloorReflectionSettingsExpected,
+                                        unchangedFloorReflectionSettings,
+                                        errorMessage)) {
         QTextStream(stderr) << "Failed hide-state load modified the destination project state\n";
         return 1;
     }
@@ -1085,13 +1444,14 @@ int main(int argc, char** argv)
     }
 
     if (KFilterProjectIo::loadFromFile(invalidFilePath,
-                                       unchanged,
-                                       unchangedMeasurements,
-                                       unchangedMergeEnabled,
-                                       unchangedHiddenStates,
-                                       unchangedActiveFilters,
-                                       unchangedBaffleSettings,
-                                       &errorMessage)) {
+                                        unchanged,
+                                        unchangedMeasurements,
+                                        unchangedMergeEnabled,
+                                        unchangedHiddenStates,
+                                        unchangedActiveFilters,
+                                        unchangedBaffleSettings,
+                                        unchangedFloorReflectionSettings,
+                                        &errorMessage)) {
         QTextStream(stderr) << "Unknown active-filter type was accepted\n";
         return 1;
     }
@@ -1100,12 +1460,15 @@ int main(int argc, char** argv)
         !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
                      [](bool hidden) { return hidden; }) ||
         !compareActiveFilters(unchangedActiveFiltersExpected, unchangedActiveFilters, errorMessage) ||
-        !compareBaffleSettings(unchangedBaffleSettingsExpected, unchangedBaffleSettings, errorMessage)) {
+        !compareBaffleSettings(unchangedBaffleSettingsExpected, unchangedBaffleSettings, errorMessage) ||
+        !compareFloorReflectionSettings(unchangedFloorReflectionSettingsExpected,
+                                        unchangedFloorReflectionSettings,
+                                        errorMessage)) {
         QTextStream(stderr) << "Failed active-filter load modified the destination project state\n";
         return 1;
     }
 
-    // Invalid Baffle metadata in format 6 must fail transactionally.
+    // Invalid Baffle metadata in format 8 must fail transactionally.
     QJsonObject invalidBaffleRoot = validRoot;
     QJsonObject invalidBaffleProject = invalidBaffleRoot.value(QStringLiteral("project")).toObject();
     QJsonArray invalidBaffleDrivers = invalidBaffleProject.value(QStringLiteral("drivers")).toArray();
@@ -1124,13 +1487,14 @@ int main(int argc, char** argv)
     }
 
     if (KFilterProjectIo::loadFromFile(invalidFilePath,
-                                       unchanged,
-                                       unchangedMeasurements,
-                                       unchangedMergeEnabled,
-                                       unchangedHiddenStates,
-                                       unchangedActiveFilters,
-                                       unchangedBaffleSettings,
-                                       &errorMessage)) {
+                                        unchanged,
+                                        unchangedMeasurements,
+                                        unchangedMergeEnabled,
+                                        unchangedHiddenStates,
+                                        unchangedActiveFilters,
+                                        unchangedBaffleSettings,
+                                        unchangedFloorReflectionSettings,
+                                        &errorMessage)) {
         QTextStream(stderr) << "Invalid Baffle width was accepted\n";
         return 1;
     }
@@ -1139,8 +1503,185 @@ int main(int argc, char** argv)
         !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
                      [](bool hidden) { return hidden; }) ||
         !compareActiveFilters(unchangedActiveFiltersExpected, unchangedActiveFilters, errorMessage) ||
-        !compareBaffleSettings(unchangedBaffleSettingsExpected, unchangedBaffleSettings, errorMessage)) {
+        !compareBaffleSettings(unchangedBaffleSettingsExpected, unchangedBaffleSettings, errorMessage) ||
+        !compareFloorReflectionSettings(unchangedFloorReflectionSettingsExpected,
+                                        unchangedFloorReflectionSettings,
+                                        errorMessage)) {
         QTextStream(stderr) << "Failed Baffle load modified the destination project state\n";
+        return 1;
+    }
+
+    // Format 8 retains the Version-7 chamfer validation contract transactionally.
+    QJsonObject invalidChamferRoot = validRoot;
+    QJsonObject invalidChamferProject = invalidChamferRoot.value(QStringLiteral("project")).toObject();
+    QJsonArray invalidChamferDrivers = invalidChamferProject.value(QStringLiteral("drivers")).toArray();
+    QJsonObject invalidChamferDriver = invalidChamferDrivers.at(2).toObject();
+    QJsonObject invalidChamfer = invalidChamferDriver.value(QStringLiteral("baffle")).toObject();
+    invalidChamfer.insert(QStringLiteral("leftEdgeTreatment"), QStringLiteral("chamfer45"));
+    invalidChamfer.insert(QStringLiteral("leftChamferSetbackMm"), 4.0);
+    invalidChamferDriver.insert(QStringLiteral("baffle"), invalidChamfer);
+    invalidChamferDrivers[2] = invalidChamferDriver;
+    invalidChamferProject.insert(QStringLiteral("drivers"), invalidChamferDrivers);
+    invalidChamferRoot.insert(QStringLiteral("project"), invalidChamferProject);
+    if (!writeTextFile(invalidFilePath,
+                       QString::fromUtf8(QJsonDocument(invalidChamferRoot).toJson(QJsonDocument::Indented)),
+                       errorMessage)) {
+        QTextStream(stderr) << errorMessage << '\n';
+        return 1;
+    }
+    if (KFilterProjectIo::loadFromFile(invalidFilePath,
+                                        unchanged,
+                                        unchangedMeasurements,
+                                        unchangedMergeEnabled,
+                                        unchangedHiddenStates,
+                                        unchangedActiveFilters,
+                                        unchangedBaffleSettings,
+                                        unchangedFloorReflectionSettings,
+                                        &errorMessage)) {
+        QTextStream(stderr) << "Sub-5-mm active chamfer was accepted\n";
+        return 1;
+    }
+    if (unchanged[0].GetTitle() != QStringLiteral("unchanged sentinel") ||
+        unchangedMeasurements[0].size() != 1 || !unchangedMergeEnabled ||
+        !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
+                     [](bool hidden) { return hidden; }) ||
+        !compareActiveFilters(unchangedActiveFiltersExpected, unchangedActiveFilters, errorMessage) ||
+        !compareBaffleSettings(unchangedBaffleSettingsExpected, unchangedBaffleSettings, errorMessage) ||
+        !compareFloorReflectionSettings(unchangedFloorReflectionSettingsExpected,
+                                        unchangedFloorReflectionSettings,
+                                        errorMessage)) {
+        QTextStream(stderr) << "Failed chamfer metadata load modified the destination project state\n";
+        return 1;
+    }
+
+    // Patch 220: unknown boundary values and Rigid-floor + Chamfer combinations
+    // must fail transactionally.
+    QJsonObject invalidBoundaryRoot = validRoot;
+    QJsonObject invalidBoundaryProject = invalidBoundaryRoot.value(QStringLiteral("project")).toObject();
+    QJsonArray invalidBoundaryDrivers = invalidBoundaryProject.value(QStringLiteral("drivers")).toArray();
+    QJsonObject invalidBoundaryDriver = invalidBoundaryDrivers.at(0).toObject();
+    QJsonObject invalidBoundary = invalidBoundaryDriver.value(QStringLiteral("baffle")).toObject();
+    invalidBoundary.insert(QStringLiteral("boundaryCondition"), QStringLiteral("unsupportedBoundary"));
+    invalidBoundaryDriver.insert(QStringLiteral("baffle"), invalidBoundary);
+    invalidBoundaryDrivers[0] = invalidBoundaryDriver;
+    invalidBoundaryProject.insert(QStringLiteral("drivers"), invalidBoundaryDrivers);
+    invalidBoundaryRoot.insert(QStringLiteral("project"), invalidBoundaryProject);
+    if (!writeTextFile(invalidFilePath,
+                       QString::fromUtf8(QJsonDocument(invalidBoundaryRoot).toJson(QJsonDocument::Indented)),
+                       errorMessage)) {
+        QTextStream(stderr) << errorMessage << '\n';
+        return 1;
+    }
+    if (KFilterProjectIo::loadFromFile(invalidFilePath,
+                                        unchanged,
+                                        unchangedMeasurements,
+                                        unchangedMergeEnabled,
+                                        unchangedHiddenStates,
+                                        unchangedActiveFilters,
+                                        unchangedBaffleSettings,
+                                        unchangedFloorReflectionSettings,
+                                        &errorMessage)) {
+        QTextStream(stderr) << "Unsupported Baffle boundary condition was accepted\n";
+        return 1;
+    }
+
+    QJsonObject invalidFloorChamferRoot = validRoot;
+    QJsonObject invalidFloorChamferProject =
+        invalidFloorChamferRoot.value(QStringLiteral("project")).toObject();
+    QJsonArray invalidFloorChamferDrivers =
+        invalidFloorChamferProject.value(QStringLiteral("drivers")).toArray();
+    QJsonObject invalidFloorChamferDriver = invalidFloorChamferDrivers.at(2).toObject();
+    QJsonObject invalidFloorChamfer =
+        invalidFloorChamferDriver.value(QStringLiteral("baffle")).toObject();
+    invalidFloorChamfer.insert(QStringLiteral("boundaryCondition"),
+                               QStringLiteral("rigidFloorContactDiffractionOnly"));
+    invalidFloorChamferDriver.insert(QStringLiteral("baffle"), invalidFloorChamfer);
+    invalidFloorChamferDrivers[2] = invalidFloorChamferDriver;
+    invalidFloorChamferProject.insert(QStringLiteral("drivers"), invalidFloorChamferDrivers);
+    invalidFloorChamferRoot.insert(QStringLiteral("project"), invalidFloorChamferProject);
+    if (!writeTextFile(invalidFilePath,
+                       QString::fromUtf8(QJsonDocument(invalidFloorChamferRoot).toJson(QJsonDocument::Indented)),
+                       errorMessage)) {
+        QTextStream(stderr) << errorMessage << '\n';
+        return 1;
+    }
+    if (KFilterProjectIo::loadFromFile(invalidFilePath,
+                                        unchanged,
+                                        unchangedMeasurements,
+                                        unchangedMergeEnabled,
+                                        unchangedHiddenStates,
+                                        unchangedActiveFilters,
+                                        unchangedBaffleSettings,
+                                        unchangedFloorReflectionSettings,
+                                        &errorMessage)) {
+        QTextStream(stderr) << "Rigid-floor plus Chamfer Baffle combination was accepted\n";
+        return 1;
+    }
+
+    // Patch 225: malformed Floor Reflection metadata must fail transactionally.
+    QJsonObject invalidFloorReflectionRoot = validRoot;
+    QJsonObject invalidFloorReflectionProject =
+        invalidFloorReflectionRoot.value(QStringLiteral("project")).toObject();
+    QJsonArray invalidFloorReflectionDrivers =
+        invalidFloorReflectionProject.value(QStringLiteral("drivers")).toArray();
+    QJsonObject invalidFloorReflectionDriver = invalidFloorReflectionDrivers.at(0).toObject();
+    QJsonObject invalidFloorReflection =
+        invalidFloorReflectionDriver.value(QStringLiteral("floorReflection")).toObject();
+    invalidFloorReflection.insert(QStringLiteral("cabinetBottomAboveFloorMm"), -1.0);
+    invalidFloorReflectionDriver.insert(QStringLiteral("floorReflection"), invalidFloorReflection);
+    invalidFloorReflectionDrivers[0] = invalidFloorReflectionDriver;
+    invalidFloorReflectionProject.insert(QStringLiteral("drivers"), invalidFloorReflectionDrivers);
+    invalidFloorReflectionRoot.insert(QStringLiteral("project"), invalidFloorReflectionProject);
+    if (!writeTextFile(invalidFilePath,
+                       QString::fromUtf8(QJsonDocument(invalidFloorReflectionRoot).toJson(QJsonDocument::Indented)),
+                       errorMessage)) {
+        QTextStream(stderr) << errorMessage << '\n';
+        return 1;
+    }
+    if (KFilterProjectIo::loadFromFile(invalidFilePath,
+                                       unchanged, unchangedMeasurements, unchangedMergeEnabled,
+                                       unchangedHiddenStates, unchangedActiveFilters,
+                                       unchangedBaffleSettings, unchangedFloorReflectionSettings,
+                                       &errorMessage)) {
+        QTextStream(stderr) << "Negative Floor Reflection placement value was accepted\n";
+        return 1;
+    }
+    if (!compareFloorReflectionSettings(unchangedFloorReflectionSettingsExpected,
+                                        unchangedFloorReflectionSettings,
+                                        errorMessage)) {
+        QTextStream(stderr) << "Failed Floor Reflection load modified destination floor metadata\n";
+        return 1;
+    }
+
+    QJsonObject invalidSurfaceRoot = validRoot;
+    QJsonObject invalidSurfaceProject = invalidSurfaceRoot.value(QStringLiteral("project")).toObject();
+    QJsonArray invalidSurfaceDrivers = invalidSurfaceProject.value(QStringLiteral("drivers")).toArray();
+    QJsonObject invalidSurfaceDriver = invalidSurfaceDrivers.at(0).toObject();
+    QJsonObject invalidSurface =
+        invalidSurfaceDriver.value(QStringLiteral("floorReflection")).toObject();
+    invalidSurface.insert(QStringLiteral("surfacePreset"), QStringLiteral("unsupportedSurface"));
+    invalidSurfaceDriver.insert(QStringLiteral("floorReflection"), invalidSurface);
+    invalidSurfaceDrivers[0] = invalidSurfaceDriver;
+    invalidSurfaceProject.insert(QStringLiteral("drivers"), invalidSurfaceDrivers);
+    invalidSurfaceRoot.insert(QStringLiteral("project"), invalidSurfaceProject);
+    if (!writeTextFile(invalidFilePath,
+                       QString::fromUtf8(QJsonDocument(invalidSurfaceRoot).toJson(QJsonDocument::Indented)),
+                       errorMessage)) {
+        QTextStream(stderr) << errorMessage << '\n';
+        return 1;
+    }
+    if (KFilterProjectIo::loadFromFile(invalidFilePath,
+                                       unchanged, unchangedMeasurements, unchangedMergeEnabled,
+                                       unchangedHiddenStates, unchangedActiveFilters,
+                                       unchangedBaffleSettings, unchangedFloorReflectionSettings,
+                                       &errorMessage)) {
+        QTextStream(stderr) << "Unsupported Floor Reflection surface preset was accepted\n";
+        return 1;
+    }
+    if (!compareFloorReflectionSettings(unchangedFloorReflectionSettingsExpected,
+                                        unchangedFloorReflectionSettings,
+                                        errorMessage)) {
+        QTextStream(stderr) << "Failed surface-preset load modified destination floor metadata\n";
         return 1;
     }
 
@@ -1154,13 +1695,14 @@ int main(int argc, char** argv)
     }
 
     if (KFilterProjectIo::loadFromFile(invalidFilePath,
-                                       unchanged,
-                                       unchangedMeasurements,
-                                       unchangedMergeEnabled,
-                                       unchangedHiddenStates,
-                                       unchangedActiveFilters,
-                                       unchangedBaffleSettings,
-                                       &errorMessage)) {
+                                        unchanged,
+                                        unchangedMeasurements,
+                                        unchangedMergeEnabled,
+                                        unchangedHiddenStates,
+                                        unchangedActiveFilters,
+                                        unchangedBaffleSettings,
+                                        unchangedFloorReflectionSettings,
+                                        &errorMessage)) {
         QTextStream(stderr) << "Unsupported JSON project version was accepted\n";
         return 1;
     }
@@ -1170,7 +1712,10 @@ int main(int argc, char** argv)
         !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
                      [](bool hidden) { return hidden; }) ||
         !compareActiveFilters(unchangedActiveFiltersExpected, unchangedActiveFilters, errorMessage) ||
-        !compareBaffleSettings(unchangedBaffleSettingsExpected, unchangedBaffleSettings, errorMessage)) {
+        !compareBaffleSettings(unchangedBaffleSettingsExpected, unchangedBaffleSettings, errorMessage) ||
+        !compareFloorReflectionSettings(unchangedFloorReflectionSettingsExpected,
+                                        unchangedFloorReflectionSettings,
+                                        errorMessage)) {
         QTextStream(stderr) << "Failed JSON load modified the destination project state\n";
         return 1;
     }

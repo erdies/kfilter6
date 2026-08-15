@@ -825,6 +825,52 @@ bool checkBaffleSimulationIntegration()
         return false;
     }
 
+    // Patch 213: persisted Stage-3B side-edge treatment must enter the same
+    // centralized document cache/complex processing path as the validated
+    // direct Chamfer45 engine.
+    const BaffleResponse sharpFinite = finiteFromDocument;
+    rectangularSettings.leftEdgeTreatment = BaffleSideEdgeTreatment::Chamfer45;
+    rectangularSettings.leftChamferSetbackMm = 25.0;
+    const BaffleResponse chamferFromDocument = rectangularDocument.baffleResponse(0);
+    const BaffleResponse expectedChamfer =
+        calculateBaffleResponse(rectangularSettings, RectangularEffectiveDiameterCm);
+    bool chamferChangedResponse = false;
+    for (std::size_t sampleIndex = 0; sampleIndex < KFilterFrequencyCount; ++sampleIndex) {
+        if (std::abs(chamferFromDocument.values[sampleIndex] -
+                     expectedChamfer.values[sampleIndex]) > 1.0e-12) {
+            QTextStream(stderr) << "Document Chamfer45 response/cache path mismatch\n";
+            return false;
+        }
+        if (std::abs(chamferFromDocument.values[sampleIndex] -
+                     sharpFinite.values[sampleIndex]) > 1.0e-5) {
+            chamferChangedResponse = true;
+        }
+    }
+    if (!chamferChangedResponse) {
+        QTextStream(stderr) << "Document Chamfer45 selection did not change the response\n";
+        return false;
+    }
+
+    // Patch 220: the Rigid-floor boundary uses the same centralized document
+    // cache path. Return to Sharp, select the floor boundary, and compare the
+    // cached response against the direct production solver before restoring
+    // the previous Free-field Chamfer setup.
+    rectangularSettings.leftEdgeTreatment = BaffleSideEdgeTreatment::Sharp;
+    rectangularSettings.boundaryCondition =
+        BaffleBoundaryCondition::RigidFloorContactDiffractionOnly;
+    const BaffleResponse rigidFloorFromDocument = rectangularDocument.baffleResponse(0);
+    const BaffleResponse expectedRigidFloor =
+        calculateBaffleResponse(rectangularSettings, RectangularEffectiveDiameterCm);
+    for (std::size_t sampleIndex = 0; sampleIndex < KFilterFrequencyCount; ++sampleIndex) {
+        if (std::abs(rigidFloorFromDocument.values[sampleIndex] -
+                     expectedRigidFloor.values[sampleIndex]) > 1.0e-12) {
+            QTextStream(stderr) << "Document Rigid-floor response/cache path mismatch\n";
+            return false;
+        }
+    }
+    rectangularSettings.boundaryCondition = BaffleBoundaryCondition::FreeField;
+    rectangularSettings.leftEdgeTreatment = BaffleSideEdgeTreatment::Chamfer45;
+
     const BaffleResponse& rectangularResponse = rectangularDocument.baffleResponse(0);
     if (rectangularResponse.status != BaffleResponseStatus::Valid) {
         QTextStream(stderr) << "Valid Rectangular Edge Diffraction response was not reported\n";
@@ -890,6 +936,170 @@ bool checkBaffleSimulationIntegration()
     if (!expectNear("Baffle magnitude in energy summary",
                     phaseDocument.m_doubleXContainer[0][TestSampleIndex],
                     phaseDocument.DB(rawMagnitude * std::sqrt(1.0 + std::norm(h))),
+                    1.0e-5)) {
+        return false;
+    }
+
+    return true;
+}
+
+bool checkFloorReflectionSimulationIntegration()
+{
+    constexpr std::size_t TestSampleIndex = 60;
+
+    KFilterDoc document;
+    driver& d = document.m_driverDriver[0];
+    d.PressureisActive = true;
+
+    // Vertical source geometry is retained in BaffleSettings even when
+    // Baffle/Diffraction processing itself is disabled.
+    BaffleSettings& baffle = document.baffleSettings(0);
+    baffle.enabled = false;
+    baffle.heightMm = 965.0;
+    baffle.driverYmm = 245.0;
+
+    FloorReflectionSettings& floor = document.floorReflectionSettings(0);
+    floor.enabled = false;
+    floor.cabinetBottomAboveFloorMm = 0.0;
+    floor.listenerHeightAboveFloorMm = 1050.0;
+    floor.horizontalDistanceMm = 2500.0;
+
+    if (!document.Sound(0)) {
+        QTextStream(stderr) << "Floor Reflection baseline could not be calculated\n";
+        return false;
+    }
+    const double baselineDb = document.m_doubleXContainer[0][TestSampleIndex];
+    if (document.floorReflectionResponse(0).status != FloorReflectionResponseStatus::Neutral) {
+        QTextStream(stderr) << "Disabled Floor Reflection was not neutral in document path\n";
+        return false;
+    }
+
+    floor.enabled = true;
+    const FloorReflectionResponse response = document.floorReflectionResponse(0);
+    if (response.status != FloorReflectionResponseStatus::Valid ||
+        !expectNear("Derived product source height path difference",
+                    response.geometry.pathDifferenceM,
+                    calculateIdealRigidFloorReflectionResponse({0.72, 1.05, 2.50})
+                        .geometry.pathDifferenceM,
+                    1.0e-12)) {
+        return false;
+    }
+
+    document.Sound(0);
+    const double expectedFloorDeltaDb =
+        20.0 * std::log10(std::abs(response.values[TestSampleIndex]));
+    if (!expectNear("Single-driver productive Floor Reflection magnitude",
+                    document.m_doubleXContainer[0][TestSampleIndex] - baselineDb,
+                    expectedFloorDeltaDb,
+                    1.0e-5)) {
+        return false;
+    }
+
+    // Patch 229: selecting the Miki reference must immediately replace only
+    // H_floor in the same product path; the raw driver baseline stays unchanged.
+    floor.surfacePreset = FloorSurfacePreset::MikiReference10mm100k;
+    const FloorReflectionResponse porousResponse = document.floorReflectionResponse(0);
+    if (porousResponse.status != FloorReflectionResponseStatus::Valid ||
+        std::abs(porousResponse.values[TestSampleIndex] - response.values[TestSampleIndex]) < 1.0e-3) {
+        QTextStream(stderr) << "Productive Miki Floor Reflection did not differ from rigid reference\n";
+        return false;
+    }
+    document.Sound(0);
+    const double expectedPorousDeltaDb =
+        20.0 * std::log10(std::abs(porousResponse.values[TestSampleIndex]));
+    if (!expectNear("Single-driver productive Miki Floor Reflection magnitude",
+                    document.m_doubleXContainer[0][TestSampleIndex] - baselineDb,
+                    expectedPorousDeltaDb,
+                    1.0e-5)) {
+        return false;
+    }
+    floor.surfacePreset = FloorSurfacePreset::HardRigid;
+
+    // Invalid placement geometry bypasses H_floor only.
+    baffle.heightMm = 0.0;
+    if (document.floorReflectionResponse(0).status !=
+        FloorReflectionResponseStatus::InvalidParameters) {
+        QTextStream(stderr) << "Missing baffle height was not reported by product Floor Reflection\n";
+        return false;
+    }
+    document.Sound(0);
+    if (!expectNear("Invalid Floor Reflection geometry bypass",
+                    document.m_doubleXContainer[0][TestSampleIndex],
+                    baselineDb,
+                    1.0e-5)) {
+        return false;
+    }
+
+    // Re-enable valid geometry and the normalized rigid-floor diffraction
+    // boundary. The productive path must equal H_baffle * H_floor, with no
+    // second +6.0206 dB image-source gain.
+    baffle.enabled = true;
+    baffle.model = BaffleModel::RectangularEdgeDiffraction;
+    baffle.widthMm = 231.0;
+    baffle.heightMm = 965.0;
+    baffle.driverXmm = 115.5;
+    baffle.driverYmm = 245.0;
+    baffle.boundaryCondition = BaffleBoundaryCondition::RigidFloorContactDiffractionOnly;
+    baffle.leftEdgeTreatment = BaffleSideEdgeTreatment::Sharp;
+    baffle.rightEdgeTreatment = BaffleSideEdgeTreatment::Sharp;
+
+    const BaffleResponse& baffleResponse = document.baffleResponse(0);
+    const FloorReflectionResponse& combinedFloorResponse = document.floorReflectionResponse(0);
+    if (baffleResponse.status != BaffleResponseStatus::Valid ||
+        combinedFloorResponse.status != FloorReflectionResponseStatus::Valid) {
+        QTextStream(stderr) << "Valid rigid-floor product combination was rejected\n";
+        return false;
+    }
+    document.Sound(0);
+    const double expectedCombinedDeltaDb = 20.0 * std::log10(
+        std::abs(baffleResponse.values[TestSampleIndex] *
+                 combinedFloorResponse.values[TestSampleIndex]));
+    if (!expectNear("Rigid diffraction times productive Floor Reflection",
+                    document.m_doubleXContainer[0][TestSampleIndex] - baselineDb,
+                    expectedCombinedDeltaDb,
+                    1.0e-5)) {
+        return false;
+    }
+
+    // A second identical raw driver makes H_floor phase observable in the
+    // vector sum, while the scalar/energy sum depends only on |H_floor|.
+    KFilterDoc phaseDocument;
+    driver& reflectedDriver = phaseDocument.m_driverDriver[0];
+    driver& rawDriver = phaseDocument.m_driverDriver[1];
+    reflectedDriver.SummaryisActive = true;
+    rawDriver.SummaryisActive = true;
+    reflectedDriver.ScalarSummaryisActive = true;
+    rawDriver.ScalarSummaryisActive = true;
+
+    BaffleSettings& phaseBaffle = phaseDocument.baffleSettings(0);
+    phaseBaffle.heightMm = 965.0;
+    phaseBaffle.driverYmm = 245.0;
+    FloorReflectionSettings& phaseFloor = phaseDocument.floorReflectionSettings(0);
+    phaseFloor.enabled = true;
+    phaseFloor.listenerHeightAboveFloorMm = 1050.0;
+    phaseFloor.horizontalDistanceMm = 2500.0;
+
+    rawDriver.Schall();
+    const int resultIndex = static_cast<int>(TestSampleIndex) * 2;
+    const double rawMagnitude = std::hypot(rawDriver.ResultSchall[resultIndex],
+                                           rawDriver.ResultSchall[resultIndex + 1]);
+    const FloorReflectionResponse& phaseResponse = phaseDocument.floorReflectionResponse(0);
+    const std::complex<double> h = phaseResponse.values[TestSampleIndex];
+
+    phaseDocument.PressureSummary();
+    if (!expectNear("Floor Reflection phase in vector summary",
+                    phaseDocument.m_doubleXContainer[0][TestSampleIndex],
+                    phaseDocument.DB(rawMagnitude *
+                        std::abs(std::complex<double>{1.0, 0.0} + h)),
+                    1.0e-5)) {
+        return false;
+    }
+
+    phaseDocument.PressureScalarSummary();
+    if (!expectNear("Floor Reflection magnitude in energy summary",
+                    phaseDocument.m_doubleXContainer[0][TestSampleIndex],
+                    phaseDocument.DB(rawMagnitude *
+                        std::sqrt(1.0 + std::norm(h))),
                     1.0e-5)) {
         return false;
     }
@@ -1088,6 +1298,7 @@ int main(int argc, char** argv)
         !checkMeasurementSummaryMerge() ||
         !checkActiveFilterSimulationIntegration() ||
         !checkBaffleSimulationIntegration() ||
+        !checkFloorReflectionSimulationIntegration() ||
         !checkSelectiveMeasurementClearing() ||
         !checkSelectiveMeasurementSums()) {
         return 1;
@@ -1133,11 +1344,36 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    // Patch 191 persists the Stage-1 Baffle settings in .kfp format version 6.
+    // Baffle settings persist in the current .kfp format, including the
+    // Patch-220 boundary condition.
     original.baffleSettings(2).enabled = true;
     original.baffleSettings(2).model = BaffleModel::SimpleBaffleStep;
     original.baffleSettings(2).widthMm = 231.0;
     original.baffleSettings(2).showResponseInPlot = true;
+
+    original.baffleSettings(3).enabled = true;
+    original.baffleSettings(3).model = BaffleModel::RectangularEdgeDiffraction;
+    original.baffleSettings(3).widthMm = 231.0;
+    original.baffleSettings(3).heightMm = 965.0;
+    original.baffleSettings(3).driverXmm = 115.5;
+    original.baffleSettings(3).driverYmm = 868.5;
+    original.baffleSettings(3).boundaryCondition =
+        BaffleBoundaryCondition::RigidFloorContactDiffractionOnly;
+
+
+    // Floor Reflection placement + surface metadata are persisted per driver.
+    // Patch 229 adds the experimental Miki reference preset to this round trip.
+    original.floorReflectionSettings(1).enabled = true;
+    original.floorReflectionSettings(1).cabinetBottomAboveFloorMm = 120.0;
+    original.floorReflectionSettings(1).listenerHeightAboveFloorMm = 1075.5;
+    original.floorReflectionSettings(1).horizontalDistanceMm = 2450.25;
+    original.floorReflectionSettings(1).surfacePreset =
+        FloorSurfacePreset::MikiReference10mm100k;
+
+    original.floorReflectionSettings(3).enabled = true;
+    original.floorReflectionSettings(3).cabinetBottomAboveFloorMm = 0.0;
+    original.floorReflectionSettings(3).listenerHeightAboveFloorMm = 1050.0;
+    original.floorReflectionSettings(3).horizontalDistanceMm = 2500.0;
 
     const QString filePath = QDir::temp().filePath(QStringLiteral("kfilter_doc_smoketest.kfp"));
     const QUrl fileUrl = QUrl::fromLocalFile(filePath);
@@ -1160,8 +1396,21 @@ int main(int argc, char** argv)
 
     if (!original.baffleSettings(2).enabled ||
         !fuzzyEqual(original.baffleSettings(2).widthMm, 231.0) ||
-        !original.baffleSettings(2).showResponseInPlot) {
+        !original.baffleSettings(2).showResponseInPlot ||
+        original.baffleSettings(3).boundaryCondition !=
+            BaffleBoundaryCondition::RigidFloorContactDiffractionOnly) {
         QTextStream(stderr) << "saveDocument unexpectedly changed baffle state\n";
+        return 1;
+    }
+
+
+    if (!original.floorReflectionSettings(1).enabled ||
+        !fuzzyEqual(original.floorReflectionSettings(1).cabinetBottomAboveFloorMm, 120.0) ||
+        !fuzzyEqual(original.floorReflectionSettings(1).listenerHeightAboveFloorMm, 1075.5) ||
+        !fuzzyEqual(original.floorReflectionSettings(1).horizontalDistanceMm, 2450.25) ||
+        original.floorReflectionSettings(1).surfacePreset !=
+            FloorSurfacePreset::MikiReference10mm100k) {
+        QTextStream(stderr) << "saveDocument unexpectedly changed floor-reflection state\n";
         return 1;
     }
 
@@ -1170,6 +1419,10 @@ int main(int argc, char** argv)
     loaded.activeFilterChain(0).addSection(ActiveFilterType::Delay);
     loaded.baffleSettings(0).enabled = true;
     loaded.baffleSettings(0).widthMm = 999.0;
+    loaded.floorReflectionSettings(0).enabled = true;
+    loaded.floorReflectionSettings(0).cabinetBottomAboveFloorMm = 999.0;
+    loaded.floorReflectionSettings(0).listenerHeightAboveFloorMm = 999.0;
+    loaded.floorReflectionSettings(0).horizontalDistanceMm = 999.0;
     QObject::connect(&loaded, &KFilterDoc::forceviewrefresh, [&refreshCount]() {
         ++refreshCount;
     });
@@ -1213,9 +1466,28 @@ int main(int argc, char** argv)
             !fuzzyEqual(expected.heightMm, actual.heightMm) ||
             !fuzzyEqual(expected.driverXmm, actual.driverXmm) ||
             !fuzzyEqual(expected.driverYmm, actual.driverYmm) ||
+            expected.boundaryCondition != actual.boundaryCondition ||
             expected.showResponseInPlot != actual.showResponseInPlot ||
-            expected.edgeSourceCount != actual.edgeSourceCount) {
+            expected.edgeSourceCount != actual.edgeSourceCount ||
+            expected.leftEdgeTreatment != actual.leftEdgeTreatment ||
+            !fuzzyEqual(expected.leftChamferSetbackMm, actual.leftChamferSetbackMm) ||
+            expected.rightEdgeTreatment != actual.rightEdgeTreatment ||
+            !fuzzyEqual(expected.rightChamferSetbackMm, actual.rightChamferSetbackMm)) {
             QTextStream(stderr) << "Baffle settings were not restored for driver "
+                                << (driverIndex + 1) << '\n';
+            return 1;
+        }
+    }
+
+    for (int driverIndex = 0; driverIndex < KFilterProjectIo::DriverCount; ++driverIndex) {
+        const FloorReflectionSettings& expected = original.floorReflectionSettings(driverIndex);
+        const FloorReflectionSettings& actual = loaded.floorReflectionSettings(driverIndex);
+        if (expected.enabled != actual.enabled ||
+            !fuzzyEqual(expected.cabinetBottomAboveFloorMm, actual.cabinetBottomAboveFloorMm) ||
+            !fuzzyEqual(expected.listenerHeightAboveFloorMm, actual.listenerHeightAboveFloorMm) ||
+            !fuzzyEqual(expected.horizontalDistanceMm, actual.horizontalDistanceMm) ||
+            expected.surfacePreset != actual.surfacePreset) {
+            QTextStream(stderr) << "Floor-reflection settings were not restored for driver "
                                 << (driverIndex + 1) << '\n';
             return 1;
         }
@@ -1274,16 +1546,23 @@ int main(int argc, char** argv)
     loaded.activeFilterChain(3).addSection(ActiveFilterType::Notch);
     loaded.baffleSettings(3).enabled = true;
     loaded.baffleSettings(3).widthMm = 450.0;
+    loaded.floorReflectionSettings(3).enabled = true;
+    loaded.floorReflectionSettings(3).cabinetBottomAboveFloorMm = 500.0;
     loaded.newDocument();
     if (loaded.hasMeasurementCurves() || loaded.measurementMergeEnabled() ||
         loaded.measurementHiddenForDriver(0) || loaded.measurementHiddenForDriver(3) ||
         loaded.activeFilterChain(3).enabled() || !loaded.activeFilterChain(3).empty() ||
-        loaded.baffleSettings(3).enabled) {
-        QTextStream(stderr) << "New document did not clear measurement/active-filter/baffle state\n";
+        loaded.baffleSettings(3).enabled ||
+        loaded.floorReflectionSettings(3).enabled ||
+        !fuzzyEqual(loaded.floorReflectionSettings(3).cabinetBottomAboveFloorMm, 0.0) ||
+        !fuzzyEqual(loaded.floorReflectionSettings(3).listenerHeightAboveFloorMm, 1050.0) ||
+        !fuzzyEqual(loaded.floorReflectionSettings(3).horizontalDistanceMm, 2500.0) ||
+        loaded.floorReflectionSettings(3).surfacePreset != FloorSurfacePreset::HardRigid) {
+        QTextStream(stderr) << "New document did not clear measurement/active-filter/baffle/floor state\n";
         return 1;
     }
 
     QFile::remove(filePath);
-    QTextStream(stdout) << "KFilterDoc document, measurement, active-filter, and baffle smoke test passed\n";
+    QTextStream(stdout) << "KFilterDoc document, measurement, active-filter, baffle, and floor-metadata smoke test passed\n";
     return 0;
 }

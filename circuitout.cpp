@@ -174,7 +174,7 @@ bool driverHasActiveCurveOrTotalFlag(const driver& drv)
 int allDriversPreviewHeight(int driverCount)
 {
     const int visibleRowCount = std::max(1, driverCount);
-    return 16 + visibleRowCount * 320 + (visibleRowCount - 1) * 10;
+    return 16 + visibleRowCount * 290 + (visibleRowCount - 1) * 10;
 }
 
 struct EquivalentDriverGeometry
@@ -236,6 +236,26 @@ EquivalentDriverGeometry buildEquivalentDriverGeometry(const QRectF& rect, int s
     }
 
     return geometry;
+}
+
+QRectF speakerRadiationBounds(const QRectF& rect)
+{
+    const qreal cy = rect.center().y();
+    const qreal coneRight = rect.left() + rect.width() * 0.56;
+    const qreal arcX = coneRight + 3.0;
+    const qreal arcTop = cy - rect.height() * 0.36;
+    const qreal arcH = rect.height() * 0.72;
+
+    QRectF bounds;
+    for (int i = 0; i < 3; ++i) {
+        const qreal width = rect.width() * (0.18 + i * 0.12);
+        const QRectF arcRect(arcX + i * 2.0,
+                             arcTop - i * 3.0,
+                             width,
+                             arcH + i * 6.0);
+        bounds = bounds.isValid() ? bounds.united(arcRect) : arcRect;
+    }
+    return bounds;
 }
 }
 
@@ -573,6 +593,9 @@ void CircuitOut::paintEvent(QPaintEvent *event)
     m_sectionHits.clear();
     m_driverHits.clear();
     m_driverActivityLampHits.clear();
+    m_activeFilterHits.clear();
+    m_networkParametersHits.clear();
+    m_baffleParametersHits.clear();
 
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
@@ -660,7 +683,7 @@ void CircuitOut::drawPreview(QPainter& painter, const QRect& previewRect, Render
     const QRect outerRect = previewRect.adjusted(8, 8, -8, -8);
     const int rowGap = 10;
     const int renderDriverCount = static_cast<int>(renderIndexes.size());
-    const int previewHeight = std::max(320, (outerRect.height() - (renderDriverCount - 1) * rowGap) / renderDriverCount);
+    const int previewHeight = std::max(290, (outerRect.height() - (renderDriverCount - 1) * rowGap) / renderDriverCount);
 
     int top = outerRect.top();
     for (const int index : renderIndexes) {
@@ -684,6 +707,27 @@ void CircuitOut::mousePressEvent(QMouseEvent *event)
         DriverActivityLampHit lampHit;
         if (findDriverActivityLampHit(event->pos(), lampHit)) {
             emit driverActivityLampClicked(lampHit.driverIndex);
+            event->accept();
+            return;
+        }
+
+        ActiveFilterHit activeFilterHit;
+        if (findActiveFilterHit(event->pos(), activeFilterHit)) {
+            emit activeFilterClicked(activeFilterHit.driverIndex);
+            event->accept();
+            return;
+        }
+
+        NetworkParametersHit networkParametersHit;
+        if (findNetworkParametersHit(event->pos(), networkParametersHit)) {
+            emit networkParametersClicked(networkParametersHit.driverIndex);
+            event->accept();
+            return;
+        }
+
+        BaffleParametersHit baffleParametersHit;
+        if (findBaffleParametersHit(event->pos(), baffleParametersHit)) {
+            emit baffleParametersClicked(baffleParametersHit.driverIndex);
             event->accept();
             return;
         }
@@ -771,6 +815,42 @@ void CircuitOut::registerDriverActivityLampHit(const QRectF& bounds) const
     m_driverActivityLampHits.append(hit);
 }
 
+void CircuitOut::registerActiveFilterHit(const QRectF& bounds) const
+{
+    if (printRenderStyle() || !bounds.isValid() || bounds.isEmpty()) {
+        return;
+    }
+
+    ActiveFilterHit hit;
+    hit.bounds = bounds;
+    hit.driverIndex = std::clamp(m_driverNumber - 1, 0, 3);
+    m_activeFilterHits.append(hit);
+}
+
+void CircuitOut::registerNetworkParametersHit(const QRectF& bounds) const
+{
+    if (printRenderStyle() || !bounds.isValid() || bounds.isEmpty()) {
+        return;
+    }
+
+    NetworkParametersHit hit;
+    hit.bounds = bounds;
+    hit.driverIndex = std::clamp(m_driverNumber - 1, 0, 3);
+    m_networkParametersHits.append(hit);
+}
+
+void CircuitOut::registerBaffleParametersHit(const QRectF& bounds) const
+{
+    if (printRenderStyle() || !bounds.isValid() || bounds.isEmpty()) {
+        return;
+    }
+
+    BaffleParametersHit hit;
+    hit.bounds = bounds;
+    hit.driverIndex = std::clamp(m_driverNumber - 1, 0, 3);
+    m_baffleParametersHits.append(hit);
+}
+
 bool CircuitOut::findSectionHit(const QPoint& position, NetworkSectionHit& hit) const
 {
     for (auto it = m_sectionHits.crbegin(); it != m_sectionHits.crend(); ++it) {
@@ -784,6 +864,11 @@ bool CircuitOut::findSectionHit(const QPoint& position, NetworkSectionHit& hit) 
 
 bool CircuitOut::findDriverHit(const QPoint& position, DriverHit& hit) const
 {
+    BaffleParametersHit baffleHit;
+    if (findBaffleParametersHit(position, baffleHit)) {
+        return false;
+    }
+
     for (auto it = m_driverHits.crbegin(); it != m_driverHits.crend(); ++it) {
         if (it->bounds.contains(position)) {
             hit = *it;
@@ -796,6 +881,39 @@ bool CircuitOut::findDriverHit(const QPoint& position, DriverHit& hit) const
 bool CircuitOut::findDriverActivityLampHit(const QPoint& position, DriverActivityLampHit& hit) const
 {
     for (auto it = m_driverActivityLampHits.crbegin(); it != m_driverActivityLampHits.crend(); ++it) {
+        if (it->bounds.contains(position)) {
+            hit = *it;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool CircuitOut::findActiveFilterHit(const QPoint& position, ActiveFilterHit& hit) const
+{
+    for (auto it = m_activeFilterHits.crbegin(); it != m_activeFilterHits.crend(); ++it) {
+        if (it->bounds.contains(position)) {
+            hit = *it;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool CircuitOut::findNetworkParametersHit(const QPoint& position, NetworkParametersHit& hit) const
+{
+    for (auto it = m_networkParametersHits.crbegin(); it != m_networkParametersHits.crend(); ++it) {
+        if (it->bounds.contains(position)) {
+            hit = *it;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool CircuitOut::findBaffleParametersHit(const QPoint& position, BaffleParametersHit& hit) const
+{
+    for (auto it = m_baffleParametersHits.crbegin(); it != m_baffleParametersHits.crend(); ++it) {
         if (it->bounds.contains(position)) {
             hit = *it;
             return true;
@@ -821,6 +939,21 @@ bool CircuitOut::sameDriverActivityLampHit(const DriverActivityLampHit& lhs, con
     return lhs.driverIndex == rhs.driverIndex;
 }
 
+bool CircuitOut::sameActiveFilterHit(const ActiveFilterHit& lhs, const ActiveFilterHit& rhs) const
+{
+    return lhs.driverIndex == rhs.driverIndex;
+}
+
+bool CircuitOut::sameNetworkParametersHit(const NetworkParametersHit& lhs, const NetworkParametersHit& rhs) const
+{
+    return lhs.driverIndex == rhs.driverIndex;
+}
+
+bool CircuitOut::sameBaffleParametersHit(const BaffleParametersHit& lhs, const BaffleParametersHit& rhs) const
+{
+    return lhs.driverIndex == rhs.driverIndex;
+}
+
 void CircuitOut::updateHoverHit(const QPoint& position)
 {
     DriverActivityLampHit lampHit;
@@ -831,6 +964,45 @@ void CircuitOut::updateHoverHit(const QPoint& position)
             m_hoverDriverActivityLampHit = lampHit;
             m_hoverHitKind = HoverHitKind::DriverActivityLamp;
             emit networkSectionHoverLeft();
+        }
+        return;
+    }
+
+    ActiveFilterHit activeFilterHit;
+    if (findActiveFilterHit(position, activeFilterHit)) {
+        setCursor(Qt::PointingHandCursor);
+        if (m_hoverHitKind != HoverHitKind::ActiveFilter ||
+            !sameActiveFilterHit(m_hoverActiveFilterHit, activeFilterHit)) {
+            m_hoverActiveFilterHit = activeFilterHit;
+            m_hoverHitKind = HoverHitKind::ActiveFilter;
+            emit networkSectionHoverLeft();
+            emit activeFilterHovered(activeFilterHit.driverIndex);
+        }
+        return;
+    }
+
+    NetworkParametersHit networkParametersHit;
+    if (findNetworkParametersHit(position, networkParametersHit)) {
+        setCursor(Qt::PointingHandCursor);
+        if (m_hoverHitKind != HoverHitKind::NetworkParameters ||
+            !sameNetworkParametersHit(m_hoverNetworkParametersHit, networkParametersHit)) {
+            m_hoverNetworkParametersHit = networkParametersHit;
+            m_hoverHitKind = HoverHitKind::NetworkParameters;
+            emit networkSectionHoverLeft();
+            emit networkParametersHovered(networkParametersHit.driverIndex);
+        }
+        return;
+    }
+
+    BaffleParametersHit baffleParametersHit;
+    if (findBaffleParametersHit(position, baffleParametersHit)) {
+        setCursor(Qt::PointingHandCursor);
+        if (m_hoverHitKind != HoverHitKind::BaffleParameters ||
+            !sameBaffleParametersHit(m_hoverBaffleParametersHit, baffleParametersHit)) {
+            m_hoverBaffleParametersHit = baffleParametersHit;
+            m_hoverHitKind = HoverHitKind::BaffleParameters;
+            emit networkSectionHoverLeft();
+            emit baffleParametersHovered(baffleParametersHit.driverIndex);
         }
         return;
     }
@@ -1016,6 +1188,14 @@ void CircuitOut::drawCurrentDriverPreview(QPainter& painter, const QRect& previe
     painter.drawText(titleLeft, drawingRect.top(), titleWidth, 22,
                      Qt::AlignLeft | Qt::AlignVCenter, visibleTitle);
 
+    const int activeFilterHitLeft = titleLeft + titleWidth;
+    if (activeFilterHitLeft < drawingRect.right()) {
+        registerActiveFilterHit(QRectF(activeFilterHitLeft,
+                                       drawingRect.top(),
+                                       drawingRect.right() - activeFilterHitLeft,
+                                       22.0));
+    }
+
     if (statusWidth > 0) {
         painter.setFont(oldFont);
         painter.setPen(QPen(secondaryInkColor(), 1.0));
@@ -1054,6 +1234,15 @@ void CircuitOut::drawCurrentDriverPreview(QPainter& painter, const QRect& previe
     const qreal sourceX = circuitLeft - 28;
     painter.drawLine(QPointF(sourceX, signalY), QPointF(circuitLeft, signalY));
     painter.drawLine(QPointF(sourceX, returnY), QPointF(networkRight + 22, returnY));
+
+    const qreal sourceAvailableHeight = std::max<qreal>(24.0, returnY - signalY);
+    const qreal sourceRadius = std::min<qreal>(18.0, sourceAvailableHeight * 0.22);
+    const qreal sourceCenterY = (signalY + returnY) / 2.0;
+    registerNetworkParametersHit(QRectF(sourceX - sourceRadius,
+                                        sourceCenterY - sourceRadius,
+                                        2.0 * sourceRadius,
+                                        2.0 * sourceRadius)
+                                     .adjusted(-6.0, -6.0, 6.0, 6.0));
     drawAcSource(painter, sourceX, signalY, returnY);
     drawGround(painter, QPointF(sourceX, returnY));
     painter.setPen(QPen(primaryInkColor(), 1.2));
@@ -1178,7 +1367,7 @@ void CircuitOut::drawSection(QPainter& painter, int section, int x0, int x1, int
     }
 
     painter.setPen(QPen(secondaryInkColor(), 1));
-    painter.drawText(QRectF(x0, signalY - 54, x1 - x0, 14), Qt::AlignCenter, tr("%1").arg(section + 1));
+    painter.drawText(QRectF(x0, signalY - 49, x1 - x0, 14), Qt::AlignCenter, tr("%1").arg(section + 1));
 }
 
 void CircuitOut::drawSeriesPath(QPainter& painter, int section, int x0, int x1, int signalY) const
@@ -1686,6 +1875,7 @@ void CircuitOut::drawSpeakerSymbol(QPainter& painter, const QRectF& rect) const
     const qreal arcX = coneRight + 3;
     const qreal arcTop = cy - rect.height() * 0.36;
     const qreal arcH = rect.height() * 0.72;
+    registerBaffleParametersHit(speakerRadiationBounds(rect).adjusted(-3.0, -4.0, 3.0, 4.0));
     for (int i = 0; i < 3; ++i) {
         const qreal w = rect.width() * (0.18 + i * 0.12);
         const QRectF arcRect(arcX + i * 2.0, arcTop - i * 3.0, w, arcH + i * 6.0);

@@ -417,8 +417,84 @@ bool baffleModelFromString(const QString& value, BaffleModel& model)
     return true;
 }
 
+QString baffleSideEdgeTreatmentToString(BaffleSideEdgeTreatment treatment)
+{
+    switch (treatment) {
+    case BaffleSideEdgeTreatment::Sharp:
+        return QStringLiteral("sharp");
+    case BaffleSideEdgeTreatment::Chamfer45:
+        return QStringLiteral("chamfer45");
+    }
+
+    return {};
+}
+
+bool baffleSideEdgeTreatmentFromString(const QString& value,
+                                       BaffleSideEdgeTreatment& treatment)
+{
+    if (value == QStringLiteral("sharp")) {
+        treatment = BaffleSideEdgeTreatment::Sharp;
+    } else if (value == QStringLiteral("chamfer45")) {
+        treatment = BaffleSideEdgeTreatment::Chamfer45;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+QString baffleBoundaryConditionToString(BaffleBoundaryCondition condition)
+{
+    switch (condition) {
+    case BaffleBoundaryCondition::FreeField:
+        return QStringLiteral("freeField");
+    case BaffleBoundaryCondition::RigidFloorContactDiffractionOnly:
+        return QStringLiteral("rigidFloorContactDiffractionOnly");
+    }
+
+    return {};
+}
+
+bool baffleBoundaryConditionFromString(const QString& value,
+                                       BaffleBoundaryCondition& condition)
+{
+    if (value == QStringLiteral("freeField")) {
+        condition = BaffleBoundaryCondition::FreeField;
+    } else if (value == QStringLiteral("rigidFloorContactDiffractionOnly")) {
+        condition = BaffleBoundaryCondition::RigidFloorContactDiffractionOnly;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+QString floorSurfacePresetToString(FloorSurfacePreset preset)
+{
+    switch (preset) {
+    case FloorSurfacePreset::HardRigid:
+        return QStringLiteral("hardRigid");
+    case FloorSurfacePreset::MikiReference10mm100k:
+        return QStringLiteral("mikiReference10mm100k");
+    }
+
+    return {};
+}
+
+bool floorSurfacePresetFromString(const QString& value, FloorSurfacePreset& preset)
+{
+    if (value == QStringLiteral("hardRigid")) {
+        preset = FloorSurfacePreset::HardRigid;
+        return true;
+    }
+    if (value == QStringLiteral("mikiReference10mm100k")) {
+        preset = FloorSurfacePreset::MikiReference10mm100k;
+        return true;
+    }
+    return false;
+}
+
 bool jsonToBaffleSettings(const QJsonObject& driverObject,
                           BaffleSettings& settings,
+                          int formatVersion,
                           const QString& driverContext,
                           QString* errorMessage)
 {
@@ -460,17 +536,88 @@ bool jsonToBaffleSettings(const QJsonObject& driverObject,
     }
     parsed.edgeSourceCount = static_cast<std::size_t>(edgeSourceCount);
 
+    if (formatVersion >= 8) {
+        QString boundaryString;
+        if (!readRequiredString(baffleObject, QStringLiteral("boundaryCondition"),
+                                boundaryString, context, errorMessage)) {
+            return false;
+        }
+        if (!baffleBoundaryConditionFromString(boundaryString, parsed.boundaryCondition)) {
+            setError(errorMessage,
+                     QStringLiteral("Unsupported baffle boundary condition '%1' in '%2.boundaryCondition'.")
+                         .arg(boundaryString, context));
+            return false;
+        }
+    }
+
+    if (formatVersion >= 7) {
+        QString leftTreatmentString;
+        QString rightTreatmentString;
+        if (!readRequiredString(baffleObject, QStringLiteral("leftEdgeTreatment"),
+                                leftTreatmentString, context, errorMessage) ||
+            !readRequiredDouble(baffleObject, QStringLiteral("leftChamferSetbackMm"),
+                                parsed.leftChamferSetbackMm, context, errorMessage) ||
+            !readRequiredString(baffleObject, QStringLiteral("rightEdgeTreatment"),
+                                rightTreatmentString, context, errorMessage) ||
+            !readRequiredDouble(baffleObject, QStringLiteral("rightChamferSetbackMm"),
+                                parsed.rightChamferSetbackMm, context, errorMessage)) {
+            return false;
+        }
+        if (!baffleSideEdgeTreatmentFromString(leftTreatmentString, parsed.leftEdgeTreatment)) {
+            setError(errorMessage,
+                     QStringLiteral("Unsupported left edge treatment '%1' in '%2.leftEdgeTreatment'.")
+                         .arg(leftTreatmentString, context));
+            return false;
+        }
+        if (!baffleSideEdgeTreatmentFromString(rightTreatmentString, parsed.rightEdgeTreatment)) {
+            setError(errorMessage,
+                     QStringLiteral("Unsupported right edge treatment '%1' in '%2.rightEdgeTreatment'.")
+                         .arg(rightTreatmentString, context));
+            return false;
+        }
+    }
+
     if (parsed.widthMm <= 0.0) {
         setError(errorMessage, QStringLiteral("Field '%1.widthMm' must be greater than zero.").arg(context));
         return false;
     }
+    if (!std::isfinite(parsed.leftChamferSetbackMm) ||
+        !std::isfinite(parsed.rightChamferSetbackMm) ||
+        parsed.leftChamferSetbackMm < 0.0 ||
+        parsed.rightChamferSetbackMm < 0.0 ||
+        (parsed.leftEdgeTreatment == BaffleSideEdgeTreatment::Chamfer45 &&
+         parsed.leftChamferSetbackMm < 5.0) ||
+        (parsed.rightEdgeTreatment == BaffleSideEdgeTreatment::Chamfer45 &&
+         parsed.rightChamferSetbackMm < 5.0)) {
+        setError(errorMessage,
+                 QStringLiteral("Chamfer metadata in '%1' is invalid; active 45-degree chamfers must be at least 5 mm and setbacks must be finite/non-negative.")
+                     .arg(context));
+        return false;
+    }
     if (parsed.model == BaffleModel::RectangularEdgeDiffraction) {
+        if (parsed.boundaryCondition == BaffleBoundaryCondition::RigidFloorContactDiffractionOnly &&
+            (parsed.leftEdgeTreatment != BaffleSideEdgeTreatment::Sharp ||
+             parsed.rightEdgeTreatment != BaffleSideEdgeTreatment::Sharp)) {
+            setError(errorMessage,
+                     QStringLiteral("Rigid floor contact in '%1' currently supports Sharp side edges only.")
+                         .arg(context));
+            return false;
+        }
+        const double leftSetback = parsed.leftEdgeTreatment == BaffleSideEdgeTreatment::Chamfer45
+                                       ? parsed.leftChamferSetbackMm
+                                       : 0.0;
+        const double rightSetback = parsed.rightEdgeTreatment == BaffleSideEdgeTreatment::Chamfer45
+                                        ? parsed.rightChamferSetbackMm
+                                        : 0.0;
         if (parsed.heightMm <= 0.0 ||
             parsed.driverXmm <= 0.0 || parsed.driverXmm >= parsed.widthMm ||
             parsed.driverYmm <= 0.0 || parsed.driverYmm >= parsed.heightMm ||
-            parsed.edgeSourceCount < 4) {
+            parsed.edgeSourceCount < 4 ||
+            leftSetback + rightSetback >= parsed.widthMm ||
+            parsed.driverXmm <= leftSetback ||
+            parsed.driverXmm >= parsed.widthMm - rightSetback) {
             setError(errorMessage,
-                     QStringLiteral("Rectangular geometry in '%1' is invalid; the driver centre must lie strictly inside the baffle and edgeSourceCount must be at least 4.")
+                     QStringLiteral("Rectangular geometry in '%1' is invalid; the driver centre must lie on the flat front surface, active 45-degree chamfers must be at least 5 mm, opposing chamfers must leave front width, and edgeSourceCount must be at least 4.")
                          .arg(context));
             return false;
         }
@@ -1191,6 +1338,11 @@ bool jsonToMeasurementSettings(const QJsonObject& project,
                             errorMessage);
 }
 
+bool jsonToFloorReflectionSettings(const QJsonObject& driverObject,
+                                   FloorReflectionSettings& settings,
+                                   const QString& driverContext,
+                                   QString* errorMessage);
+
 bool loadJsonProject(const QByteArray& data,
                      driver (&drivers)[KFilterProjectIo::DriverCount],
                      KFilterProjectIo::MeasurementCurves& splCorrectionCurves,
@@ -1198,12 +1350,14 @@ bool loadJsonProject(const QByteArray& data,
                      KFilterProjectIo::MeasurementHiddenStates& measurementHiddenForDrivers,
                      KFilterProjectIo::ActiveFilterChains& activeFilterChains,
                      KFilterProjectIo::BaffleSettingsPerDriver& baffleSettings,
+                     KFilterProjectIo::FloorReflectionSettingsPerDriver& floorReflectionSettings,
                      QString* errorMessage)
 {
     mergeMeasurementsEnabled = false;
     measurementHiddenForDrivers.fill(false);
     activeFilterChains = KFilterProjectIo::ActiveFilterChains{};
     baffleSettings = KFilterProjectIo::BaffleSettingsPerDriver{};
+    floorReflectionSettings = KFilterProjectIo::FloorReflectionSettingsPerDriver{};
 
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(data, &parseError);
@@ -1340,6 +1494,16 @@ bool loadJsonProject(const QByteArray& data,
             !jsonToBaffleSettings(
                 entry,
                 baffleSettings[static_cast<std::size_t>(driverIndex)],
+                formatVersion,
+                driverContext,
+                errorMessage)) {
+            return false;
+        }
+
+        if (formatVersion >= 9 &&
+            !jsonToFloorReflectionSettings(
+                entry,
+                floorReflectionSettings[static_cast<std::size_t>(driverIndex)],
                 driverContext,
                 errorMessage)) {
             return false;
@@ -1353,6 +1517,58 @@ bool loadJsonProject(const QByteArray& data,
         }
     }
 
+    return true;
+}
+
+bool jsonToFloorReflectionSettings(const QJsonObject& driverObject,
+                                   FloorReflectionSettings& settings,
+                                   const QString& driverContext,
+                                   QString* errorMessage)
+{
+    QJsonObject floorObject;
+    if (!readObject(driverObject,
+                    QStringLiteral("floorReflection"),
+                    floorObject,
+                    driverContext,
+                    errorMessage)) {
+        return false;
+    }
+
+    const QString context = driverContext + QStringLiteral(".floorReflection");
+    FloorReflectionSettings parsed;
+    QString surfaceString;
+    if (!readRequiredBool(floorObject, QStringLiteral("enabled"), parsed.enabled, context, errorMessage) ||
+        !readRequiredDouble(floorObject, QStringLiteral("cabinetBottomAboveFloorMm"),
+                            parsed.cabinetBottomAboveFloorMm, context, errorMessage) ||
+        !readRequiredDouble(floorObject, QStringLiteral("listenerHeightAboveFloorMm"),
+                            parsed.listenerHeightAboveFloorMm, context, errorMessage) ||
+        !readRequiredDouble(floorObject, QStringLiteral("horizontalDistanceMm"),
+                            parsed.horizontalDistanceMm, context, errorMessage) ||
+        !readRequiredString(floorObject, QStringLiteral("surfacePreset"),
+                            surfaceString, context, errorMessage)) {
+        return false;
+    }
+
+    if (!floorSurfacePresetFromString(surfaceString, parsed.surfacePreset)) {
+        setError(errorMessage,
+                 QStringLiteral("Unsupported floor surface preset '%1' in '%2.surfacePreset'.")
+                     .arg(surfaceString, context));
+        return false;
+    }
+
+    if (!std::isfinite(parsed.cabinetBottomAboveFloorMm) ||
+        !std::isfinite(parsed.listenerHeightAboveFloorMm) ||
+        !std::isfinite(parsed.horizontalDistanceMm) ||
+        parsed.cabinetBottomAboveFloorMm < 0.0 ||
+        parsed.listenerHeightAboveFloorMm < 0.0 ||
+        parsed.horizontalDistanceMm < 0.0) {
+        setError(errorMessage,
+                 QStringLiteral("Floor-reflection placement fields in '%1' must be finite and non-negative.")
+                     .arg(context));
+        return false;
+    }
+
+    settings = parsed;
     return true;
 }
 
@@ -1539,8 +1755,16 @@ QJsonObject baffleSettingsToJson(const BaffleSettings& settings)
     baffle.insert(QStringLiteral("heightMm"), settings.heightMm);
     baffle.insert(QStringLiteral("driverXmm"), settings.driverXmm);
     baffle.insert(QStringLiteral("driverYmm"), settings.driverYmm);
+    baffle.insert(QStringLiteral("boundaryCondition"),
+                  baffleBoundaryConditionToString(settings.boundaryCondition));
     baffle.insert(QStringLiteral("showResponseInPlot"), settings.showResponseInPlot);
     baffle.insert(QStringLiteral("edgeSourceCount"), static_cast<int>(settings.edgeSourceCount));
+    baffle.insert(QStringLiteral("leftEdgeTreatment"),
+                  baffleSideEdgeTreatmentToString(settings.leftEdgeTreatment));
+    baffle.insert(QStringLiteral("leftChamferSetbackMm"), settings.leftChamferSetbackMm);
+    baffle.insert(QStringLiteral("rightEdgeTreatment"),
+                  baffleSideEdgeTreatmentToString(settings.rightEdgeTreatment));
+    baffle.insert(QStringLiteral("rightChamferSetbackMm"), settings.rightChamferSetbackMm);
     return baffle;
 }
 
@@ -1560,7 +1784,9 @@ bool validateBaffleSettings(const BaffleSettings& settings,
     if (!requireFinite(settings.widthMm, QStringLiteral("widthMm")) ||
         !requireFinite(settings.heightMm, QStringLiteral("heightMm")) ||
         !requireFinite(settings.driverXmm, QStringLiteral("driverXmm")) ||
-        !requireFinite(settings.driverYmm, QStringLiteral("driverYmm"))) {
+        !requireFinite(settings.driverYmm, QStringLiteral("driverYmm")) ||
+        !requireFinite(settings.leftChamferSetbackMm, QStringLiteral("leftChamferSetbackMm")) ||
+        !requireFinite(settings.rightChamferSetbackMm, QStringLiteral("rightChamferSetbackMm"))) {
         return false;
     }
     if (settings.widthMm <= 0.0) {
@@ -1571,25 +1797,105 @@ bool validateBaffleSettings(const BaffleSettings& settings,
         setError(errorMessage, QStringLiteral("%1 edgeSourceCount must be between 1 and 100000.").arg(context));
         return false;
     }
+    if (settings.leftChamferSetbackMm < 0.0 || settings.rightChamferSetbackMm < 0.0) {
+        setError(errorMessage, QStringLiteral("%1 chamfer setbacks must not be negative.").arg(context));
+        return false;
+    }
+    if ((settings.leftEdgeTreatment != BaffleSideEdgeTreatment::Sharp &&
+         settings.leftEdgeTreatment != BaffleSideEdgeTreatment::Chamfer45) ||
+        (settings.rightEdgeTreatment != BaffleSideEdgeTreatment::Sharp &&
+         settings.rightEdgeTreatment != BaffleSideEdgeTreatment::Chamfer45)) {
+        setError(errorMessage, QStringLiteral("%1 contains an unsupported side-edge treatment.").arg(context));
+        return false;
+    }
+    if ((settings.leftEdgeTreatment == BaffleSideEdgeTreatment::Chamfer45 &&
+         settings.leftChamferSetbackMm < 5.0) ||
+        (settings.rightEdgeTreatment == BaffleSideEdgeTreatment::Chamfer45 &&
+         settings.rightChamferSetbackMm < 5.0)) {
+        setError(errorMessage, QStringLiteral("%1 active 45-degree chamfers must be at least 5 mm.").arg(context));
+        return false;
+    }
+    if (settings.boundaryCondition != BaffleBoundaryCondition::FreeField &&
+        settings.boundaryCondition != BaffleBoundaryCondition::RigidFloorContactDiffractionOnly) {
+        setError(errorMessage, QStringLiteral("%1 contains an unsupported boundary condition.").arg(context));
+        return false;
+    }
 
     switch (settings.model) {
     case BaffleModel::SimpleBaffleStep:
         return true;
-    case BaffleModel::RectangularEdgeDiffraction:
+    case BaffleModel::RectangularEdgeDiffraction: {
+        if (settings.boundaryCondition == BaffleBoundaryCondition::RigidFloorContactDiffractionOnly &&
+            (settings.leftEdgeTreatment != BaffleSideEdgeTreatment::Sharp ||
+             settings.rightEdgeTreatment != BaffleSideEdgeTreatment::Sharp)) {
+            setError(errorMessage,
+                     QStringLiteral("%1 Rigid floor contact currently supports Sharp side edges only.")
+                         .arg(context));
+            return false;
+        }
+        const double leftSetback =
+            settings.leftEdgeTreatment == BaffleSideEdgeTreatment::Chamfer45
+                ? settings.leftChamferSetbackMm
+                : 0.0;
+        const double rightSetback =
+            settings.rightEdgeTreatment == BaffleSideEdgeTreatment::Chamfer45
+                ? settings.rightChamferSetbackMm
+                : 0.0;
         if (settings.heightMm <= 0.0 ||
             settings.driverXmm <= 0.0 || settings.driverXmm >= settings.widthMm ||
             settings.driverYmm <= 0.0 || settings.driverYmm >= settings.heightMm ||
-            settings.edgeSourceCount < 4) {
+            settings.edgeSourceCount < 4 ||
+            leftSetback + rightSetback >= settings.widthMm ||
+            settings.driverXmm <= leftSetback ||
+            settings.driverXmm >= settings.widthMm - rightSetback) {
             setError(errorMessage,
-                     QStringLiteral("%1 rectangular geometry is invalid; the driver centre must lie strictly inside the baffle and edgeSourceCount must be at least 4.")
+                     QStringLiteral("%1 rectangular geometry is invalid; the driver centre must lie on the flat front surface, opposing chamfers must leave front width, and edgeSourceCount must be at least 4.")
                          .arg(context));
             return false;
         }
         return true;
     }
+    }
 
     setError(errorMessage, QStringLiteral("%1 contains an unsupported model value.").arg(context));
     return false;
+}
+
+
+QJsonObject floorReflectionSettingsToJson(const FloorReflectionSettings& settings)
+{
+    QJsonObject floor;
+    floor.insert(QStringLiteral("enabled"), settings.enabled);
+    floor.insert(QStringLiteral("cabinetBottomAboveFloorMm"), settings.cabinetBottomAboveFloorMm);
+    floor.insert(QStringLiteral("listenerHeightAboveFloorMm"), settings.listenerHeightAboveFloorMm);
+    floor.insert(QStringLiteral("horizontalDistanceMm"), settings.horizontalDistanceMm);
+    floor.insert(QStringLiteral("surfacePreset"), floorSurfacePresetToString(settings.surfacePreset));
+    return floor;
+}
+
+bool validateFloorReflectionSettings(const FloorReflectionSettings& settings,
+                                     int driverIndex,
+                                     QString* errorMessage)
+{
+    const QString context = QStringLiteral("Driver %1 floor-reflection settings").arg(driverIndex + 1);
+    if (!std::isfinite(settings.cabinetBottomAboveFloorMm) ||
+        !std::isfinite(settings.listenerHeightAboveFloorMm) ||
+        !std::isfinite(settings.horizontalDistanceMm)) {
+        setError(errorMessage, QStringLiteral("%1 placement fields must be finite.").arg(context));
+        return false;
+    }
+    if (settings.cabinetBottomAboveFloorMm < 0.0 ||
+        settings.listenerHeightAboveFloorMm < 0.0 ||
+        settings.horizontalDistanceMm < 0.0) {
+        setError(errorMessage, QStringLiteral("%1 placement fields must not be negative.").arg(context));
+        return false;
+    }
+    if (settings.surfacePreset != FloorSurfacePreset::HardRigid &&
+        settings.surfacePreset != FloorSurfacePreset::MikiReference10mm100k) {
+        setError(errorMessage, QStringLiteral("%1 contains an unsupported surface preset.").arg(context));
+        return false;
+    }
+    return true;
 }
 
 bool validateActiveFilterSection(const ActiveFilterSection& section,
@@ -1811,6 +2117,7 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
                                     MeasurementHiddenStates& measurementHiddenForDrivers,
                                     ActiveFilterChains& activeFilterChains,
                                     BaffleSettingsPerDriver& baffleSettings,
+                                    FloorReflectionSettingsPerDriver& floorReflectionSettings,
                                     QString* errorMessage)
 {
     QFile file(filePath);
@@ -1834,6 +2141,7 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
     MeasurementHiddenStates parsedMeasurementHiddenForDrivers{};
     ActiveFilterChains parsedActiveFilterChains{};
     BaffleSettingsPerDriver parsedBaffleSettings{};
+    FloorReflectionSettingsPerDriver parsedFloorReflectionSettings{};
     const char firstByte = data.at(firstByteIndex);
     const bool isJson = firstByte == '{' || firstByte == '[';
     const QByteArray significantData = data.mid(firstByteIndex);
@@ -1845,6 +2153,7 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
                           parsedMeasurementHiddenForDrivers,
                           parsedActiveFilterChains,
                           parsedBaffleSettings,
+                          parsedFloorReflectionSettings,
                           errorMessage)
         : loadLegacyProject(significantData, parsedDrivers, errorMessage);
     if (!loaded) {
@@ -1865,6 +2174,7 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
                     [](const KFilterMeasurementCurve& curve) { return curve.size() >= 2; });
     activeFilterChains = parsedActiveFilterChains;
     baffleSettings = parsedBaffleSettings;
+    floorReflectionSettings = parsedFloorReflectionSettings;
 
     return true;
 }
@@ -1876,6 +2186,7 @@ bool KFilterProjectIo::saveToFile(const QString& filePath,
                                   const MeasurementHiddenStates& measurementHiddenForDrivers,
                                   const ActiveFilterChains& activeFilterChains,
                                   const BaffleSettingsPerDriver& baffleSettings,
+                                  const FloorReflectionSettingsPerDriver& floorReflectionSettings,
                                   QString* errorMessage)
 {
     QJsonArray driverArray;
@@ -1891,6 +2202,10 @@ bool KFilterProjectIo::saveToFile(const QString& filePath,
                 errorMessage) ||
             !validateBaffleSettings(
                 baffleSettings[static_cast<std::size_t>(driverIndex)],
+                driverIndex,
+                errorMessage) ||
+            !validateFloorReflectionSettings(
+                floorReflectionSettings[static_cast<std::size_t>(driverIndex)],
                 driverIndex,
                 errorMessage)) {
             return false;
@@ -1911,6 +2226,10 @@ bool KFilterProjectIo::saveToFile(const QString& filePath,
         driverObject.insert(
             QStringLiteral("baffle"),
             baffleSettingsToJson(baffleSettings[static_cast<std::size_t>(driverIndex)]));
+        driverObject.insert(
+            QStringLiteral("floorReflection"),
+            floorReflectionSettingsToJson(
+                floorReflectionSettings[static_cast<std::size_t>(driverIndex)]));
         driverArray.append(driverObject);
     }
 

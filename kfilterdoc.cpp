@@ -17,10 +17,6 @@
 #include <cmath>
 #include <cstddef>
 
-#ifdef KFILTER_ENABLE_LEGACY_UI
-#include "kfilterview.h"
-#endif
-
 namespace
 {
 QString localFilePathFromUrl(const QUrl& url)
@@ -39,18 +35,11 @@ QString localFilePathFromUrl(const QUrl& url)
 constexpr int PressureSampleCount = static_cast<int>(KFilterFrequencyCount);
 }
 
-QList<KFilterView*> *KFilterDoc::pViewList = nullptr;
-
 KFilterDoc::KFilterDoc(QObject *parent, const char *name)
     : QObject(parent)
 {
   if (name != nullptr) {
     setObjectName(QString::fromLatin1(name));
-  }
-
-  if(!pViewList)
-  {
-    pViewList = new QList<KFilterView*>();
   }
 }
 
@@ -322,17 +311,34 @@ const BaffleResponse& KFilterDoc::baffleResponse(int driverIndex) const
       m_driverDriver[index].getDm());
 }
 
-void KFilterDoc::addView(KFilterView *view)
+FloorReflectionSettings& KFilterDoc::floorReflectionSettings(int driverIndex)
 {
-  if (view != nullptr) {
-    pViewList->append(view);
-  }
+  return m_floorReflectionSettings.at(static_cast<std::size_t>(driverIndex));
 }
 
-void KFilterDoc::removeView(KFilterView *view)
+const FloorReflectionSettings& KFilterDoc::floorReflectionSettings(int driverIndex) const
 {
-  pViewList->removeAll(view);
+  return m_floorReflectionSettings.at(static_cast<std::size_t>(driverIndex));
 }
+
+KFilterDoc::FloorReflectionSettingsPerDriver& KFilterDoc::floorReflectionSettingsPerDriver()
+{
+  return m_floorReflectionSettings;
+}
+
+const KFilterDoc::FloorReflectionSettingsPerDriver& KFilterDoc::floorReflectionSettingsPerDriver() const
+{
+  return m_floorReflectionSettings;
+}
+
+const FloorReflectionResponse& KFilterDoc::floorReflectionResponse(int driverIndex) const
+{
+  const std::size_t index = static_cast<std::size_t>(driverIndex);
+  return m_floorReflectionResponseCaches.at(index).responseFor(
+      m_floorReflectionSettings.at(index),
+      m_baffleSettings.at(index));
+}
+
 void KFilterDoc::setURL(const QUrl &url)
 {
   doc_url=url;
@@ -341,33 +347,6 @@ void KFilterDoc::setURL(const QUrl &url)
 const QUrl& KFilterDoc::URL() const
 {
   return doc_url;
-}
-
-void KFilterDoc::slotUpdateAllViews(KFilterView *sender)
-{
-#ifdef KFILTER_ENABLE_LEGACY_UI
-  if(pViewList)
-  {
-    for(KFilterView *w : *pViewList)
-    {
-      if(w!=sender)
-        w->repaint();
-    }
-  }
-#else
-  Q_UNUSED(sender);
-#endif
-}
-
-bool KFilterDoc::saveModified()
-{
-  if (!modified) {
-    return true;
-  }
-
-  // The interactive save prompt depends on the legacy KDE3 main window and is
-  // intentionally disabled until the application shell has been ported.
-  return false;
 }
 
 void KFilterDoc::closeDocument()
@@ -402,6 +381,7 @@ bool KFilterDoc::openDocument(const QUrl& url, const char *format /*=nullptr*/)
                                       m_measurementHiddenForDrivers,
                                       m_activeFilterChains,
                                       m_baffleSettings,
+                                      m_floorReflectionSettings,
                                       &errorMessage)) {
     qWarning().noquote() << errorMessage;
     return false;
@@ -430,6 +410,7 @@ bool KFilterDoc::saveDocument(const QUrl& url, const char *format /*=nullptr*/)
                                     m_measurementHiddenForDrivers,
                                     m_activeFilterChains,
                                     m_baffleSettings,
+                                    m_floorReflectionSettings,
                                     &errorMessage)) {
     qWarning().noquote() << errorMessage;
     return false;
@@ -451,6 +432,7 @@ void KFilterDoc::deleteContents()
   m_measurementHiddenForDrivers.fill(false);
   resetActiveFilterChains();
   resetBaffleSettings();
+  resetFloorReflectionSettings();
   invalidateSplCorrectionCaches();
   modified = false;
 }
@@ -466,6 +448,13 @@ void KFilterDoc::resetBaffleSettings()
 {
   for (BaffleSettings& settings : m_baffleSettings) {
     settings = BaffleSettings{};
+  }
+}
+
+void KFilterDoc::resetFloorReflectionSettings()
+{
+  for (FloorReflectionSettings& settings : m_floorReflectionSettings) {
+    settings = FloorReflectionSettings{};
   }
 }
 
@@ -486,35 +475,12 @@ double KFilterDoc::DB( double a_doubleA )
   return ( 8.685889638 * std::log( a_doubleA ) );
 }
 
-void KFilterDoc::initParamDialog()
-{
-  // Temporarily disabled during the Qt6/KF6 bring-up. The driver parameter
-  // dialog still depends on Qt3-era widget APIs and will be ported separately.
-}
-
-void KFilterDoc::initNetworkDialog()
-{
-  // Temporarily disabled during the Qt6/KF6 bring-up. The network dialog still
-  // depends on Qt3-era widget APIs and will be ported separately.
-}
-
-void KFilterDoc::initVolumeDialog()
-{
-  // Temporarily disabled during the Qt6/KF6 bring-up. The volume dialog still
-  // depends on Qt3-era widget APIs and will be ported separately.
-}
-
-void KFilterDoc::initToolsWizard()
-{
-  // The KDE3 wizard component is intentionally excluded during the first
-  // Qt6/KF6 bring-up.
-}
-
 std::complex<double> KFilterDoc::effectivePressureSample(
     int driverIndex,
     int sampleIndex,
     const ActiveFilterResponse& activeFilter,
     const BaffleResponse& baffle,
+    const FloorReflectionResponse& floorReflection,
     const SplCorrectionCache* correctionCache) const
 {
   if (driverIndex < 0 || driverIndex >= 4 ||
@@ -542,6 +508,14 @@ std::complex<double> KFilterDoc::effectivePressureSample(
                                      static_cast<std::size_t>(sampleIndex),
                                      sample);
 
+  // Patch 226: receiver-dependent floor reflection is a separate complex
+  // placement stage. Disabled, invalid or unsupported settings bypass H_floor
+  // without affecting Active Filters, Baffle/Diffraction or Measurement.
+  sample = applyFloorReflectionResponseSample(
+      floorReflection,
+      static_cast<std::size_t>(sampleIndex),
+      sample);
+
   // Measurement correction remains a real amplitude factor and is applied to
   // the same effective complex sample used by the individual and summary paths.
   if (correctionCache != nullptr && correctionCache->active) {
@@ -558,6 +532,7 @@ bool KFilterDoc::Sound( int a_intIndex )
     m_driverDriver[ a_intIndex ].Schall();
     const ActiveFilterResponse& activeFilter = activeFilterResponse(a_intIndex);
     const BaffleResponse& baffle = baffleResponse(a_intIndex);
+    const FloorReflectionResponse& floorReflection = floorReflectionResponse(a_intIndex);
     const SplCorrectionCache* correctionCache = ensureSplCorrectionCache(a_intIndex);
     for (int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex)
     {
@@ -566,6 +541,7 @@ bool KFilterDoc::Sound( int a_intIndex )
                                              sampleIndex,
                                              activeFilter,
                                              baffle,
+                                             floorReflection,
                                              correctionCache)));
     }
   }
@@ -601,6 +577,7 @@ bool KFilterDoc::PressureSummary()
 			m_driverDriver[ intIndex ].Schall();
 			const ActiveFilterResponse& activeFilter = activeFilterResponse(intIndex);
 			const BaffleResponse& baffle = baffleResponse(intIndex);
+			const FloorReflectionResponse& floorReflection = floorReflectionResponse(intIndex);
 			const SplCorrectionCache* correctionCache = ensureSplCorrectionCache(intIndex);
 			for ( int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex )
 			{
@@ -609,6 +586,7 @@ bool KFilterDoc::PressureSummary()
 					                        sampleIndex,
 					                        activeFilter,
 					                        baffle,
+					                        floorReflection,
 					                        correctionCache);
 			}
 		}
@@ -640,6 +618,7 @@ bool KFilterDoc::PressureScalarSummary()
 			m_driverDriver[ intIndex ].Schall();
 			const ActiveFilterResponse& activeFilter = activeFilterResponse(intIndex);
 			const BaffleResponse& baffle = baffleResponse(intIndex);
+			const FloorReflectionResponse& floorReflection = floorReflectionResponse(intIndex);
 			const SplCorrectionCache* correctionCache = ensureSplCorrectionCache(intIndex);
 			for ( int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex )
 			{
@@ -648,6 +627,7 @@ bool KFilterDoc::PressureScalarSummary()
 					                        sampleIndex,
 					                        activeFilter,
 					                        baffle,
+					                        floorReflection,
 					                        correctionCache);
 				m_doubleXContainer[ 0 ][ sampleIndex ] += std::norm(sample);
 			}
@@ -695,14 +675,6 @@ bool KFilterDoc::ImpedanceSummary()
 	///////////////////////////////
 	return ( m_driverDriver[ 0 ].ImpedanzSummaryisActive || m_driverDriver[ 1 ].ImpedanzSummaryisActive || \
 		m_driverDriver[ 2 ].ImpedanzSummaryisActive || m_driverDriver[ 3 ].ImpedanzSummaryisActive);
-}
-
-/** is called when open dialogs
-need an update */
-void KFilterDoc::slotUpdateAllDialogs()
-{
-  emit refreshDialog();
-  emit forceviewrefresh();
 }
 
 void KFilterDoc::viewrefresh()

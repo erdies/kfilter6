@@ -9,6 +9,7 @@
 
 #include <array>
 
+#include "kfilterfrequencygrid.h"
 #include "kfiltermeasurementcurve.h"
 
 #include <QColor>
@@ -151,12 +152,10 @@ private:
     bool m_measurementCursorValid = false;
     bool m_printRendering = false;
 
-    double Faktor = 1.047128548;
-    double Start = 125.6637061;
-    double Xvalue[150] = {};
+    std::array<double, KFilterFrequencyCount> m_angularFrequencyGrid{};
 
     int YScale(double value, int type) const;  // type: pressure=0, impedance=1
-    void initXvalue();
+    void initAngularFrequencyGrid();
     int XK(double x) const;
     QColor pressureCurveColor(int driverIndex) const;
     QColor impedanceCurveColor(int driverIndex) const;

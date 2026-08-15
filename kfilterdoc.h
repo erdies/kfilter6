@@ -12,7 +12,6 @@
 #endif
 
 #include <QObject>
-#include <QList>
 #include <QUrl>
 
 #include <array>
@@ -23,16 +22,18 @@
 #include "activefilterresponse.h"
 #include "bafflemodel.h"
 #include "baffleresponse.h"
+#include "floorreflectionmodel.h"
+#include "floorreflectionprocessing.h"
 #include "driver.h"
+#include "kfilterfrequencygrid.h"
 #include "kfiltermeasurementcurve.h"
 
-class KFilterView;
 
-/** KFilterDoc provides the document object for KFilter.
+/** KFilterDoc provides the document and simulation state for KFilter.
   *
-  * The first Qt6 porting step keeps this class independent from the legacy
-  * KDE3 user interface. Dialog creation is intentionally stubbed out until the
-  * corresponding dialogs have been ported to Qt6 widgets.
+  * User-interface dialogs and save prompts are owned by KFilterQt6App. The
+  * document remains independent of those widgets and exposes state, project I/O
+  * and refresh signals only.
   */
 class KFilterDoc : public QObject
 {
@@ -40,6 +41,7 @@ class KFilterDoc : public QObject
   public:
     using ActiveFilterChains = std::array<ActiveFilterChain, 4>;
     using BaffleSettingsPerDriver = std::array<BaffleSettings, 4>;
+    using FloorReflectionSettingsPerDriver = std::array<FloorReflectionSettings, 4>;
     /** Constructor for the document object of the application. */
     explicit KFilterDoc(QObject *parent = nullptr, const char *name = nullptr);
     /** Destructor for the document object of the application. */
@@ -53,11 +55,6 @@ bool PressureSummary();
 bool ImpedanceSummary();
 bool PressureScalarSummary();
 double DB( double a_doubleA );
-
-void initParamDialog();
-void initNetworkDialog();
-void initVolumeDialog();
-void initToolsWizard();
 
 double  m_doubleXContainer[ 4 ][ 200 ];
 driver m_driverDriver[ 4 ];
@@ -88,17 +85,17 @@ BaffleSettingsPerDriver& baffleSettingsPerDriver();
 const BaffleSettingsPerDriver& baffleSettingsPerDriver() const;
 const BaffleResponse& baffleResponse(int driverIndex) const;
 
+FloorReflectionSettings& floorReflectionSettings(int driverIndex);
+const FloorReflectionSettings& floorReflectionSettings(int driverIndex) const;
+FloorReflectionSettingsPerDriver& floorReflectionSettingsPerDriver();
+const FloorReflectionSettingsPerDriver& floorReflectionSettingsPerDriver() const;
+const FloorReflectionResponse& floorReflectionResponse(int driverIndex) const;
+
 //////////////////////////////////////////////////////////
-    /** adds a view to the document which represents the document contents. Usually this is your main view. */
-    void addView(KFilterView *view);
-    /** removes a view from the list of currently connected views */
-    void removeView(KFilterView *view);
     /** sets the modified flag for the document after a modifying action on the view connected to the document.*/
     void setModified(bool _m=true){ modified=_m; }
     /** returns if the document is modified or not. Use this to determine if your document needs saving by the user on closing.*/
     bool isModified() const { return modified; }
-    /** "save modified" - asks the user for saving if the document is modified */
-    bool saveModified();
     /** deletes the document's contents */
     void deleteContents();
     /** initializes the document generally */
@@ -116,19 +113,9 @@ const BaffleResponse& baffleResponse(int driverIndex) const;
 
   signals:
     void forceviewrefresh();
-    void refreshDialog();
 
   public slots:
-    /** calls repaint() on all views connected to the document object and is called by the view by which the document has been changed.
-     * As this view normally repaints itself, it is excluded from the paintEvent.
-     */
-    void slotUpdateAllViews(KFilterView *sender);
-
     void viewrefresh();
-
-  public:
-    /** the list of the views currently connected to the document */
-    static QList<KFilterView*> *pViewList;
 
   private:
     /** the modified flag of the current document */
@@ -154,7 +141,9 @@ const BaffleResponse& baffleResponse(int driverIndex) const;
     ActiveFilterChains m_activeFilterChains{};
     mutable std::array<ActiveFilterResponseCache, 4> m_activeFilterResponseCaches{};
     BaffleSettingsPerDriver m_baffleSettings{};
+    FloorReflectionSettingsPerDriver m_floorReflectionSettings{};
     mutable std::array<BaffleResponseCache, 4> m_baffleResponseCaches{};
+    mutable std::array<FloorReflectionResponseCache, 4> m_floorReflectionResponseCaches{};
 
     const SplCorrectionCache* ensureSplCorrectionCache(int driverIndex) const;
     std::complex<double> effectivePressureSample(
@@ -162,16 +151,13 @@ const BaffleResponse& baffleResponse(int driverIndex) const;
         int sampleIndex,
         const ActiveFilterResponse& activeFilter,
         const BaffleResponse& baffle,
+        const FloorReflectionResponse& floorReflection,
         const SplCorrectionCache* correctionCache) const;
     void invalidateSplCorrectionCaches();
     void resetActiveFilterChains();
     void resetBaffleSettings();
+    void resetFloorReflectionSettings();
     void markLoadedContentsReady();
-
-  private slots:
-    /** is called when open dialogs
-        need an update */
-    void slotUpdateAllDialogs();
 
 };
 

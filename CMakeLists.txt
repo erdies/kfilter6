@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(kfilter VERSION 0.1.0 LANGUAGES CXX)
 
-set(KFILTER_PATCH_LEVEL "210")
+set(KFILTER_PATCH_LEVEL "246")
 set(KFILTER_LICENSE_STRING "GPL-3.0-or-later")
 
 set(CMAKE_CXX_STANDARD 17)
@@ -30,7 +30,24 @@ option(KFILTER_BUILD_ACTIVE_FILTER_MODEL_SMOKETEST "Build the active-filter data
 option(KFILTER_BUILD_ACTIVE_FILTER_DIALOG_SMOKETEST "Build the active-filter model/dialog round-trip smoke test" ON)
 option(KFILTER_BUILD_ACTIVE_FILTER_RESPONSE_SMOKETEST "Build the active-filter complex transfer-function smoke test" ON)
 option(KFILTER_BUILD_BAFFLE_RESPONSE_SMOKETEST "Build the baffle complex transfer-function smoke test" ON)
+option(KFILTER_BUILD_BAFFLE_LF_HYBRID_DIAGNOSTIC "Build the LF hybrid baffle production/reference comparison tool" ON)
+option(KFILTER_BUILD_BAFFLE_LF_HYBRID_SMOKETEST "Build the LF hybrid baffle production/regression smoke test" ON)
+option(KFILTER_BUILD_FLOOR_REFLECTION_MODEL_SMOKETEST "Build the Floor Reflection product-settings model smoke test" ON)
+option(KFILTER_BUILD_FLOOR_REFLECTION_PROCESSING_SMOKETEST "Build the productive Floor Reflection integration smoke test" ON)
+option(KFILTER_BUILD_FLOOR_REFLECTION_RESPONSE_SMOKETEST "Build the ideal-rigid floor-reflection response smoke test" ON)
+option(KFILTER_BUILD_FLOOR_SURFACE_MODEL_SMOKETEST "Build the Miki porous floor-surface model smoke test" ON)
+option(KFILTER_BUILD_FLOOR_SURFACE_DIAGNOSTIC "Build the Miki porous floor-surface comparison diagnostic" ON)
+option(KFILTER_BUILD_FLOOR_REFLECTION_DIAGNOSTIC "Build the ideal-rigid floor-reflection Stage-F1 diagnostic tool" ON)
+option(KFILTER_BUILD_FLOOR_BAFFLE_COMBINATION_DIAGNOSTIC "Build the Floor Reflection Stage-F2 baffle/placement combination diagnostic" ON)
+option(KFILTER_BUILD_FLOOR_BAFFLE_COMBINATION_SMOKETEST "Build the Floor Reflection Stage-F2 baffle/placement combination smoke test" ON)
+option(KFILTER_BUILD_BAFFLE_FLOOR_DIAGNOSTIC "Build the rigid-floor/bottom-edge diagnostic tool" ON)
+option(KFILTER_BUILD_BAFFLE_FLOOR_ROBUSTNESS_DIAGNOSTIC "Build the rigid-floor image-geometry robustness sweep" ON)
+option(KFILTER_BUILD_BAFFLE_FLOOR_DIAGNOSTIC_SMOKETEST "Build the rigid-floor diagnostic regression test" ON)
+option(KFILTER_BUILD_BAFFLE_CHAMFER_RESPONSE_SMOKETEST "Build the 45-degree chamfer response smoke test" ON)
 option(KFILTER_BUILD_BAFFLE_DIALOG_SMOKETEST "Build the Baffle / Diffraction dialog smoke test" ON)
+option(KFILTER_BUILD_CIRCUITOUT_ACTIVE_FILTER_HIT_SMOKETEST "Build the Network Preview active-filter hit-zone smoke test" ON)
+option(KFILTER_BUILD_CIRCUITOUT_NETWORK_PARAMETERS_HIT_SMOKETEST "Build the Network Preview AC-source hit-zone smoke test" ON)
+option(KFILTER_BUILD_CIRCUITOUT_BAFFLE_PARAMETERS_HIT_SMOKETEST "Build the Network Preview Baffle / Diffraction wave-symbol hit-zone smoke test" ON)
 
 add_library(kfilter_core STATIC
     activefiltermodel.cpp
@@ -39,6 +56,15 @@ add_library(kfilter_core STATIC
     activefilterresponse.h
     bafflemodel.cpp
     bafflemodel.h
+    floorreflectionmodel.h
+    floorreflectionprocessing.cpp
+    floorreflectionprocessing.h
+    floorreflectionresponse.cpp
+    floorreflectionresponse.h
+    floorsurfacemodel.cpp
+    floorsurfacemodel.h
+    bafflechamferresponse.cpp
+    bafflechamferresponse.h
     baffleresponse.cpp
     baffleresponse.h
     kfilterfrequencygrid.cpp
@@ -162,6 +188,63 @@ if(KFILTER_BUILD_QT6_APP)
         set_tests_properties(kfilter_baffle_dialog_smoketest
             PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     endif()
+
+    if(KFILTER_BUILD_CIRCUITOUT_ACTIVE_FILTER_HIT_SMOKETEST)
+        add_executable(kfilter_circuitout_active_filter_hit_smoketest
+            tools/circuitout_active_filter_hit_smoketest.cpp
+            circuitout.cpp
+            circuitout.h
+        )
+        target_link_libraries(kfilter_circuitout_active_filter_hit_smoketest
+            PRIVATE
+                kfilter_core
+                Qt6::Widgets
+        )
+
+        enable_testing()
+        add_test(NAME kfilter_circuitout_active_filter_hit_smoketest
+                 COMMAND kfilter_circuitout_active_filter_hit_smoketest)
+        set_tests_properties(kfilter_circuitout_active_filter_hit_smoketest
+            PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    endif()
+
+    if(KFILTER_BUILD_CIRCUITOUT_NETWORK_PARAMETERS_HIT_SMOKETEST)
+        add_executable(kfilter_circuitout_network_parameters_hit_smoketest
+            tools/circuitout_network_parameters_hit_smoketest.cpp
+            circuitout.cpp
+            circuitout.h
+        )
+        target_link_libraries(kfilter_circuitout_network_parameters_hit_smoketest
+            PRIVATE
+                kfilter_core
+                Qt6::Widgets
+        )
+
+        enable_testing()
+        add_test(NAME kfilter_circuitout_network_parameters_hit_smoketest
+                 COMMAND kfilter_circuitout_network_parameters_hit_smoketest)
+        set_tests_properties(kfilter_circuitout_network_parameters_hit_smoketest
+            PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    endif()
+
+    if(KFILTER_BUILD_CIRCUITOUT_BAFFLE_PARAMETERS_HIT_SMOKETEST)
+        add_executable(kfilter_circuitout_baffle_parameters_hit_smoketest
+            tools/circuitout_baffle_parameters_hit_smoketest.cpp
+            circuitout.cpp
+            circuitout.h
+        )
+        target_link_libraries(kfilter_circuitout_baffle_parameters_hit_smoketest
+            PRIVATE
+                kfilter_core
+                Qt6::Widgets
+        )
+
+        enable_testing()
+        add_test(NAME kfilter_circuitout_baffle_parameters_hit_smoketest
+                 COMMAND kfilter_circuitout_baffle_parameters_hit_smoketest)
+        set_tests_properties(kfilter_circuitout_baffle_parameters_hit_smoketest
+            PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    endif()
 endif()
 
 if(KFILTER_BUILD_ACTIVE_FILTER_MODEL_SMOKETEST)
@@ -195,6 +278,141 @@ if(KFILTER_BUILD_BAFFLE_RESPONSE_SMOKETEST)
     enable_testing()
     add_test(NAME kfilter_baffle_response_smoketest
              COMMAND kfilter_baffle_response_smoketest)
+endif()
+
+if(KFILTER_BUILD_BAFFLE_LF_HYBRID_DIAGNOSTIC)
+    add_executable(kfilter_baffle_lf_hybrid_diagnostic
+        tools/baffle_lf_hybrid_diagnostic.cpp
+        tools/baffle_lf_hybrid_diagnostic_model.cpp
+        tools/baffle_lf_hybrid_diagnostic_model.h
+    )
+    target_link_libraries(kfilter_baffle_lf_hybrid_diagnostic PRIVATE kfilter_core)
+endif()
+
+if(KFILTER_BUILD_BAFFLE_LF_HYBRID_SMOKETEST)
+    add_executable(kfilter_baffle_lf_hybrid_smoketest
+        tools/baffle_lf_hybrid_smoketest.cpp
+        tools/baffle_lf_hybrid_diagnostic_model.cpp
+        tools/baffle_lf_hybrid_diagnostic_model.h
+    )
+    target_link_libraries(kfilter_baffle_lf_hybrid_smoketest PRIVATE kfilter_core)
+
+    enable_testing()
+    add_test(NAME kfilter_baffle_lf_hybrid_smoketest
+             COMMAND kfilter_baffle_lf_hybrid_smoketest)
+endif()
+
+if(KFILTER_BUILD_FLOOR_REFLECTION_MODEL_SMOKETEST)
+    add_executable(kfilter_floor_reflection_model_smoketest
+        tools/floor_reflection_model_smoketest.cpp
+    )
+    target_include_directories(kfilter_floor_reflection_model_smoketest
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+    enable_testing()
+    add_test(NAME kfilter_floor_reflection_model_smoketest
+             COMMAND kfilter_floor_reflection_model_smoketest)
+endif()
+
+if(KFILTER_BUILD_FLOOR_REFLECTION_PROCESSING_SMOKETEST)
+    add_executable(kfilter_floor_reflection_processing_smoketest
+        tools/floor_reflection_processing_smoketest.cpp
+    )
+    target_link_libraries(kfilter_floor_reflection_processing_smoketest PRIVATE kfilter_core)
+
+    enable_testing()
+    add_test(NAME kfilter_floor_reflection_processing_smoketest
+             COMMAND kfilter_floor_reflection_processing_smoketest)
+endif()
+
+if(KFILTER_BUILD_FLOOR_REFLECTION_RESPONSE_SMOKETEST)
+    add_executable(kfilter_floor_reflection_response_smoketest
+        tools/floor_reflection_response_smoketest.cpp
+    )
+    target_link_libraries(kfilter_floor_reflection_response_smoketest PRIVATE kfilter_core)
+
+    enable_testing()
+    add_test(NAME kfilter_floor_reflection_response_smoketest
+             COMMAND kfilter_floor_reflection_response_smoketest)
+endif()
+
+if(KFILTER_BUILD_FLOOR_SURFACE_MODEL_SMOKETEST)
+    add_executable(kfilter_floor_surface_model_smoketest
+        tools/floor_surface_model_smoketest.cpp
+    )
+    target_link_libraries(kfilter_floor_surface_model_smoketest PRIVATE kfilter_core)
+
+    enable_testing()
+    add_test(NAME kfilter_floor_surface_model_smoketest
+             COMMAND kfilter_floor_surface_model_smoketest)
+endif()
+
+if(KFILTER_BUILD_FLOOR_SURFACE_DIAGNOSTIC)
+    add_executable(kfilter_floor_surface_diagnostic
+        tools/floor_surface_diagnostic.cpp
+    )
+    target_link_libraries(kfilter_floor_surface_diagnostic PRIVATE kfilter_core)
+endif()
+
+if(KFILTER_BUILD_FLOOR_REFLECTION_DIAGNOSTIC)
+    add_executable(kfilter_floor_reflection_diagnostic
+        tools/floor_reflection_diagnostic.cpp
+    )
+    target_link_libraries(kfilter_floor_reflection_diagnostic PRIVATE kfilter_core)
+endif()
+
+if(KFILTER_BUILD_FLOOR_BAFFLE_COMBINATION_DIAGNOSTIC)
+    add_executable(kfilter_floor_baffle_combination_diagnostic
+        tools/floor_baffle_combination_diagnostic.cpp
+    )
+    target_link_libraries(kfilter_floor_baffle_combination_diagnostic PRIVATE kfilter_core)
+endif()
+
+if(KFILTER_BUILD_FLOOR_BAFFLE_COMBINATION_SMOKETEST)
+    add_executable(kfilter_floor_baffle_combination_smoketest
+        tools/floor_baffle_combination_smoketest.cpp
+    )
+    target_link_libraries(kfilter_floor_baffle_combination_smoketest PRIVATE kfilter_core)
+
+    enable_testing()
+    add_test(NAME kfilter_floor_baffle_combination_smoketest
+             COMMAND kfilter_floor_baffle_combination_smoketest)
+endif()
+
+if(KFILTER_BUILD_BAFFLE_FLOOR_DIAGNOSTIC)
+    add_executable(kfilter_baffle_floor_diagnostic
+        tools/baffle_floor_diagnostic.cpp
+    )
+    target_link_libraries(kfilter_baffle_floor_diagnostic PRIVATE kfilter_core)
+endif()
+
+if(KFILTER_BUILD_BAFFLE_FLOOR_ROBUSTNESS_DIAGNOSTIC)
+    add_executable(kfilter_baffle_floor_robustness_diagnostic
+        tools/baffle_floor_robustness_diagnostic.cpp
+    )
+    target_link_libraries(kfilter_baffle_floor_robustness_diagnostic PRIVATE kfilter_core)
+endif()
+
+if(KFILTER_BUILD_BAFFLE_FLOOR_DIAGNOSTIC_SMOKETEST)
+    add_executable(kfilter_baffle_floor_diagnostic_smoketest
+        tools/baffle_floor_diagnostic_smoketest.cpp
+    )
+    target_link_libraries(kfilter_baffle_floor_diagnostic_smoketest PRIVATE kfilter_core)
+
+    enable_testing()
+    add_test(NAME kfilter_baffle_floor_diagnostic_smoketest
+             COMMAND kfilter_baffle_floor_diagnostic_smoketest)
+endif()
+
+if(KFILTER_BUILD_BAFFLE_CHAMFER_RESPONSE_SMOKETEST)
+    add_executable(kfilter_baffle_chamfer_response_smoketest
+        tools/baffle_chamfer_response_smoketest.cpp
+    )
+    target_link_libraries(kfilter_baffle_chamfer_response_smoketest PRIVATE kfilter_core)
+
+    enable_testing()
+    add_test(NAME kfilter_baffle_chamfer_response_smoketest
+             COMMAND kfilter_baffle_chamfer_response_smoketest)
 endif()
 
 if(KFILTER_BUILD_DRIVER_SMOKETEST)

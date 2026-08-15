@@ -7,9 +7,10 @@ Copyright (C) 2002-2026 Martin Erdtmann
 
 ## Current baseline
 
-This tree is an incremental Qt6 bring-up of the original KDE3.1/KDevelop-era
-KFilter sources. The goal is still: first compile and run the old application
-behaviour as closely as possible, then refactor.
+This tree is the active Qt6/KF6 KFilter codebase evolved from the original
+KDE3.1/KDevelop-era sources. The patch log below is chronological: statements such
+as "not ported yet" describe the state at that historical patch and must not be
+read as limitations of the current tree.
 
 ## Patch status
 
@@ -41,19 +42,19 @@ behaviour as closely as possible, then refactor.
 - Added `kfilter_doc_smoketest`, which verifies `KFilterDoc` save/load and the
   `forceviewrefresh` signal emission on successful load.
 
-## Known intentional limitations
+## Historical limitations after Patch 003
 
-- The real application executable is not built yet.
-- `KFilterDoc::saveModified()` currently returns `false` for modified documents
-  because the old interactive KDE3 save prompt has not been ported yet.
+- The real application executable was not built yet.
+- `KFilterDoc::saveModified()` returned `false` for modified documents because
+  the old interactive KDE3 save prompt had not been ported yet.
 - `initParamDialog()`, `initNetworkDialog()`, `initVolumeDialog()` and
-  `initToolsWizard()` are currently no-ops.
-- The old `KFilterView`, `KFilterApp`, dialogs and drawing code are still not
+  `initToolsWizard()` were no-ops.
+- The old `KFilterView`, `KFilterApp`, dialogs and drawing code were not yet
   part of the Qt6 build target.
-- Remote project URLs are intentionally unsupported at this stage; project I/O
-  is local-file-only.
+- Remote project URLs were intentionally unsupported at that stage; project I/O
+  was local-file-only.
 
-## Next good step
+## Historical next step after Patch 003
 
 Port the application shell around `KFilterApp`/`main.cpp` with a minimal Qt6
 `QApplication` + `QMainWindow`/`KXmlGuiWindow` setup. Keep the shell minimal:
@@ -925,3 +926,213 @@ changed.
   Rectangular processing in the centralized complex driver path.
 - Not included yet: Copy Geometry, a baffle sketch, user-editable edge-source count,
   piston directivity, edge radius/chamfer, or off-axis/directivity modelling.
+
+## Patch 225: Floor Reflection product settings and persistence
+
+- Added the Qt-independent `FloorReflectionSettings` product model with one
+  per-driver settings entry in `KFilterDoc`.
+- Patch-225 defaults are intentionally neutral and backward-compatible:
+  Floor Reflection disabled, cabinet bottom at 0 mm above the floor, listener
+  height 1050 mm, horizontal distance 2500 mm, and `Hard / rigid` surface.
+- Source height is deliberately **not** persisted independently. The later
+  productive response stage will derive it from cabinet/baffle geometry, so
+  project data cannot contain contradictory source-height definitions.
+- Advanced `.kfp` JSON to `formatVersion = 9`. Each driver now stores a
+  `floorReflection` object containing `enabled`, `cabinetBottomAboveFloorMm`,
+  `listenerHeightAboveFloorMm`, `horizontalDistanceMm`, and `surfacePreset`.
+- JSON versions 1 through 8 and legacy text projects remain readable. Because
+  they predate Floor Reflection persistence, all four settings entries load
+  with the Patch-225 defaults while existing driver, measurement, active-filter
+  and Baffle metadata retains its prior migration behavior.
+- Only the validated `hardRigid` surface preset is accepted in Patch 225.
+  Malformed/negative placement metadata or unsupported surface values fail
+  transactionally without modifying the destination document state.
+- `KFilterDoc::newDocument()` resets Floor Reflection metadata to defaults.
+- Patch 225 itself did not multiply Floor Reflection into `effectivePressureSample()`;
+  that acoustic integration is introduced by Patch 226 below.
+- Added model-default, project round-trip/version-8 compatibility, invalid-data
+  transactionality, document persistence, and document-reset smoke coverage.
+
+## Patch 226: Productive ideal-rigid Floor Reflection integration
+
+- Added `floorreflectionprocessing.cpp/.h` as the product boundary between the
+  persisted placement model and the validated Stage-F0 image-source solver.
+- Enabled `Hard / rigid` Floor Reflection is now applied as a complex
+  `H_floor(f)` stage in the centralized pressure path after Baffle/Diffraction
+  and before Measurement correction.
+- Source height is derived, not stored: `cabinet bottom above floor + baffle
+  height - Driver Y from top`. This requires a positive baffle height and a
+  driver centre within the vertical baffle extent; invalid geometry bypasses
+  only Floor Reflection.
+- Floor Reflection deliberately does not depend on the Baffle `enabled` flag,
+  Baffle model, or Free-field/Rigid-floor boundary selector. Baffle geometry is
+  reused only to obtain the source height, keeping placement reflection and
+  enclosure diffraction as independent transfer stages.
+- Added `FloorReflectionResponseCache`; disabled settings are a neutral fast
+  path and edits to retained placement values while disabled do not regenerate
+  the response. Enabled transfer-relevant edits do.
+- `KFilterDoc::floorReflectionResponse()` exposes the same cached response used
+  by single-driver SPL, vector SPL summary, and energetic SPL summary paths.
+- The product regression verifies disabled neutrality, exact agreement with the
+  F0 reference geometry, complex multiplication, cabinet elevation, invalid
+  geometry bypass, independence from Baffle boundary selection, and cache
+  invalidation. The document regression additionally checks phase in the vector
+  sum and `RigidFloorContactDiffractionOnly * H_floor` without reintroducing the
+  +6.0206 dB boundary gain previously isolated in Stage F2.
+- No GUI is added in Patch 226. Existing projects remain acoustically unchanged
+  because Floor Reflection defaults to disabled; persisted version-9 projects
+  that explicitly set `enabled=true` now activate the response as intended.
+
+
+## Patch 227: Floor Reflection product GUI
+
+- Extended the existing **Edit -> Baffle / Diffraction Parameters...** per-driver
+  dialog with a dedicated Floor Reflection group. No second placement dialog is
+  introduced.
+- Added live-edit controls for Floor Reflection enable state, cabinet-bottom
+  height above the floor, listener height, horizontal listening distance, and
+  the surface preset. The first product GUI deliberately exposes only the
+  validated `Hard / rigid floor` preset.
+- Source height remains derived rather than stored or edited independently:
+  `cabinet bottom + Baffle height - Driver Y from top`. A status line reports the
+  derived source height and detects invalid/degenerate placement geometry.
+- Floor Reflection remains independent from Baffle / Diffraction enable state and
+  from `Rigid floor contact (diffraction only)`. Because the Floor Reflection DSP
+  still needs physical source geometry, Baffle height and Driver Y remain editable
+  whenever Floor Reflection is enabled, including while the Baffle stage is
+  bypassed or uses Simple Baffle Step.
+- The Floor controls participate in the dialog's existing live-preview and
+  Apply/OK/Cancel transaction semantics. Cancel restores both Baffle and Floor
+  Reflection settings to the last applied state.
+- Extended `kfilter_baffle_dialog_smoketest` with default-state, independent-stage,
+  source-height derivation, decimal-comma input, live-preview, Apply and Cancel
+  coverage for Floor Reflection.
+- No `.kfp` format change is required; Patch 225 already introduced all persisted
+  Floor Reflection fields in format version 9. No Side View Preview and no porous
+  or measured material model is added by Patch 227.
+
+## Patch 228: Porous floor-surface diagnostic (Miki)
+
+- Added the Qt-independent `floorsurfacemodel.cpp/.h` material boundary without
+  changing the persisted `FloorSurfacePreset` product enum. The normal product
+  GUI and signal path therefore remain limited to `Hard / rigid floor` in this
+  patch.
+- Implemented two low-level surface types: ideal rigid (`Gamma = +1 + j0`) and a
+  locally reacting Miki porous layer backed by an acoustically rigid wall.
+- The Miki implementation follows Yasushi Miki, *Acoustical properties of porous
+  materials - Modifications of Delany-Bazley models -*, J. Acoust. Soc. Jpn. (E)
+  11(1), 19-24 (1990), DOI `10.1250/ast.11.19`: normalized characteristic
+  impedance from Eqs. (29)-(31), propagation constant from Eqs. (32)-(34), and
+  rigid-backed surface impedance `Zs = Zc * coth(gamma*l)` from Eq. (35).
+- The complex pressure reflection coefficient is then calculated from the local
+  surface impedance and the incidence angle already produced by the Floor
+  Reflection image-source geometry. This keeps placement geometry and material
+  physics as separate testable components.
+- Added `calculateFloorReflectionResponseWithSurfaceModel()` as a diagnostic
+  combination helper. It reuses the validated F0 path geometry and
+  `calculateFloorReflectionSample()`; Patch 228 does **not** route this helper
+  into `floorreflectionprocessing.cpp`, project persistence or the Qt GUI yet.
+- The default diagnostic reference uses `thickness = 10 mm` and
+  `flow resistivity = 100000 Pa*s/m^2`, the same parameter pair used by Miki's
+  Fig. 3 rigid-backed example. It is deliberately labelled as a Miki reference
+  case, not as a universal carpet preset.
+- Added `kfilter_floor_surface_diagnostic` with:
+  - `--summary h_source h_listener distance [thickness_mm sigma]`
+  - `--curve h_source h_listener distance [thickness_mm sigma]`
+  - `--material frequency_hz incidence_deg [thickness_mm sigma]`
+  The optional parameters make it possible to explore material strength before
+  committing any user-facing preset taxonomy.
+- Extremely small `f/sigma` is reported explicitly. Miki notes that the earlier
+  Delany-Bazley fit carried an extrapolation warning below `f/sigma = 0.01`; the
+  modified model is physically better behaved but its prediction was not fully
+  verified there. Patch 228 therefore outputs `legacy_low_ratio_flag` and a
+  separate `passivity_warning` instead of silently clamping complex `Gamma`.
+- Added `kfilter_floor_surface_model_smoketest`. It checks fixed complex 1-kHz
+  values from Miki Eqs. (29)-(35), oblique-incidence reflection, passive behavior
+  in the reference `f/sigma >= 0.01` range, low-frequency warning behavior, invalid
+  input rejection, and exact equality of the new rigid-surface path with the
+  previously validated Stage-F0 ideal-rigid response.
+- The locally reacting approximation remains an engineering model. Later product
+  integration should document the model range and surface-preset provenance; see
+  also Yasuda, Ueno & Sekine, *Acoust. Sci. & Tech.* 36(5), 459-462 (2015), DOI
+  `10.1250/ast.36.459`.
+
+
+## Patch 229: Productive Miki reference floor surface
+
+- Extended the persisted `FloorSurfacePreset` enum with
+  `MikiReference10mm100k` while keeping `HardRigid` as the default and exact
+  Stage-F0 reference path.
+- Promoted the Patch-228 diagnostic material case into the normal product path
+  without creating a second material implementation.
+  `floorreflectionprocessing.cpp` maps the new preset to the existing
+  `MikiPorousRigidBacking` solver using:
+  - thickness `10 mm`
+  - flow resistivity `100000 Pa*s/m^2`
+  - acoustically rigid backing
+- The UI label is **Porous floor - Miki reference** and the status text marks it
+  as **experimental**. It is deliberately not named `Carpet`; the parameters are
+  a documented Miki reference case, not a universal measured floor covering.
+- Advanced `.kfp` JSON `formatVersion` from 9 to 10 and added the stable surface
+  string `mikiReference10mm100k`. Version-9 projects continue to load normally
+  with their existing `hardRigid` surface values. Unknown surface strings still
+  fail transactionally.
+- Extended product-processing regression coverage so the productive Miki preset
+  must be complex-sample identical to
+  `calculateFloorReflectionResponseWithSurfaceModel()` from Patch 228. Switching
+  the surface preset invalidates the Floor Reflection response cache.
+- Extended project-I/O, document, and Baffle-dialog smoke tests for Miki preset
+  round-trip, v9 compatibility, live GUI selection/status, Apply/Cancel behavior,
+  and productive signal-path integration.
+- The Patch-228 low-`f/sigma` diagnostic caveat remains applicable. Patch 229 does
+  not clamp or reinterpret the Miki response and does not claim high material
+  accuracy in that extrapolative region.
+- The optional side-view preview remains deferred.
+
+## Patch 236: Pre-handover cleanup
+
+- Centralized `KFilterView`'s 150-point plotting raster on `kfilterfrequencygrid.h`;
+  the historical angular-frequency drawing coordinate keeps its exact recurrence but
+  now uses the same authoritative sample count, minimum frequency and step as the
+  Active Filter, Baffle and Floor Reflection response grids.
+- Removed unused KDE3-era view-list/dialog-refresh/save-prompt stubs from
+  `KFilterDoc`. Project save prompting remains correctly owned by `KFilterQt6App`.
+- Renamed the main-window hover cleanup slot to the generic
+  `clearCircuitPreviewHover()` and removed duplicate active-section-editor guards
+  from the private dialog-opening helpers; public entry points retain the guard.
+- Updated stale current-state documentation: `.kfp` format version 10 is current,
+  historical porting limitations are explicitly labelled as historical, and the
+  Active Filter response header describes the implemented section families.
+- Extended the Baffle/Diffraction preview hit regression to cover free-air, sealed,
+  vented and bandpass loudspeaker-symbol placements while retaining strict
+  separation from the Driver Parameters hit area.
+- No `driver.*` refactoring or simulation-model change is part of this cleanup.
+
+
+## Patch 246: Productive low-midrange magnitude hybrid for Free-field Rectangular Baffle
+
+- Promoted the Patch-245 width-anchored `n=2` candidate into the productive
+  **Free-field Rectangular Edge Diffraction** response. The selected law is
+  `r = f/fBS`, `w = r^2/(1+r^2)`, with `fBS = 115/W[m]`.
+- The validated raw Rectangular engine remains unchanged and retains all geometry:
+  width/height, driver position, N=200 contour discretization, M=73 finite-piston
+  spatial averaging, and optional left/right 45-degree chamfers.
+- Only magnitude is hybridized in dB:
+  `D = Dsimple + w*(Draw-Dsimple)`. The raw Rectangular complex phase is preserved
+  by multiplying each raw sample by a positive real scale factor.
+- The blend anchor is width-only. Cabinet height therefore continues to influence
+  the raw diffraction response but no longer also changes how early KFilter trusts
+  that raw LF magnitude.
+- Added `calculateBaffleUnblendedRectangularResponseForDiagnostic()` so historical
+  Sharp/finite-piston/chamfer goldens and developer diagnostics can continue to test
+  the raw model independently from the productive hybrid.
+- The Patch-242 `sqrt(W*H)` candidate and Patch-244/245 `n=1` / `n=1.5` variants
+  remain diagnostic references. The Patch-246 LF smoke test verifies that the
+  productive Sharp response is the `n=2` candidate across the full geometry matrix.
+- Productive Chamfer45 uses the same LF hybrid after its raw Stage-3A response; the
+  analytical chamfer goldens remain attached to the unblended diagnostic reference.
+- `RigidFloorContactDiffractionOnly` is intentionally unchanged. Its normalized
+  unfolded image-geometry response is a separate boundary model and is not blended
+  toward the Free-field Simple Baffle Step. Existing floor diagnostics remain raw.
+- No UI control and no project-format field is added. The exponent is deliberately
+  fixed as a model constant rather than exposed as a user-tunable compensation knob.

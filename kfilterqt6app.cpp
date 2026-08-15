@@ -28,6 +28,8 @@
 #include <QColorDialog>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFont>
+#include <QFontMetricsF>
 #include <QDir>
 #include <QDialog>
 #include <QDragEnterEvent>
@@ -495,13 +497,25 @@ KFilterQt6App::KFilterQt6App(QWidget *parent)
         showNetworkSectionHoverFromPreview(driverIndex, sectionIndex, static_cast<int>(group));
     });
     connect(m_circuitPreview, &CircuitOut::networkSectionHoverLeft,
-            this, &KFilterQt6App::clearNetworkSectionHoverFromPreview);
+            this, &KFilterQt6App::clearCircuitPreviewHover);
     connect(m_circuitPreview, &CircuitOut::driverClicked,
             this, &KFilterQt6App::editDriverParametersFromPreview);
     connect(m_circuitPreview, &CircuitOut::driverHovered,
             this, &KFilterQt6App::showDriverHoverFromPreview);
     connect(m_circuitPreview, &CircuitOut::driverActivityLampClicked,
             this, &KFilterQt6App::toggleDriverPlotVisibilityFromPreview);
+    connect(m_circuitPreview, &CircuitOut::activeFilterClicked,
+            this, &KFilterQt6App::editActiveFilterParametersFromPreview);
+    connect(m_circuitPreview, &CircuitOut::activeFilterHovered,
+            this, &KFilterQt6App::showActiveFilterHoverFromPreview);
+    connect(m_circuitPreview, &CircuitOut::networkParametersClicked,
+            this, &KFilterQt6App::editNetworkParametersFromPreview);
+    connect(m_circuitPreview, &CircuitOut::networkParametersHovered,
+            this, &KFilterQt6App::showNetworkParametersHoverFromPreview);
+    connect(m_circuitPreview, &CircuitOut::baffleParametersClicked,
+            this, &KFilterQt6App::editBaffleParametersFromPreview);
+    connect(m_circuitPreview, &CircuitOut::baffleParametersHovered,
+            this, &KFilterQt6App::showBaffleParametersHoverFromPreview);
 
     auto *circuitScrollArea = new QScrollArea(central);
     circuitScrollArea->setWidgetResizable(true);
@@ -1387,7 +1401,52 @@ void KFilterQt6App::showDriverHoverFromPreview(int driverIndex)
     statusBar()->showMessage(m_lastCircuitPreviewHoverStatus);
 }
 
-void KFilterQt6App::clearNetworkSectionHoverFromPreview()
+void KFilterQt6App::showActiveFilterHoverFromPreview(int driverIndex)
+{
+    if (networkSectionEditInProgress()) {
+        return;
+    }
+
+    if (driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount) {
+        return;
+    }
+
+    m_lastCircuitPreviewHoverStatus = tr("Click to edit Active Filter parameters for Driver %1.")
+                                         .arg(driverIndex + 1);
+    statusBar()->showMessage(m_lastCircuitPreviewHoverStatus);
+}
+
+void KFilterQt6App::showNetworkParametersHoverFromPreview(int driverIndex)
+{
+    if (networkSectionEditInProgress()) {
+        return;
+    }
+
+    if (driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount) {
+        return;
+    }
+
+    m_lastCircuitPreviewHoverStatus = tr("Click to edit Network / Filter parameters for Driver %1.")
+                                         .arg(driverIndex + 1);
+    statusBar()->showMessage(m_lastCircuitPreviewHoverStatus);
+}
+
+void KFilterQt6App::showBaffleParametersHoverFromPreview(int driverIndex)
+{
+    if (networkSectionEditInProgress()) {
+        return;
+    }
+
+    if (driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount) {
+        return;
+    }
+
+    m_lastCircuitPreviewHoverStatus = tr("Click to edit Baffle / Diffraction parameters for Driver %1.")
+                                         .arg(driverIndex + 1);
+    statusBar()->showMessage(m_lastCircuitPreviewHoverStatus);
+}
+
+void KFilterQt6App::clearCircuitPreviewHover()
 {
     if (!m_lastCircuitPreviewHoverStatus.isEmpty() &&
         statusBar()->currentMessage() == m_lastCircuitPreviewHoverStatus) {
@@ -1961,11 +2020,15 @@ void KFilterQt6App::exportNetworkSchematicPdf()
     refreshCircuitPreview();
 
     QString proposedPath;
+    QString projectTitle = tr("Untitled");
     const QString path = currentLocalPath();
     if (!path.isEmpty()) {
         const QFileInfo info(path);
+        if (!info.completeBaseName().isEmpty()) {
+            projectTitle = info.completeBaseName();
+        }
         proposedPath = QDir(dialogStartDirectory()).filePath(
-            QStringLiteral("%1_project.pdf").arg(info.completeBaseName()));
+            QStringLiteral("%1_project.pdf").arg(projectTitle));
     } else {
         proposedPath = QDir(dialogStartDirectory()).filePath(QStringLiteral("Untitled_project.pdf"));
     }
@@ -2015,6 +2078,14 @@ void KFilterQt6App::exportNetworkSchematicPdf()
     const QSize networkSourceSize = m_circuitPreview->printSourceSizeHint();
     const qreal patch134NetworkScale = networkPrintScaleForTarget(pageRect, networkSourceSize);
 
+    QFont projectTitleFont = painter.font();
+    projectTitleFont.setBold(true);
+    projectTitleFont.setPointSizeF(13.0);
+    const QFontMetricsF projectTitleMetrics(projectTitleFont);
+    const qreal projectTitleHeight = std::ceil(projectTitleMetrics.height());
+    const qreal projectTitleGap = std::max<qreal>(4.0, pageRect.height() * 0.004);
+    const qreal projectTitleBlockHeight = projectTitleHeight + projectTitleGap;
+
     constexpr qreal PreferredPlotHeightRatio = 0.25;
     constexpr qreal MinimumPlotHeightRatio = 0.14;
     constexpr qreal PreserveNetworkScaleTolerance = 0.99;
@@ -2023,6 +2094,7 @@ void KFilterQt6App::exportNetworkSchematicPdf()
     auto layoutForPlotHeight = [&](qreal plotHeight) {
         struct Layout
         {
+            QRectF titleRect;
             QRectF plotSlot;
             QRectF plotImageRect;
             QRectF networkRect;
@@ -2030,10 +2102,21 @@ void KFilterQt6App::exportNetworkSchematicPdf()
         };
 
         Layout layout;
-        layout.plotSlot = QRectF(pageRect.left(), pageRect.top(), pageRect.width(), plotHeight);
+        const qreal plotContentHeight = std::max<qreal>(0.0, plotHeight - projectTitleBlockHeight);
+        layout.plotSlot = QRectF(pageRect.left(),
+                                 pageRect.top() + projectTitleBlockHeight,
+                                 pageRect.width(),
+                                 plotContentHeight);
         layout.plotImageRect = plotImageTargetRectForPdf(plotImage,
                                                          layout.plotSlot,
                                                          PdfVerticalAlignment::Top);
+        const QRectF titleAnchorRect = layout.plotImageRect.isValid()
+                                           ? layout.plotImageRect
+                                           : layout.plotSlot;
+        layout.titleRect = QRectF(titleAnchorRect.left(),
+                                  pageRect.top(),
+                                  titleAnchorRect.width(),
+                                  projectTitleHeight);
         const qreal networkTop = layout.plotImageRect.isValid()
                                      ? layout.plotImageRect.bottom() + sectionGap
                                      : layout.plotSlot.bottom() + sectionGap;
@@ -2045,12 +2128,30 @@ void KFilterQt6App::exportNetworkSchematicPdf()
         return layout;
     };
 
+    auto drawProjectTitle = [&](const QRectF& titleRect) {
+        if (!titleRect.isValid() || titleRect.isEmpty()) {
+            return;
+        }
+
+        const QString displayTitle = projectTitleMetrics.elidedText(
+            projectTitle,
+            Qt::ElideMiddle,
+            qRound(titleRect.width()));
+
+        painter.save();
+        painter.setFont(projectTitleFont);
+        painter.setPen(Qt::black);
+        painter.drawText(titleRect, Qt::AlignHCenter | Qt::AlignVCenter, displayTitle);
+        painter.restore();
+    };
+
     const auto preferredLayout = layoutForPlotHeight(pageRect.height() * PreferredPlotHeightRatio);
     const bool preferredPreservesNetwork =
         patch134NetworkScale > 0.0 &&
         preferredLayout.networkScale >= patch134NetworkScale * PreserveNetworkScaleTolerance;
 
     if (preferredPreservesNetwork) {
+        drawProjectTitle(preferredLayout.titleRect);
         drawPlotImageForPdf(painter, plotImage, preferredLayout.plotSlot, PdfVerticalAlignment::Top);
         m_circuitPreview->renderForPrint(painter, preferredLayout.networkRect);
     } else {
@@ -2060,10 +2161,13 @@ void KFilterQt6App::exportNetworkSchematicPdf()
             compactLayout.networkScale >= patch134NetworkScale * PreserveNetworkScaleTolerance;
 
         if (compactPreservesNetwork) {
+            drawProjectTitle(compactLayout.titleRect);
             drawPlotImageForPdf(painter, plotImage, compactLayout.plotSlot, PdfVerticalAlignment::Top);
             m_circuitPreview->renderForPrint(painter, compactLayout.networkRect);
         } else {
-            drawPlotImageForPdf(painter, plotImage, pageRect);
+            const auto plotOnlyLayout = layoutForPlotHeight(pageRect.height());
+            drawProjectTitle(plotOnlyLayout.titleRect);
+            drawPlotImageForPdf(painter, plotImage, plotOnlyLayout.plotSlot, PdfVerticalAlignment::Top);
             if (!writer.newPage()) {
                 painter.end();
                 QMessageBox::warning(this, tr("Export Project as PDF"),
@@ -2570,10 +2674,6 @@ void KFilterQt6App::toggleDriverPlotVisibilityFromPreview(int driverIndex)
 
 void KFilterQt6App::openDriverParametersDialog(int initialDriverIndex)
 {
-    if (raiseActiveNetworkSectionEditor()) {
-        return;
-    }
-
     const int safeInitialDriverIndex =
         std::clamp(initialDriverIndex, 0, KFilterProjectIo::DriverCount - 1);
 
@@ -2600,7 +2700,28 @@ void KFilterQt6App::editNetworkParameters()
         return;
     }
 
-    NetworkParametersDialog dialog(m_doc->m_driverDriver, this, m_lastNetworkParametersDriverIndex);
+    openNetworkParametersDialog(m_lastNetworkParametersDriverIndex);
+}
+
+void KFilterQt6App::editNetworkParametersFromPreview(int driverIndex)
+{
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
+    if (driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount) {
+        return;
+    }
+
+    openNetworkParametersDialog(driverIndex);
+}
+
+void KFilterQt6App::openNetworkParametersDialog(int initialDriverIndex)
+{
+    const int safeInitialDriverIndex =
+        std::clamp(initialDriverIndex, 0, KFilterProjectIo::DriverCount - 1);
+
+    NetworkParametersDialog dialog(m_doc->m_driverDriver, this, safeInitialDriverIndex);
     connect(&dialog, &NetworkParametersDialog::parametersApplied, this, [this]() {
         m_doc->setModified(true);
         m_doc->viewrefresh();
@@ -2617,9 +2738,30 @@ void KFilterQt6App::editActiveFilterParameters()
         return;
     }
 
+    openActiveFilterParametersDialog(m_lastActiveFilterDriverIndex);
+}
+
+void KFilterQt6App::editActiveFilterParametersFromPreview(int driverIndex)
+{
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
+    if (driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount) {
+        return;
+    }
+
+    openActiveFilterParametersDialog(driverIndex);
+}
+
+void KFilterQt6App::openActiveFilterParametersDialog(int initialDriverIndex)
+{
+    const int safeInitialDriverIndex =
+        std::clamp(initialDriverIndex, 0, KFilterProjectIo::DriverCount - 1);
+
     ActiveFilterParametersDialog dialog(m_doc->activeFilterChains(),
                                         this,
-                                        m_lastActiveFilterDriverIndex);
+                                        safeInitialDriverIndex);
     connect(&dialog, &ActiveFilterParametersDialog::parametersPreviewChanged, this, [this]() {
         m_doc->viewrefresh();
     });
@@ -2640,9 +2782,31 @@ void KFilterQt6App::editBaffleParameters()
         return;
     }
 
+    openBaffleParametersDialog(m_lastBaffleDriverIndex);
+}
+
+void KFilterQt6App::editBaffleParametersFromPreview(int driverIndex)
+{
+    if (raiseActiveNetworkSectionEditor()) {
+        return;
+    }
+
+    if (driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount) {
+        return;
+    }
+
+    openBaffleParametersDialog(driverIndex);
+}
+
+void KFilterQt6App::openBaffleParametersDialog(int initialDriverIndex)
+{
+    const int safeInitialDriverIndex =
+        std::clamp(initialDriverIndex, 0, KFilterProjectIo::DriverCount - 1);
+
     BaffleParametersDialog dialog(m_doc->baffleSettingsPerDriver(),
+                                  m_doc->floorReflectionSettingsPerDriver(),
                                   this,
-                                  m_lastBaffleDriverIndex);
+                                  safeInitialDriverIndex);
     connect(&dialog, &BaffleParametersDialog::parametersPreviewChanged, this, [this]() {
         m_doc->viewrefresh();
     });
@@ -2650,7 +2814,7 @@ void KFilterQt6App::editBaffleParameters()
         m_doc->setModified(true);
         m_doc->viewrefresh();
         statusBar()->showMessage(
-            tr("Baffle / Diffraction parameters applied; Stage-1 processing and diagnostic visibility are stored with the project."),
+            tr("Baffle / Diffraction and Floor Reflection parameters applied; processing and placement settings are stored with the project."),
             4000);
     });
     dialog.exec();

@@ -10,6 +10,7 @@
 #include "activefiltermodel.h"
 #include "bafflemodel.h"
 #include "driver.h"
+#include "floorreflectionmodel.h"
 #include "kfiltermeasurementcurve.h"
 
 #include <QString>
@@ -22,10 +23,11 @@ public:
     static constexpr int DriverCount = 4;
     static constexpr int NetworkUnitCount = 48;
     static constexpr int LegacyJsonFormatVersion = 1;
-    static constexpr int JsonFormatVersion = 6;
+    static constexpr int JsonFormatVersion = 10;
 
     using ActiveFilterChains = std::array<ActiveFilterChain, DriverCount>;
     using BaffleSettingsPerDriver = std::array<BaffleSettings, DriverCount>;
+    using FloorReflectionSettingsPerDriver = std::array<FloorReflectionSettings, DriverCount>;
     using MeasurementCurves = std::array<KFilterMeasurementCurve, DriverCount>;
     using MeasurementHiddenStates = std::array<bool, DriverCount>;
 
@@ -36,6 +38,7 @@ public:
                              MeasurementHiddenStates& measurementHiddenForDrivers,
                              ActiveFilterChains& activeFilterChains,
                              BaffleSettingsPerDriver& baffleSettings,
+                             FloorReflectionSettingsPerDriver& floorReflectionSettings,
                              QString* errorMessage = nullptr);
 
     static bool saveToFile(const QString& filePath,
@@ -45,6 +48,7 @@ public:
                            const MeasurementHiddenStates& measurementHiddenForDrivers,
                            const ActiveFilterChains& activeFilterChains,
                            const BaffleSettingsPerDriver& baffleSettings,
+                           const FloorReflectionSettingsPerDriver& floorReflectionSettings,
                            QString* errorMessage = nullptr);
 };
 

@@ -72,6 +72,12 @@ signals:
     void driverClicked(int driverIndex);
     void driverHovered(int driverIndex);
     void driverActivityLampClicked(int driverIndex);
+    void activeFilterClicked(int driverIndex);
+    void activeFilterHovered(int driverIndex);
+    void networkParametersClicked(int driverIndex);
+    void networkParametersHovered(int driverIndex);
+    void baffleParametersClicked(int driverIndex);
+    void baffleParametersHovered(int driverIndex);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -114,6 +120,24 @@ private:
         int driverIndex = 0;
     };
 
+    struct ActiveFilterHit
+    {
+        QRectF bounds;
+        int driverIndex = 0;
+    };
+
+    struct NetworkParametersHit
+    {
+        QRectF bounds;
+        int driverIndex = 0;
+    };
+
+    struct BaffleParametersHit
+    {
+        QRectF bounds;
+        int driverIndex = 0;
+    };
+
     enum class RenderStyle
     {
         Screen = 0,
@@ -133,7 +157,10 @@ private:
         None = 0,
         NetworkSection,
         Driver,
-        DriverActivityLamp
+        DriverActivityLamp,
+        ActiveFilter,
+        NetworkParameters,
+        BaffleParameters
     };
 
     struct DriverSnapshot
@@ -160,12 +187,21 @@ private:
     void registerSectionHit(int section, NetworkHitGroup group, const QRectF& bounds) const;
     void registerDriverHit(const QRectF& bounds) const;
     void registerDriverActivityLampHit(const QRectF& bounds) const;
+    void registerActiveFilterHit(const QRectF& bounds) const;
+    void registerNetworkParametersHit(const QRectF& bounds) const;
+    void registerBaffleParametersHit(const QRectF& bounds) const;
     bool findSectionHit(const QPoint& position, NetworkSectionHit& hit) const;
     bool findDriverHit(const QPoint& position, DriverHit& hit) const;
     bool findDriverActivityLampHit(const QPoint& position, DriverActivityLampHit& hit) const;
+    bool findActiveFilterHit(const QPoint& position, ActiveFilterHit& hit) const;
+    bool findNetworkParametersHit(const QPoint& position, NetworkParametersHit& hit) const;
+    bool findBaffleParametersHit(const QPoint& position, BaffleParametersHit& hit) const;
     bool sameSectionHit(const NetworkSectionHit& lhs, const NetworkSectionHit& rhs) const;
     bool sameDriverHit(const DriverHit& lhs, const DriverHit& rhs) const;
     bool sameDriverActivityLampHit(const DriverActivityLampHit& lhs, const DriverActivityLampHit& rhs) const;
+    bool sameActiveFilterHit(const ActiveFilterHit& lhs, const ActiveFilterHit& rhs) const;
+    bool sameNetworkParametersHit(const NetworkParametersHit& lhs, const NetworkParametersHit& rhs) const;
+    bool sameBaffleParametersHit(const BaffleParametersHit& lhs, const BaffleParametersHit& rhs) const;
     void updateHoverHit(const QPoint& position);
     void clearHoverHit();
     QSize sourceSizeForRender(RenderStyle style) const;
@@ -234,9 +270,15 @@ private:
     mutable QVector<NetworkSectionHit> m_sectionHits;
     mutable QVector<DriverHit> m_driverHits;
     mutable QVector<DriverActivityLampHit> m_driverActivityLampHits;
+    mutable QVector<ActiveFilterHit> m_activeFilterHits;
+    mutable QVector<NetworkParametersHit> m_networkParametersHits;
+    mutable QVector<BaffleParametersHit> m_baffleParametersHits;
     NetworkSectionHit m_hoverSectionHit;
     DriverHit m_hoverDriverHit;
     DriverActivityLampHit m_hoverDriverActivityLampHit;
+    ActiveFilterHit m_hoverActiveFilterHit;
+    NetworkParametersHit m_hoverNetworkParametersHit;
+    BaffleParametersHit m_hoverBaffleParametersHit;
     HoverHitKind m_hoverHitKind = HoverHitKind::None;
     RenderStyle m_renderStyle = RenderStyle::Screen;
 };

@@ -45,7 +45,9 @@ QPen activeFilterResponsePen(const QColor& color)
 
 QPen baffleResponsePen(const QColor& color)
 {
-    QPen pen(color);
+    // Keep the driver hue for identification, but make the optional Baffle
+    // diagnostic curve deliberately brighter than the normal response curve.
+    QPen pen(color.lighter(135));
     pen.setWidth(2);
     pen.setStyle(Qt::CustomDashLine);
     pen.setDashPattern(QList<qreal>{2.0, 3.0, 7.0, 3.0});
@@ -64,9 +66,7 @@ KFilterView::KFilterView(KFilterDoc *document, QWidget *parent)
     setMinimumSize(640, 360);
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
-    Start = 125.6637061;
-    Faktor = 1.047128548;
-    initXvalue();
+    initAngularFrequencyGrid();
 }
 
 KFilterView::~KFilterView() = default;
@@ -251,9 +251,9 @@ double KFilterView::xToFrequencyHz(double x) const
         return std::numeric_limits<double>::quiet_NaN();
     }
 
-    constexpr double MinimumFrequencyHz = 20.0;
     constexpr double FrequencyRatio = 1000.0;
-    return MinimumFrequencyHz * std::exp((x / static_cast<double>(width())) * std::log(FrequencyRatio));
+    return KFilterMinimumFrequencyHz *
+           std::exp((x / static_cast<double>(width())) * std::log(FrequencyRatio));
 }
 
 double KFilterView::frequencyHzToX(double frequencyHz) const
@@ -262,10 +262,9 @@ double KFilterView::frequencyHzToX(double frequencyHz) const
         return std::numeric_limits<double>::quiet_NaN();
     }
 
-    constexpr double MinimumFrequencyHz = 20.0;
     constexpr double FrequencyRatio = 1000.0;
     return static_cast<double>(width()) *
-           std::log(frequencyHz / MinimumFrequencyHz) / std::log(FrequencyRatio);
+           std::log(frequencyHz / KFilterMinimumFrequencyHz) / std::log(FrequencyRatio);
 }
 
 double KFilterView::yToPressureDb(double y) const
@@ -348,11 +347,16 @@ bool KFilterView::measurementMergeAppliedForDriver(int driverIndex) const
            m_document->splCorrectionCurve(driverIndex).size() >= 2;
 }
 
-void KFilterView::initXvalue()
+void KFilterView::initAngularFrequencyGrid()
 {
-    Xvalue[0] = Start;
-    for (int i = 1; i < 150; i++) {
-        Xvalue[i] = Xvalue[i - 1] * Faktor;
+    // XK() retains the historical angular-frequency coordinate system. Keep
+    // its exact recurrence, but source the sample count, minimum frequency and
+    // frequency step from the central KFilter frequency-grid contract.
+    constexpr double TwoPiLegacy = 6.283185305;
+    m_angularFrequencyGrid[0] = KFilterMinimumFrequencyHz * TwoPiLegacy;
+    for (std::size_t sampleIndex = 1; sampleIndex < KFilterFrequencyCount; ++sampleIndex) {
+        m_angularFrequencyGrid[sampleIndex] =
+            m_angularFrequencyGrid[sampleIndex - 1] * KFilterFrequencyStep;
     }
 }
 
@@ -391,13 +395,13 @@ KFilterView::CurveLabelAnchor KFilterView::findLastVisibleCurvePoint(const doubl
         return {};
     }
 
-    QPointF points[150];
-    bool valid[150] = {};
-    for (int i = 0; i < 150; i++) {
+    std::array<QPointF, KFilterFrequencyCount> points{};
+    std::array<bool, KFilterFrequencyCount> valid{};
+    for (std::size_t i = 0; i < KFilterFrequencyCount; ++i) {
         if (!std::isfinite(values[i])) {
             continue;
         }
-        points[i] = QPointF(XK(Xvalue[i]), YScale(values[i], type));
+        points[i] = QPointF(XK(m_angularFrequencyGrid[i]), YScale(values[i], type));
         valid[i] = true;
     }
 
@@ -423,7 +427,7 @@ KFilterView::CurveLabelAnchor KFilterView::findLastVisibleCurvePoint(const doubl
         return best;
     };
 
-    for (int i = 148; i >= 0; i--) {
+    for (int i = static_cast<int>(KFilterFrequencyCount) - 2; i >= 0; --i) {
         if (!valid[i] || !valid[i + 1]) {
             continue;
         }
@@ -453,9 +457,9 @@ KFilterView::CurveLabelAnchor KFilterView::findLastVisibleCurvePoint(const doubl
 
 void KFilterView::drawCurve(QPainter& painter, const double values[200], int type)
 {
-    QPoint lastPoint(XK(Xvalue[0]), YScale(values[0], type));
-    for (int i = 1; i < 150; i++) {
-        const QPoint nextPoint(XK(Xvalue[i]), YScale(values[i], type));
+    QPoint lastPoint(XK(m_angularFrequencyGrid[0]), YScale(values[0], type));
+    for (std::size_t i = 1; i < KFilterFrequencyCount; ++i) {
+        const QPoint nextPoint(XK(m_angularFrequencyGrid[i]), YScale(values[i], type));
         painter.drawLine(lastPoint, nextPoint);
         lastPoint = nextPoint;
     }

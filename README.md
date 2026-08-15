@@ -98,7 +98,7 @@ With **Merge Measurement** enabled, the interpolated correction is applied to th
 
 The **Hide Measurement for Driver** submenu controls each driver independently. A checked driver keeps its simulated SPL curve visible but suppresses both the stored correction curve and its correction influence. With Merge enabled, hidden drivers therefore contribute their uncorrected simulation to vector and energetic sums, while non-hidden drivers contribute their corrected simulation. The same effective contribution is used for the individual curve and both sum modes, so mixed hide states remain mathematically and visually consistent.
 
-Only the resulting relative correction points are project data. The original measurement file, absolute raw levels, calibration range, offset settings, and fade settings are not persisted. The current `.kfp` JSON format version 6 stores each correction curve together with its per-driver hide state, plus the project-wide merge switch. It also persists every driver's complete active-filter metadata and Baffle / Diffraction settings. Calculated complex transfer-response arrays remain transient and are rebuilt from the stored metadata after loading. PDF rendering follows the same effective per-driver correction state as the plot.
+Only the resulting relative correction points are project data. The original measurement file, absolute raw levels, calibration range, offset settings, and fade settings are not persisted. Measurement correction persistence was introduced with `.kfp` JSON format version 6 and remains part of the current format version 10: each correction curve is stored together with its per-driver hide state and the project-wide merge switch. The current format also persists every driver's complete active-filter, Baffle / Diffraction, and Floor Reflection settings. Calculated complex transfer-response arrays remain transient and are rebuilt from the stored metadata after loading. PDF rendering follows the same effective per-driver correction state as the plot.
 
 ### Active filters
 
@@ -213,7 +213,7 @@ the current DSP; the dialog therefore exposes only center frequency and Q for No
 If any enabled section in a chain is unsupported or invalid, the complete active
 filter stage for that driver is bypassed rather than applying a supported prefix.
 Active-filter metadata was introduced in `.kfp` format version 5 and remains part of
-the current version-6 format; calculated 150-point complex responses remain transient
+the current version-10 format; calculated 150-point complex responses remain transient
 cache data.
 
 ### Baffle / Diffraction
@@ -224,8 +224,9 @@ Baffle processing stage per driver. Two models are available:
 - **Simple Baffle Step**: width-only engineering shelf with midpoint
   `f0 = 115 / W[m]`, 0 dB LF reference, +3.0103 dB at `f0`, and approximately
   +6.02 dB at high frequency.
-- **Rectangular Edge Diffraction**: sharp-edged, point-source, on-axis far-field
-  model using baffle width/height and the driver centre position `(X,Y)`.
+- **Rectangular Edge Diffraction**: geometry-aware on-axis far-field edge model
+  using baffle width/height and driver centre position `(X,Y)`, with the existing
+  finite-piston spatial averaging and optional left/right 45-degree chamfers.
 
 The Patch-192 rectangular model discretizes the perimeter into 200 edge sources by
 default, distributed approximately in proportion to edge length while retaining all
@@ -238,24 +239,74 @@ w_j       = phi_j / (2*pi)
 k          = 2*pi*f / 343 m/s
 ```
 
-`b_j` is the driver-centre-to-edge-source distance. Stage 2 replaces Stage 1; the two
-responses are never multiplied together. There is no hidden observer-distance
-parameter in this first rectangular model.
+`b_j` is the driver-centre-to-edge-source distance. This expression remains the
+**unblended raw Rectangular reference**; there is no hidden observer-distance parameter.
+
+Patch 246 changes the productive **Free field** magnitude because the raw edge model
+was found to rise too strongly in the low-midrange for a compensation-oriented design
+tool. KFilter now keeps the complete raw Rectangular/finite-piston/chamfer geometry and
+its complex phase, but blends only magnitude in dB toward the established width-only
+Simple Baffle Step response:
+
+```text
+fBS = 115 / W[m]
+r   = f / fBS
+w   = r^2 / (1 + r^2)
+D   = Dsimple + w * (Draw - Dsimple)
+```
+
+Thus the response stays close to the conservative Simple Baffle Step at low frequency,
+is exactly halfway between Simple and raw Rectangular magnitude at `fBS`, and converges
+smoothly toward the raw geometry model at higher frequency. The blend weight depends
+only on baffle width; height, driver position, finite-piston averaging and chamfers still
+enter through `Draw`. The raw Rectangular phase is preserved by a positive real magnitude
+rescale. This is an engineering hybrid/trust law, not a claim that `n=2` is a fundamental
+acoustic constant. The separate **Rigid floor contact (diffraction only)** boundary mode
+remains on its previously validated normalized image-geometry path and is not hybridized.
+The Simple and raw Rectangular responses are blended, never multiplied.
 
 The resulting complex multiplier is inserted after the Active Filter response and
 before the scalar Measurement correction in the centralized driver path, so both its
-magnitude and phase also enter the vector SPL sum. Invalid rectangular geometry safely
-bypasses only the Baffle stage.
+magnitude and preserved Rectangular phase also enter the vector SPL sum. Invalid
+rectangular geometry safely bypasses only the Baffle stage.
 
 The optional diagnostic overlay shows `20 * log10(|H_baffle(f)|)` with its own
 dash-dot plot style. Diagnostic visibility never controls whether the Baffle stage
 itself is active. **Hide Measurement** affects only the Measurement correction and
 therefore does not bypass Baffle processing.
 
-`.kfp` format version 6 stores each driver's Baffle enable state, model, width,
-rectangular geometry, diagnostic visibility, and edge-source count. The 150-point
-complex Baffle response and cache generation are not serialized. Projects through
-format version 5 load with Baffle processing disabled and default settings.
+Baffle persistence was introduced with `.kfp` format version 6 and remains part of
+the current format version 10. Each driver's Baffle enable state, model, width,
+rectangular geometry, diagnostic visibility, and edge-source count are stored. The
+150-point complex Baffle response and cache generation are not serialized. Projects
+through format version 5 load with Baffle processing disabled and default settings.
+
+### Floor Reflection
+
+Patch 229 exposes the productive Floor Reflection stage in the existing
+**Edit -> Baffle / Diffraction Parameters...** dialog. The stage remains independent
+from Baffle / Diffraction processing and from the `Rigid floor contact (diffraction only)`
+boundary selector. Per driver the dialog provides:
+
+- **Enable floor reflection for this driver**
+- **Cabinet bottom above floor**
+- **Listener height above floor**
+- **Listening distance**
+- **Surface**, with **Hard / rigid floor** and the experimental
+  **Porous floor - Miki reference**
+
+Source height is not an independent input. It is derived from
+`cabinet bottom above floor + Baffle height - Driver Y from top`. Therefore Baffle
+height and Driver Y remain editable whenever Floor Reflection is enabled, even if
+Baffle / Diffraction itself is bypassed or uses the width-only Simple Baffle Step
+model. The dialog status line reports the derived source height or explains when
+invalid geometry causes only the Floor Reflection stage to be bypassed. Floor
+Reflection edits use the same live-preview and Apply/OK/Cancel semantics as the
+existing Baffle controls. `Hard / rigid floor` remains the exact validated reference
+path. `Porous floor - Miki reference` uses a 10 mm Miki porous layer with flow
+resistivity 100000 Pa*s/m^2 on a rigid backing. It is intentionally labelled as an
+experimental engineering reference rather than a claim to represent a specific
+carpet. The planned side-view geometry preview remains deferred.
 
 ### Network preview
 
@@ -439,7 +490,7 @@ If Section 8 already contains shunt values, KFilter asks before replacing them.
 
 ### 5. Use the network preview
 
-The network preview shows the current network topology graphically. Click a section R/C/L group to edit that section, or click the driver/enclosure sketch on the right to open the matching driver parameter tab. The small lamp next to each driver title is lit when at least one curve/total flag is enabled for that driver; clicking it toggles plot visibility for that driver.
+The network preview shows the current network topology graphically and also acts as direct navigation to the main per-driver editors. Click a section R/C/L group to edit that section; click the AC source at the far left for **Network / Filter Parameters**; click the driver/enclosure area for **Driver Parameters**; click the radiation-wave symbol immediately to the right of the loudspeaker for **Baffle / Diffraction Parameters**; and click the Active Filter strip to the right of the driver title for **Active Filter Parameters**. The small lamp next to each driver title is lit when at least one curve/total flag is enabled for that driver; clicking it toggles plot visibility for that driver. Hovering these interactive areas shows their action in the status bar.
 
 The default mode is:
 
@@ -474,7 +525,7 @@ File -> Save
 File -> Save As...
 ```
 
-Projects are saved as versioned, human-readable JSON while retaining the `.kfp` extension. Legacy text-based `.kfp` files and JSON format versions 1 through 3 can still be opened; saving such a project rewrites it in the current version 4 format. SPL correction curves, their per-driver hide states, and the `Merge Measurements` state are project data.
+Projects are saved as versioned, human-readable JSON while retaining the `.kfp` extension. Legacy text-based `.kfp` files and JSON format versions 1 through 9 can still be opened; saving such a project rewrites it in the current version 10 format. SPL correction curves, per-driver active-filter and Baffle settings, and Floor Reflection placement/surface metadata are project data. Floor Reflection remains disabled by default for backward-compatible project behavior; version 10 adds the experimental porous-surface preset introduced in Patch 229.
 
 ## User settings
 
@@ -521,6 +572,16 @@ Patch 166 hardens the internal driver state handling. Calculation-relevant sette
 Patch 167 adds neutral correction fast paths. Disabled merge state, all-zero correction curves, and curves outside the fixed SPL simulation raster now bypass per-sample interpolation when drawing individual curves and bypass interpolation, dB-to-linear conversion, and correction multiplication in SPL sums. A zero dB correction also returns amplitude factor 1 directly without evaluating `pow()`.
 
 Patch 168 caches SPL correction values and amplitude factors on the fixed 150-point simulation raster. Each correction curve now exposes its points read-only and advances a unique revision whenever controlled mutation changes its contents. The document cache is rebuilt only after curve replacement or mutation, merge-state changes, project loading, or document clearing; drawing, labels, and both SPL summary modes reuse the prepared values.
+
+Patch 225 introduces the product-level Floor Reflection settings model and project persistence without changing the acoustic signal path. Each driver stores an enable flag, cabinet-bottom height above the floor, listener height, horizontal listening distance, and the currently sole `Hard / rigid` surface preset. The `.kfp` JSON format is advanced to version 9; versions 1 through 8 and legacy text projects load with Floor Reflection disabled and the documented defaults.
+
+Patch 226 activates the validated ideal-rigid Floor Reflection response in the centralized complex driver path. Source height is derived from `cabinetBottomAboveFloorMm + baffleHeight - driverYFromTop`; the response is independent of whether Baffle/Diffraction processing itself is enabled. The processing order is Driver -> Active Filter -> Baffle/Diffraction -> Floor Reflection -> Measurement. Disabled, invalid or unsupported Floor Reflection remains a neutral bypass.
+
+Patch 227 adds the product GUI for those settings to the existing per-driver Baffle / Diffraction dialog. Baffle height and Driver Y stay editable while Floor Reflection is enabled even if the Baffle processing stage itself is bypassed. The first GUI release exposes only the validated `Hard / rigid floor` surface; the planned side-view preview and porous/material models remain deferred.
+
+Patch 228 adds a **developer diagnostic** for frequency- and angle-dependent porous floor surfaces based on Miki's empirical model for a rigid-backed porous layer. This diagnostic is intentionally not yet a product preset: the normal application and `.kfp` format still expose only `Hard / rigid floor`. The command-line tool can compare the rigid response with a documented 10 mm / 100000 Pa*s/m^2 Miki reference case or with explicitly supplied thickness/flow-resistivity values before any user-facing carpet/underlay presets are chosen.
+
+Patch 229 promotes that exact 10 mm / 100000 Pa*s/m^2 Miki reference case into the productive Floor Reflection surface selector. The low-level Patch-228 material solver is reused without duplication, `Hard / rigid floor` remains unchanged, and the new preset is explicitly marked experimental. The `.kfp` JSON format advances to version 10 so older builds reject projects that may contain the new surface value instead of silently losing it. Version-9 Floor Reflection projects continue to load as `Hard / rigid`.
 
 Project-format compatibility rules:
 

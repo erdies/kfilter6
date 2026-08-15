@@ -76,6 +76,29 @@ bool responsesNear(const BaffleResponse& actual,
     return true;
 }
 
+bool phaseDirectionsNear(const BaffleResponse& first,
+                         const BaffleResponse& second,
+                         double tolerance = 2.0e-12)
+{
+    if (first.status != BaffleResponseStatus::Valid ||
+        second.status != BaffleResponseStatus::Valid) {
+        return false;
+    }
+    for (std::size_t sampleIndex = 0; sampleIndex < KFilterFrequencyCount; ++sampleIndex) {
+        const double firstMagnitude = std::abs(first.values[sampleIndex]);
+        const double secondMagnitude = std::abs(second.values[sampleIndex]);
+        if (firstMagnitude <= 0.0 || secondMagnitude <= 0.0) {
+            return false;
+        }
+        const std::complex<double> firstDirection = first.values[sampleIndex] / firstMagnitude;
+        const std::complex<double> secondDirection = second.values[sampleIndex] / secondMagnitude;
+        if (std::abs(firstDirection - secondDirection) > tolerance) {
+            return false;
+        }
+    }
+    return true;
+}
+
 double maxMagnitudeDifferenceDb(const BaffleResponse& first,
                                 const BaffleResponse& second)
 {
@@ -384,6 +407,108 @@ int main()
         return 1;
     }
 
+    // Patch 216 investigation: expose the four-edge decomposition. Patch 246
+    // keeps this diagnostic on the unblended raw Sharp engine so its geometry
+    // reference remains stable while the productive Free-field response gains
+    // the LF magnitude hybrid. Omitting only the bottom edge must
+    // break the top/bottom mirror symmetry of the candidate response.
+    BaffleSettings floorUpper = rectangular;
+    floorUpper.driverXmm = floorUpper.widthMm / 2.0;
+    floorUpper.driverYmm = floorUpper.heightMm * 0.10;
+    BaffleSettings floorLower = floorUpper;
+    floorLower.driverYmm = floorLower.heightMm - floorUpper.driverYmm;
+
+    const BaffleResponse floorUpperProduction = calculateBaffleResponse(floorUpper);
+    const BaffleResponse floorLowerProduction = calculateBaffleResponse(floorLower);
+    const BaffleResponse floorUpperRaw =
+        calculateBaffleUnblendedRectangularResponseForDiagnostic(floorUpper);
+    const BaffleResponse floorLowerRaw =
+        calculateBaffleUnblendedRectangularResponseForDiagnostic(floorLower);
+    const BaffleRectangularBottomEdgeDiagnostic floorUpperDiagnostic =
+        calculateBaffleRectangularBottomEdgeDiagnostic(floorUpper);
+    const BaffleRectangularBottomEdgeDiagnostic floorLowerDiagnostic =
+        calculateBaffleRectangularBottomEdgeDiagnostic(floorLower);
+    if (!require(responsesNear(floorUpperDiagnostic.freeField,
+                               floorUpperRaw, 2.0e-12),
+                 "bottom-edge diagnostic free-field side must preserve the unblended Sharp reference") ||
+        !require(responsesNear(floorUpperRaw, floorLowerRaw, 2.0e-12),
+                 "unblended free-field rectangular reference must retain vertical mirror symmetry") ||
+        !require(responsesNear(floorUpperProduction, floorLowerProduction, 2.0e-12),
+                 "Patch-246 productive hybrid must retain vertical mirror symmetry") ||
+        !require(phaseDirectionsNear(floorUpperProduction, floorUpperRaw),
+                 "Patch-246 productive LF hybrid must preserve the raw rectangular phase") ||
+        !require(maxMagnitudeDifferenceDb(floorUpperDiagnostic.bottomEdgeOmitted,
+                                          floorLowerDiagnostic.bottomEdgeOmitted) > 0.05,
+                 "omitting only the bottom edge must break vertical mirror symmetry") ||
+        !require(maxMagnitudeDifferenceDb(floorUpperDiagnostic.freeField,
+                                          floorUpperDiagnostic.bottomEdgeOmitted) > 0.05,
+                 "bottom-edge omission candidate must measurably differ from free field")) {
+        return 1;
+    }
+
+    constexpr double FloorDiagnosticDiameterCm = 13.0;
+    const BaffleResponse floorUpperFiniteProduction =
+        calculateBaffleResponse(floorUpper, FloorDiagnosticDiameterCm);
+    const BaffleResponse floorUpperFiniteRaw =
+        calculateBaffleUnblendedRectangularResponseForDiagnostic(
+            floorUpper, FloorDiagnosticDiameterCm);
+    const BaffleRectangularBottomEdgeDiagnostic floorUpperFiniteDiagnostic =
+        calculateBaffleRectangularBottomEdgeDiagnostic(
+            floorUpper, FloorDiagnosticDiameterCm);
+    if (!require(responsesNear(floorUpperFiniteDiagnostic.freeField,
+                               floorUpperFiniteRaw, 2.0e-12),
+                 "finite-piston bottom-edge diagnostic must preserve the unblended Sharp reference") ||
+        !require(phaseDirectionsNear(floorUpperFiniteProduction, floorUpperFiniteRaw),
+                 "finite-piston Patch-246 hybrid must preserve the raw rectangular phase") ||
+        !require(allFinite(floorUpperFiniteDiagnostic.bottomEdgeOmitted),
+                 "finite-piston bottom-edge omission diagnostic must remain finite")) {
+        return 1;
+    }
+
+    // Patch 220 production promotion: the optional rigid-floor boundary must
+    // reproduce the normalized unfolded image-geometry diagnostic exactly,
+    // while Free field remains the unchanged default.
+    BaffleSettings rigidFloor = floorLower;
+    rigidFloor.boundaryCondition =
+        BaffleBoundaryCondition::RigidFloorContactDiffractionOnly;
+    const BaffleResponse rigidFloorProduction =
+        calculateBaffleResponse(rigidFloor, FloorDiagnosticDiameterCm);
+    const BaffleResponse floorLowerFiniteProduction =
+        calculateBaffleResponse(floorLower, FloorDiagnosticDiameterCm);
+    const BaffleRectangularRigidFloorDiagnostic rigidFloorReference =
+        calculateBaffleRectangularRigidFloorDiagnostic(
+            floorLower, FloorDiagnosticDiameterCm);
+    if (!require(rigidFloorProduction.status == BaffleResponseStatus::Valid,
+                 "rigid-floor production response must be valid for Sharp rectangular geometry") ||
+        !require(responsesNear(rigidFloorProduction,
+                               rigidFloorReference.imageGeometryNormalized, 2.0e-12),
+                 "rigid-floor production response must match the normalized image diagnostic") ||
+        !require(maxMagnitudeDifferenceDb(rigidFloorProduction, floorLowerFiniteProduction) > 0.20,
+                 "rigid-floor production mode must measurably differ from Free field near the floor")) {
+        return 1;
+    }
+
+    BaffleSettings floorChamfer = floorUpper;
+    floorChamfer.leftEdgeTreatment = BaffleSideEdgeTreatment::Chamfer45;
+    floorChamfer.leftChamferSetbackMm = 20.0;
+    const BaffleRectangularBottomEdgeDiagnostic unsupportedFloorChamfer =
+        calculateBaffleRectangularBottomEdgeDiagnostic(floorChamfer);
+    if (!require(unsupportedFloorChamfer.freeField.status == BaffleResponseStatus::UnsupportedModel &&
+                 unsupportedFloorChamfer.bottomEdgeOmitted.status == BaffleResponseStatus::UnsupportedModel,
+                 "Patch-216 bottom-edge diagnostic must deliberately reject chamfer geometry")) {
+        return 1;
+    }
+    floorChamfer.boundaryCondition =
+        BaffleBoundaryCondition::RigidFloorContactDiffractionOnly;
+    const BaffleResponse unsupportedFloorChamferProduction =
+        calculateBaffleResponse(floorChamfer);
+    if (!require(unsupportedFloorChamferProduction.status == BaffleResponseStatus::UnsupportedModel,
+                 "Patch-220 rigid-floor production mode must reject chamfer geometry") ||
+        !require(allUnity(unsupportedFloorChamferProduction),
+                 "unsupported rigid-floor chamfer geometry must safely bypass to unity")) {
+        return 1;
+    }
+
     // Stage-2 safety: invalid geometry bypasses only H_baffle.
     const double nan = std::numeric_limits<double>::quiet_NaN();
     for (int invalidCase = 0; invalidCase < 10; ++invalidCase) {
@@ -467,6 +592,15 @@ int main()
         return 1;
     }
 
+    cachedSettings.boundaryCondition =
+        BaffleBoundaryCondition::RigidFloorContactDiffractionOnly;
+    cache.responseFor(cachedSettings, 17.0);
+    if (!require(cache.generation() == widthGeneration,
+                 "Simple Baffle Step cache must ignore stored rectangular boundary history")) {
+        return 1;
+    }
+    cachedSettings.boundaryCondition = BaffleBoundaryCondition::FreeField;
+
     cachedSettings.model = BaffleModel::RectangularEdgeDiffraction;
     constexpr double CachedDiameterCm = 13.0;
     const BaffleResponse& rectangularCached = cache.responseFor(cachedSettings, CachedDiameterCm);
@@ -501,9 +635,53 @@ int main()
         return 1;
     }
 
+    // Stage 3B cache semantics: inactive stored chamfer widths are edit history
+    // only. Selecting Chamfer45 changes the transfer and an active setback
+    // change must then invalidate it.
+    cachedSettings.leftChamferSetbackMm = 30.0;
+    cache.responseFor(cachedSettings, CachedDiameterCm);
+    if (!require(cache.generation() == edgeCountGeneration,
+                 "Sharp side must ignore inactive stored chamfer width")) {
+        return 1;
+    }
+    cachedSettings.leftEdgeTreatment = BaffleSideEdgeTreatment::Chamfer45;
+    cache.responseFor(cachedSettings, CachedDiameterCm);
+    const std::uint64_t chamferGeneration = cache.generation();
+    if (!require(chamferGeneration == edgeCountGeneration + 1,
+                 "selecting Chamfer45 must invalidate the rectangular transfer cache")) {
+        return 1;
+    }
+    cachedSettings.leftChamferSetbackMm = 35.0;
+    cache.responseFor(cachedSettings, CachedDiameterCm);
+    const std::uint64_t chamferWidthGeneration = cache.generation();
+    if (!require(chamferWidthGeneration == chamferGeneration + 1,
+                 "active chamfer width change must invalidate the transfer cache")) {
+        return 1;
+    }
+
     cache.responseFor(cachedSettings, CachedDiameterCm + 1.0);
-    if (!require(cache.generation() == edgeCountGeneration + 1,
-                 "Stage-2 effective Dm change must invalidate transfer cache")) {
+    if (!require(cache.generation() == chamferWidthGeneration + 1,
+                 "Stage-2/3B effective Dm change must invalidate transfer cache")) {
+        return 1;
+    }
+    const std::uint64_t diameterGeneration = cache.generation();
+
+    cachedSettings.leftEdgeTreatment = BaffleSideEdgeTreatment::Sharp;
+    cache.responseFor(cachedSettings, CachedDiameterCm + 1.0);
+    const std::uint64_t sharpGeneration = cache.generation();
+    if (!require(sharpGeneration == diameterGeneration + 1,
+                 "returning from Chamfer45 to Sharp must invalidate the transfer cache")) {
+        return 1;
+    }
+
+    cachedSettings.boundaryCondition =
+        BaffleBoundaryCondition::RigidFloorContactDiffractionOnly;
+    const BaffleResponse& rigidFloorCached =
+        cache.responseFor(cachedSettings, CachedDiameterCm + 1.0);
+    if (!require(cache.generation() == sharpGeneration + 1,
+                 "changing rectangular boundary condition must invalidate the transfer cache") ||
+        !require(rigidFloorCached.status == BaffleResponseStatus::Valid,
+                 "cache must calculate the Sharp rigid-floor response")) {
         return 1;
     }
 

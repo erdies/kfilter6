@@ -65,8 +65,11 @@ private slots:
     void editDriverParameters();
     void editDriverParametersFromPreview(int driverIndex);
     void editNetworkParameters();
+    void editNetworkParametersFromPreview(int driverIndex);
     void editActiveFilterParameters();
+    void editActiveFilterParametersFromPreview(int driverIndex);
     void editBaffleParameters();
+    void editBaffleParametersFromPreview(int driverIndex);
     void refreshCircuitPreview();
     void showAboutDialog();
     void resetWindowLayout();
@@ -86,8 +89,11 @@ private slots:
     void clearNetworkSectionFromPreview(int driverIndex, int sectionIndex, int groupValue);
     void showNetworkSectionHoverFromPreview(int driverIndex, int sectionIndex, int groupValue);
     void showDriverHoverFromPreview(int driverIndex);
+    void showActiveFilterHoverFromPreview(int driverIndex);
+    void showNetworkParametersHoverFromPreview(int driverIndex);
+    void showBaffleParametersHoverFromPreview(int driverIndex);
     void toggleDriverPlotVisibilityFromPreview(int driverIndex);
-    void clearNetworkSectionHoverFromPreview();
+    void clearCircuitPreviewHover();
     void setFileToolBarVisible(bool visible);
     void setEditToolBarVisible(bool visible);
     void setStatusBarVisible(bool visible);
@@ -118,6 +124,9 @@ private:
     void updateMeasurementActions();
     QString measurementDriverMenuText(int driverIndex) const;
     void openDriverParametersDialog(int initialDriverIndex);
+    void openNetworkParametersDialog(int initialDriverIndex);
+    void openActiveFilterParametersDialog(int initialDriverIndex);
+    void openBaffleParametersDialog(int initialDriverIndex);
     bool networkSectionEditInProgress() const;
     bool raiseActiveNetworkSectionEditor();
     bool projectUrlFromDropMimeData(const QMimeData *mimeData, QUrl &url) const;

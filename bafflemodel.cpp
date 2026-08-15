@@ -6,6 +6,23 @@
 
 #include "bafflemodel.h"
 
+namespace
+{
+bool edgeTreatmentTransferEquivalent(BaffleSideEdgeTreatment treatment,
+                                     double setbackMm,
+                                     BaffleSideEdgeTreatment otherTreatment,
+                                     double otherSetbackMm)
+{
+    if (treatment != otherTreatment) {
+        return false;
+    }
+    if (treatment == BaffleSideEdgeTreatment::Sharp) {
+        return true;
+    }
+    return setbackMm == otherSetbackMm;
+}
+}
+
 bool BaffleSettings::transferEquivalent(const BaffleSettings& other) const
 {
     if (enabled != other.enabled) {
@@ -26,11 +43,20 @@ bool BaffleSettings::transferEquivalent(const BaffleSettings& other) const
         return widthMm == other.widthMm;
 
     case BaffleModel::RectangularEdgeDiffraction:
-        return widthMm == other.widthMm &&
+        return boundaryCondition == other.boundaryCondition &&
+               widthMm == other.widthMm &&
                heightMm == other.heightMm &&
                driverXmm == other.driverXmm &&
                driverYmm == other.driverYmm &&
-               edgeSourceCount == other.edgeSourceCount;
+               edgeSourceCount == other.edgeSourceCount &&
+               edgeTreatmentTransferEquivalent(leftEdgeTreatment,
+                                               leftChamferSetbackMm,
+                                               other.leftEdgeTreatment,
+                                               other.leftChamferSetbackMm) &&
+               edgeTreatmentTransferEquivalent(rightEdgeTreatment,
+                                               rightChamferSetbackMm,
+                                               other.rightEdgeTreatment,
+                                               other.rightChamferSetbackMm);
     }
 
     return false;

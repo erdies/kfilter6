@@ -8,6 +8,7 @@
 #define BAFFLEPARAMETERSDIALOG_H
 
 #include "bafflemodel.h"
+#include "floorreflectionmodel.h"
 #include "kfilterprojectio.h"
 
 #include <QDialog>
@@ -23,11 +24,15 @@ class QTabWidget;
 class QWidget;
 
 /**
- * Per-driver editor for Baffle / Diffraction project settings.
+ * Per-driver editor for Baffle / Diffraction and Floor Reflection settings.
  *
- * Patch 192 exposes both the complex Simple Baffle Step and the initial
- * on-axis far-field Rectangular Edge Diffraction model. Changes are mirrored
- * temporarily into the current KFilterDoc model for live preview. Apply/OK
+ * The dialog exposes both the complex Simple Baffle Step and the on-axis
+ * Rectangular Edge Diffraction model. Patch 220 adds an optional ideal rigid
+ * floor-contact boundary for Sharp rectangular geometry; Patch 227 adds the
+ * independent receiver-dependent Floor Reflection product controls. Field edits
+ * are mirrored temporarily into the current KFilterDoc model for live preview. A
+ * driver drag updates only the geometry widget and X/Y controls while moving;
+ * the final position enters the live-preview model on mouse release. Apply/OK
  * define the new committed project state; Cancel restores the last committed
  * state.
  */
@@ -38,8 +43,11 @@ class BaffleParametersDialog : public QDialog
 public:
     using BaffleSettingsPerDriver =
         std::array<BaffleSettings, KFilterProjectIo::DriverCount>;
+    using FloorReflectionSettingsPerDriver =
+        std::array<FloorReflectionSettings, KFilterProjectIo::DriverCount>;
 
     explicit BaffleParametersDialog(BaffleSettingsPerDriver& settings,
+                                    FloorReflectionSettingsPerDriver& floorReflectionSettings,
                                     QWidget *parent = nullptr,
                                     int initialDriverIndex = 0);
 
@@ -62,14 +70,26 @@ private:
         QWidget *page = nullptr;
         QCheckBox *enabled = nullptr;
         QComboBox *model = nullptr;
+        QComboBox *boundaryCondition = nullptr;
         QDoubleSpinBox *width = nullptr;
         QDoubleSpinBox *height = nullptr;
         QDoubleSpinBox *driverX = nullptr;
         QDoubleSpinBox *driverY = nullptr;
+        QComboBox *leftEdgeTreatment = nullptr;
+        QDoubleSpinBox *leftChamferSetback = nullptr;
+        QComboBox *rightEdgeTreatment = nullptr;
+        QDoubleSpinBox *rightChamferSetback = nullptr;
         QLabel *midpoint = nullptr;
         BaffleGeometryPreview *geometryPreview = nullptr;
         QCheckBox *showResponse = nullptr;
         QLabel *responseStatus = nullptr;
+
+        QCheckBox *floorReflectionEnabled = nullptr;
+        QDoubleSpinBox *cabinetBottomAboveFloor = nullptr;
+        QDoubleSpinBox *listenerHeightAboveFloor = nullptr;
+        QDoubleSpinBox *listeningDistance = nullptr;
+        QComboBox *floorSurface = nullptr;
+        QLabel *floorReflectionStatus = nullptr;
     };
 
     QWidget *createDriverPage(int driverIndex);
@@ -80,12 +100,16 @@ private:
     void updateMidpointLabel(int driverIndex);
     void updateGeometryPreview(int driverIndex);
     void updateResponseStatus(int driverIndex);
+    void updateFloorReflectionStatus(int driverIndex);
     void previewWorkingModel();
     void applyToModel();
 
     BaffleSettingsPerDriver& m_settings;
+    FloorReflectionSettingsPerDriver& m_floorReflectionSettings;
     BaffleSettingsPerDriver m_committedSettings;
     BaffleSettingsPerDriver m_workingSettings;
+    FloorReflectionSettingsPerDriver m_committedFloorReflectionSettings;
+    FloorReflectionSettingsPerDriver m_workingFloorReflectionSettings;
     std::array<DriverPage, KFilterProjectIo::DriverCount> m_pages;
     QTabWidget *m_tabs = nullptr;
     bool m_loading = false;
