@@ -328,8 +328,8 @@ bool NetworkParametersDialog::applyToDrivers()
                 drv.setUnit(unitIndex(row, column), internalFromDisplay(row, displayValues[driverIndex][row][column]));
             }
         }
-        drv.Berechneparameter();
-        drv.setmodified();
+        drv.calculateParameters();
+        drv.setModified();
     }
 
     return true;

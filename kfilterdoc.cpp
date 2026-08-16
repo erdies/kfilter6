@@ -463,8 +463,8 @@ void KFilterDoc::markLoadedContentsReady()
   invalidateSplCorrectionCaches();
   for ( int intI = 0; intI < 4; intI++ )
   {
-    m_driverDriver[ intI ].Berechneparameter();
-    m_driverDriver[ intI ].setmodified();
+    m_driverDriver[ intI ].calculateParameters();
+    m_driverDriver[ intI ].setModified();
   }
   emit forceviewrefresh();
   modified = false;
@@ -488,10 +488,8 @@ std::complex<double> KFilterDoc::effectivePressureSample(
     return {};
   }
 
-  const int resultIndex = sampleIndex * 2;
-  std::complex<double> sample{
-      m_driverDriver[driverIndex].ResultSchall[resultIndex],
-      m_driverDriver[driverIndex].ResultSchall[resultIndex + 1]};
+  std::complex<double> sample =
+      m_driverDriver[driverIndex].ResultPressure[static_cast<std::size_t>(sampleIndex)];
 
   // Patch 179: the active-filter stage is the first complex post-driver stage.
   // Unsupported/invalid chains deliberately bypass here; the response status is
@@ -527,9 +525,9 @@ std::complex<double> KFilterDoc::effectivePressureSample(
 
 bool KFilterDoc::Sound( int a_intIndex )
 {
-  if (m_driverDriver[ a_intIndex ].PressureisActive )
+  if (m_driverDriver[ a_intIndex ].pressureIsActive )
   {
-    m_driverDriver[ a_intIndex ].Schall();
+    m_driverDriver[ a_intIndex ].calculatePressureResponse();
     const ActiveFilterResponse& activeFilter = activeFilterResponse(a_intIndex);
     const BaffleResponse& baffle = baffleResponse(a_intIndex);
     const FloorReflectionResponse& floorReflection = floorReflectionResponse(a_intIndex);
@@ -545,24 +543,21 @@ bool KFilterDoc::Sound( int a_intIndex )
                                              correctionCache)));
     }
   }
-  return m_driverDriver[ a_intIndex ].PressureisActive;
+  return m_driverDriver[ a_intIndex ].pressureIsActive;
 }
 
 bool KFilterDoc::Impedance( int a_intIndex )
 {
-	if (m_driverDriver[ a_intIndex ].ImpedanzisActive)
+	if (m_driverDriver[ a_intIndex ].impedanceIsActive)
 	{
-		m_driverDriver[ a_intIndex ].Impedanz();
-		int intJ = 0;
-		for (int intI = 0; intI < 300; intI = intI + 2 )
+		m_driverDriver[ a_intIndex ].calculateImpedanceResponse();
+		for (int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex)
 		{
-			m_doubleXContainer[ a_intIndex ][ intJ ] = std::sqrt( std::pow( \
-				m_driverDriver[ a_intIndex ].ResultImpedanz[ intI ], 2.0 ) + \
-				std::pow( m_driverDriver[ a_intIndex ].ResultImpedanz[ intI + 1 ], 2.0 ) );
-			intJ++;
+			m_doubleXContainer[ a_intIndex ][ sampleIndex ] =
+				std::abs(m_driverDriver[ a_intIndex ].ResultImpedance[static_cast<std::size_t>(sampleIndex)]);
 		}
 	}
-	return m_driverDriver[ a_intIndex ].ImpedanzisActive;
+	return m_driverDriver[ a_intIndex ].impedanceIsActive;
 }
 
 bool KFilterDoc::PressureSummary()
@@ -572,9 +567,9 @@ bool KFilterDoc::PressureSummary()
 	////////////////////////////// calculate vector summary for active drivers
 	for( int intIndex = 0; intIndex < 4; intIndex++ )
 	{
-		if ( m_driverDriver[ intIndex ].SummaryisActive )
+		if ( m_driverDriver[ intIndex ].summaryIsActive )
 		{
-			m_driverDriver[ intIndex ].Schall();
+			m_driverDriver[ intIndex ].calculatePressureResponse();
 			const ActiveFilterResponse& activeFilter = activeFilterResponse(intIndex);
 			const BaffleResponse& baffle = baffleResponse(intIndex);
 			const FloorReflectionResponse& floorReflection = floorReflectionResponse(intIndex);
@@ -599,8 +594,8 @@ bool KFilterDoc::PressureSummary()
 			DB(std::abs(complexSum[static_cast<std::size_t>(sampleIndex)]));
 	}
 	///////////////////////////////
-	return ( m_driverDriver[ 0 ].SummaryisActive || m_driverDriver[ 1 ].SummaryisActive || \
-		m_driverDriver[ 2 ].SummaryisActive || m_driverDriver[ 3 ].SummaryisActive);
+	return ( m_driverDriver[ 0 ].summaryIsActive || m_driverDriver[ 1 ].summaryIsActive || \
+		m_driverDriver[ 2 ].summaryIsActive || m_driverDriver[ 3 ].summaryIsActive);
 }
 
 bool KFilterDoc::PressureScalarSummary()
@@ -615,7 +610,7 @@ bool KFilterDoc::PressureScalarSummary()
 	{
 		if ( m_driverDriver[ intIndex ].ScalarSummaryisActive )
 		{
-			m_driverDriver[ intIndex ].Schall();
+			m_driverDriver[ intIndex ].calculatePressureResponse();
 			const ActiveFilterResponse& activeFilter = activeFilterResponse(intIndex);
 			const BaffleResponse& baffle = baffleResponse(intIndex);
 			const FloorReflectionResponse& floorReflection = floorReflectionResponse(intIndex);
@@ -644,37 +639,32 @@ bool KFilterDoc::PressureScalarSummary()
 
 bool KFilterDoc::ImpedanceSummary()
 {
+	std::array<std::complex<double>, PressureSampleCount> admittanceSum{};
 
-	double doubleSum[ 300 ];
-	for ( int intZ = 0; intZ < 300; intZ++ )
-	{
-		doubleSum[ intZ ] = 0;
-	}
 	////////////////////////////// calculate vector summary for active drivers
 	for ( int intIndex = 0; intIndex < 4; intIndex++ )
 	{
-		if ( m_driverDriver[ intIndex ].ImpedanzSummaryisActive )
+		if ( m_driverDriver[ intIndex ].ImpedanceSummaryisActive )
 		{
-			m_driverDriver[ intIndex ].Impedanz();
-			m_driverDriver[ intIndex ].invertImpedanz();
-			for ( int intI = 0; intI < 300; intI++ )
+			m_driverDriver[ intIndex ].calculateImpedanceResponse();
+			m_driverDriver[ intIndex ].invertImpedance();
+			for ( int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex )
 			{
-				doubleSum[ intI ]= doubleSum[ intI ] + m_driverDriver[ intIndex ].ResultImpedanz[ intI ];
+				admittanceSum[static_cast<std::size_t>(sampleIndex)] +=
+					m_driverDriver[ intIndex ].ResultImpedance[static_cast<std::size_t>(sampleIndex)];
 			}
-			m_driverDriver[ intIndex ].invertImpedanz();
+			m_driverDriver[ intIndex ].invertImpedance();
 		}
 	}
 	////////////////////////////// vector summary becomes real summary
-	int intZ = 0;
-	for ( int intI = 0; intI < 300; intI = intI + 2 )
+	for ( int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex )
 	{
-		m_doubleXContainer[ 0 ][ intZ ] = 1.0 / ( std::sqrt( std::pow( doubleSum[ intI ], 2.0 ) +\
-			std::pow( doubleSum[ intI + 1 ], 2.0 ) ) );
-		intZ++;
+		m_doubleXContainer[ 0 ][ sampleIndex ] =
+			1.0 / std::abs(admittanceSum[static_cast<std::size_t>(sampleIndex)]);
 	}
 	///////////////////////////////
-	return ( m_driverDriver[ 0 ].ImpedanzSummaryisActive || m_driverDriver[ 1 ].ImpedanzSummaryisActive || \
-		m_driverDriver[ 2 ].ImpedanzSummaryisActive || m_driverDriver[ 3 ].ImpedanzSummaryisActive);
+	return ( m_driverDriver[ 0 ].ImpedanceSummaryisActive || m_driverDriver[ 1 ].ImpedanceSummaryisActive || \
+		m_driverDriver[ 2 ].ImpedanceSummaryisActive || m_driverDriver[ 3 ].ImpedanceSummaryisActive);
 }
 
 void KFilterDoc::viewrefresh()

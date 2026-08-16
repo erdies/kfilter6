@@ -26,7 +26,7 @@ bool fuzzyEqual(double left, double right)
 
 bool compareDriver(const driver& expected, const driver& actual, QString& error)
 {
-    if (expected.GetTitle() != actual.GetTitle() ||
+    if (expected.getTitle() != actual.getTitle() ||
         !fuzzyEqual(expected.getRdc(), actual.getRdc()) ||
         !fuzzyEqual(expected.getLsp(), actual.getLsp()) ||
         !fuzzyEqual(expected.getF0(), actual.getF0()) ||
@@ -39,13 +39,13 @@ bool compareDriver(const driver& expected, const driver& actual, QString& error)
         !fuzzyEqual(expected.getQl(), actual.getQl()) ||
         !fuzzyEqual(expected.Fb, actual.Fb) ||
         !fuzzyEqual(expected.V2, actual.V2) ||
-        expected.GTypProposal != actual.GTypProposal ||
+        expected.enclosureTypeProposal != actual.enclosureTypeProposal ||
         !fuzzyEqual(expected.gain, actual.gain) ||
-        expected.PressureisActive != actual.PressureisActive ||
-        expected.ImpedanzisActive != actual.ImpedanzisActive ||
-        expected.SummaryisActive != actual.SummaryisActive ||
+        expected.pressureIsActive != actual.pressureIsActive ||
+        expected.impedanceIsActive != actual.impedanceIsActive ||
+        expected.summaryIsActive != actual.summaryIsActive ||
         expected.ScalarSummaryisActive != actual.ScalarSummaryisActive ||
-        expected.ImpedanzSummaryisActive != actual.ImpedanzSummaryisActive ||
+        expected.ImpedanceSummaryisActive != actual.ImpedanceSummaryisActive ||
         expected.InvertPhase != actual.InvertPhase ||
         expected.getFullCircuit() != actual.getFullCircuit()) {
         error = QStringLiteral("Driver parameter round-trip mismatch.");
@@ -168,7 +168,7 @@ bool compareFloor(const FloorReflectionSettings& expected,
 
 void populateSlot(KFilterDriverIo::DriverSlot& slot)
 {
-    slot.driverData.SetTitle(QStringLiteral("Complete KFD Driver äöü"));
+    slot.driverData.setTitle(QStringLiteral("Complete KFD Driver äöü"));
     slot.driverData.setRdc(5.85);
     slot.driverData.setLsp(0.00073);
     slot.driverData.setF0(41.5);
@@ -181,13 +181,13 @@ void populateSlot(KFilterDriverIo::DriverSlot& slot)
     slot.driverData.setQl(7.0);
     slot.driverData.Fb = 36.0;
     slot.driverData.V2 = 3.5;
-    slot.driverData.GTypProposal = 2;
+    slot.driverData.enclosureTypeProposal = EnclosureType::Vented;
     slot.driverData.gain = 1.125;
-    slot.driverData.PressureisActive = true;
-    slot.driverData.ImpedanzisActive = false;
-    slot.driverData.SummaryisActive = true;
+    slot.driverData.pressureIsActive = true;
+    slot.driverData.impedanceIsActive = false;
+    slot.driverData.summaryIsActive = true;
     slot.driverData.ScalarSummaryisActive = false;
-    slot.driverData.ImpedanzSummaryisActive = true;
+    slot.driverData.ImpedanceSummaryisActive = true;
     slot.driverData.InvertPhase = true;
     slot.driverData.setFullCircuit(true);
     for (int unitIndex = 1; unitIndex <= KFilterDriverIo::NetworkUnitCount; ++unitIndex) {

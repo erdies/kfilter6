@@ -1182,3 +1182,407 @@ changed.
   validation, writing or final commit fails.
 - Added `kfilter_driverio_smoketest` for v2 complete-state round trip, the Merge import
   policy and intentional rejection of v1 files.
+
+## Patch 268: Dormant Driver low-pass cleanup; bass-reflex diagnostic retained
+
+- Audited the two dormant legacy paths identified by the Patch-263 Driver
+  refactoring add-on separately rather than treating them as equivalent dead code.
+- Removed the old internal Driver low-pass state (`LowPassL`, `LowPassC`,
+  `LowPassQ`, `LowPassFc`, and `lowPassFlag`). In the current Qt6 code there was
+  no setter, UI, persistence field, or other write path for `LowPassQ` or
+  `LowPassFc`; both were initialized to zero and therefore the path could not be
+  activated by the program.
+- The removed low-pass implementation is preserved here for reconstruction. With
+  `Q = LowPassQ`, `fc = LowPassFc`, angular frequency `omega`, it calculated:
+
+  ```text
+  LowPassL = 1 / (2*pi*Q*fc)
+  LowPassC = Q / (2*pi*fc)
+
+  Zc = 1 / (1 + j*omega*LowPassC)
+  Z  = Zc + j*omega*LowPassL
+  response *= abs(Zc / Z)
+  ```
+
+  This was a magnitude-only multiplication inside the historical Driver acoustic
+  path. It was not numerically identical to the modern complex Active Filter
+  low-pass implementation, so Patch 268 does not claim mathematical replacement;
+  it removes an unreachable implementation while retaining its formula here.
+- `show_reflex_only` is intentionally **not removed**. Historical KFilter versions
+  could use this path to display only the bass-reflex-port output of a vented
+  enclosure. The current UI has no control for it and there is currently little
+  practical design need for that isolated curve, but the calculation can still
+  have diagnostic/academic value. An inline source comment now records that
+  provenance so a later cleanup does not mistake it for unexplained dead state.
+- No Bass Reflex, enclosure, passive-network, Active Filter, Baffle, Measurement,
+  Floor Reflection, persistence, or project-format behavior is changed.
+
+
+## Patch 269: Restore historical Driver natural-roll-off approximation
+
+- Patch 268 removed the dormant internal Driver low-pass after confirming that
+  the current Qt6 program has no write path for `LowPassQ` / `LowPassFc` and
+  therefore cannot activate it. Subsequent reconstruction of the original
+  design intent showed that this was too aggressive for a preservation-oriented
+  refactoring.
+- The historical low-pass is **not** a predecessor or duplicate of the modern
+  user-configurable Active Filter system. It belongs to the physical Driver
+  model: it was intended as a 0 dB-normalized approximation of the natural
+  upper roll-off of a loudspeaker treated as an ideal piston radiator, so that
+  together with the T/S-derived low-frequency high-pass behavior the Driver
+  response exhibits the expected natural band-pass characteristic.
+- `LowPassL`, `LowPassC`, `LowPassQ`, `LowPassFc`, `lowPassFlag`, their parameter
+  calculation and their magnitude-only response multiplication are therefore
+  restored exactly in the runtime path.
+- The current Qt6 source still does **not** contain a productive setter, UI,
+  persistence field, or reconstructed T/S-to-`LowPassQ`/`LowPassFc` derivation.
+  The feature consequently remains dormant. Patch 269 intentionally does not
+  invent that missing derivation or reactivate the feature.
+- The preserved implementation is:
+
+  ```text
+  LowPassL = 1 / (2*pi*Q*fc)
+  LowPassC = Q / (2*pi*fc)
+
+  Zc = 1 / (1 + j*omega*LowPassC)
+  Z  = Zc + j*omega*LowPassL
+  response *= abs(Zc / Z)
+  ```
+
+- This correction illustrates the preservation rule for further Driver cleanup:
+  code that is currently unreachable but has reconstructed physical/modeling
+  meaning is retained until that meaning and its original parameter source have
+  been fully understood.
+- `show_reflex_only` remains retained and documented as the historical
+  bass-reflex-port-only diagnostic path introduced in Patch 268.
+- No current Driver output, persistence format, Active Filter behavior, Baffle,
+  Measurement, Floor Reflection, or passive-network behavior is intentionally
+  changed by this patch.
+
+## Patch 270: Driver Stage-D semantic audit and frequency-grid state cleanup
+
+- Began Stage D with an explicit mathematical audit before renaming or relocating
+  the remaining Driver coefficients. The current names are intentionally retained
+  unless their role is unambiguous across every enclosure path.
+- Removed the private `FrequencyFactor` member. It was initialized to the literal
+  `1.047128548`, which is exactly the project-wide `KFilterFrequencyStep` used by
+  `kfilterfrequencygrid.h`. Pressure and impedance iteration now multiply `omega`
+  by that shared constant directly. This removes duplicate configuration state
+  without changing the historical iterative frequency sequence or its floating-
+  point operation order.
+
+### Reconstructed coefficient semantics
+
+The following identities are derived directly from the current equations. `Qtc`
+continues to mean the legacy field that the Qt6 UI presents as `Qts`.
+
+#### `R`, `C`, `L`: reflected motional parallel-RLC branch
+
+For `omega0 = 2*pi*F0` the Driver calculates:
+
+```text
+R = Qms * Rdc / Qe
+C = Qe / (omega0 * Rdc)
+L = Rdc / (omega0 * Qe)
+```
+
+`calculateEquivalentCircuit()` uses these values as the admittance
+
+```text
+Ymotional = 1/R + j*(omega*C - 1/(omega*L))
+```
+
+before adding the resulting branch impedance to `Rdc + j*omega*Lsp`.
+The formulas satisfy exactly:
+
+```text
+1/sqrt(L*C) = omega0
+R*sqrt(C/L) = Qms
+```
+
+so these are the electrical-side motional equivalent-circuit R/L/C values, not
+arbitrary calculation coefficients.
+
+#### `acousticHighPassCapacitance`, `acousticHighPassInductance`: normalized simplified second-order high-pass
+
+The non-`fullCircuit` Open-Baffle/Sealed path implements the normalized topology
+
+```text
+Zp = 1 / (1 + 1/(s*acousticHighPassInductance))
+Zc = 1 / (s*acousticHighPassCapacitance)
+Hhp(s) = Zp / (Zp + Zc)
+       = s^2*acousticHighPassInductance*acousticHighPassCapacitance
+         / (1 + s*acousticHighPassInductance + s^2*acousticHighPassInductance*acousticHighPassCapacitance)
+```
+
+For free air/Open Baffle:
+
+```text
+acousticHighPassCapacitance = Qts / omega0
+acousticHighPassInductance = 1 / (Qts * omega0)
+```
+
+which gives the standard second-order high-pass with resonance `F0` and quality
+factor `Qts`.
+
+For a sealed enclosure with `alpha = Vas/Vb`:
+
+```text
+acousticHighPassCapacitance = Qts / omega0
+acousticHighPassInductance = 1 / (omega0 * Qts * (1 + alpha))
+```
+
+which corresponds to:
+
+```text
+Fs_box = F0 * sqrt(1 + alpha)
+Q_box  = Qts * sqrt(1 + alpha)
+```
+
+An older retained Driver source calculated these two values explicitly as `Fs`
+and `SystemQ`; they were later removed only because the stored results themselves
+were unused. This historical source therefore corroborates the transfer-function
+interpretation above.
+
+#### `pistonLowPassInductance`, `pistonLowPassCapacitance`: normalized second-order natural-roll-off model
+
+For `omegac = 2*pi*pistonLowPassFrequency`:
+
+```text
+pistonLowPassInductance = 1 / (omegac * pistonLowPassQ)
+pistonLowPassCapacitance = pistonLowPassQ / omegac
+```
+
+The preserved legacy circuit gives:
+
+```text
+Hlp(s) = 1 / (1 + s*pistonLowPassInductance + s^2*pistonLowPassInductance*pistonLowPassCapacitance)
+       = 1 / (1 + s/(omegac*Q) + s^2/omegac^2)
+```
+
+Thus the dormant model is exactly a unity-passband second-order low-pass with
+`fc = pistonLowPassFrequency` and `Q = pistonLowPassQ`. The historical Driver intentionally applies
+only `abs(Hlp)` to the acoustic response, so its phase is discarded.
+
+#### `L2`, `C2`, `R2`: enclosure-dependent secondary branch
+
+These names are overloaded and must not yet be mechanically renamed.
+
+For a vented enclosure:
+
+```text
+L2 = Vb * motionalInductance / Vas
+C2 = 1 / (L2 * (2*pi*Fb)^2)
+R2 = 2*pi*Fb*L2 / Ql
+```
+
+and the equivalent circuit uses the series branch
+
+```text
+Zbox = R2 + j*(omega*L2 - 1/(omega*C2))
+```
+
+so this branch is tuned exactly to `Fb`, with
+
+```text
+omega_b*L2/R2 = Ql
+```
+
+For Open Baffle, however, `L2` is simply assigned `motionalInductance`; for Sealed it becomes
+
+```text
+L2 = 1 / (1/motionalInductance + Vas/(Vb*motionalInductance))
+```
+
+and is used as the effective inductive/compliance term of the motional parallel
+branch. In Bandpass mode `L2/C2/R2` retain the vented branch role while
+`motionalInductance` itself is additionally modified by `V2`. Because `L2` changes semantic role between
+these cases, Stage D deliberately leaves this trio unchanged for now.
+
+#### `ventedDenominatorA0` ... `ventedDenominatorA3`: normalized fourth-order vented-box denominator
+
+In the simplified vented response let:
+
+```text
+x = f / F0
+p = s / (2*pi*F0)
+```
+
+The magnitude code is exactly equivalent to:
+
+```text
+Hvented(p) = p^4 / D(p)
+
+D(p) = p^4
+     + ventedDenominatorA3*p^3
+     + ventedDenominatorA2*p^2
+     + ventedDenominatorA1*p
+     + ventedDenominatorA0
+```
+
+because evaluation at `p = j*x` gives the implemented real/imaginary denominator
+terms:
+
+```text
+real = x^4 - ventedDenominatorA2*x^2 + ventedDenominatorA0
+imag = ventedDenominatorA1*x - ventedDenominatorA3*x^3
+```
+
+The four stored values are therefore dimensionless coefficients of the normalized
+fourth-order vented-box high-pass denominator. They are not generic constants.
+
+#### `radiationCapacitance`: ideal-piston radiation term in full-circuit mode
+
+The full-circuit path uses:
+
+```text
+radiationCapacitance = 1 / (2*pi*(34000/Dm))
+Hrad(s) = 1 / (1 + 1/(s*radiationCapacitance))
+        = s*radiationCapacitance / (1 + s*radiationCapacitance)
+```
+
+with `Dm` in cm and the historical sound-speed constant `34000 cm/s`. The
+capacitance was intentionally introduced to approximate the driver's radiation
+resistance in the extended equivalent-circuit model. In combination with the
+electromechanical circuit it produces the ideal-piston band-pass behaviour. This
+is the full-circuit alternative to the separate normalized piston low-pass model.
+
+#### `Norm` and `calibrate`: meaning still incomplete
+
+The source establishes only:
+
+```text
+calibrate = 12.58925412
+Norm = sqrt(8/Rdc) * calibrate * sqrt(2)
+```
+
+`12.58925412` is numerically the linear gain corresponding to approximately
+`+22 dB`, but no surviving source comment explains why that calibration was
+chosen or what absolute reference it represents. `Norm` is applied only in the
+full-circuit acoustic paths after the radiation term. Both values remain intact
+until their physical/normalization provenance is recovered; Stage D must not
+rename them based on speculation.
+
+### Stage-D consequence
+
+The audit separates the remaining values into three categories:
+
+```text
+clearly understood:
+    motionalResistance/motionalCapacitance/motionalInductance
+    acousticHighPassCapacitance/acousticHighPassInductance
+    pistonLowPassInductance/pistonLowPassCapacitance
+    ventedDenominatorA0/ventedDenominatorA1/ventedDenominatorA2/ventedDenominatorA3
+    FrequencyFactor (duplicate grid constant; removed in Patch 270)
+
+understood but semantically overloaded:
+    L2/C2/R2
+
+physical provenance still incomplete:
+    Norm/calibrate
+```
+
+Patch 272 applies the remaining safe naming cleanups from the clearly understood
+families. `L2/C2/R2`, `Norm`, and `calibrate` stay unchanged because their naming
+or physical normalization provenance still needs further analysis.
+
+## Patch 271: Motional-branch and radiation-model semantic naming
+
+- Renamed the unambiguously reconstructed electrical-side motional equivalent-
+  circuit members without changing any formula or calculation order:
+
+  ```text
+  R -> motionalResistance
+  C -> motionalCapacitance
+  L -> motionalInductance
+  ```
+
+  They continue to form the parallel motional admittance
+
+  ```text
+  Ymotional = 1/motionalResistance
+            + j*(omega*motionalCapacitance
+                 - 1/(omega*motionalInductance))
+  ```
+
+  before transformation back to an impedance and addition of the voice-coil
+  impedance `Rdc + j*omega*Lsp`.
+
+- Renamed `RadiationC` to `radiationCapacitance`. Historical clarification from
+  the original KFilter model establishes that this is an intentionally added
+  normalized capacitance used in the **full-circuit** calculation to approximate
+  the driver's radiation resistance for ideal-piston behaviour. Together with
+  the electromechanical equivalent circuit it produces the idealized driver's
+  natural band-pass response.
+
+- Preserved the separate historical `LowPassL/LowPassC` path. It is not redundant
+  with `radiationCapacitance`: it is the simplified, 0 dB-normalized alternative
+  used to reproduce the ideal-piston upper roll-off without evaluating the full
+  equivalent-circuit/radiation model. Both approaches were historically useful
+  for different analysis tasks and must remain available internally even though
+  no new UI is introduced at this stage.
+
+- The full-circuit model can be less useful in normal practical loudspeaker design
+  because its absolute-efficiency behaviour can obscure the relative response,
+  and real drivers often depart substantially from ideal-piston behaviour. It is
+  therefore intentionally retained as an optional modelling capability rather
+  than promoted to a new user-facing control during this refactoring.
+
+- Corrected the two stale inline `noch nicht aktiv` comments beside the motional
+  resistance and radiation-capacitance setup. Both values are used by existing
+  full-circuit calculation paths; the old comments no longer described the
+  surviving Qt6 code.
+
+- `L2/C2/R2`, `AcousticC/AcousticL`, `Consta..Constd`, `Norm`, `calibrate`, and the
+  `LowPass*` family remain otherwise unchanged. Patch 271 is a naming/documentation
+  patch only and deliberately does not alter model selection, UI, persistence,
+  formulas, or floating-point operation order.
+
+
+## Patch 272: Simplified acoustic-model semantic naming
+
+- Renamed the normalized simplified high-pass members without changing their
+  values, formulas, storage duration, or calculation order:
+
+  ```text
+  AcousticC -> acousticHighPassCapacitance
+  AcousticL -> acousticHighPassInductance
+  ```
+
+- Renamed the fourth-order simplified vented-box denominator coefficients by
+  their polynomial order:
+
+  ```text
+  Consta -> ventedDenominatorA0
+  Constb -> ventedDenominatorA1
+  Constc -> ventedDenominatorA2
+  Constd -> ventedDenominatorA3
+  ```
+
+  The naming follows the already reconstructed denominator
+
+  ```text
+  D(p) = p^4 + A3*p^3 + A2*p^2 + A1*p + A0
+  ```
+
+  and therefore replaces opaque historical names without changing the
+  underlying vented-box approximation.
+
+- Renamed the preserved simplified ideal-piston upper-roll-off model so it can
+  no longer be confused with a user Active Filter:
+
+  ```text
+  LowPassL   -> pistonLowPassInductance
+  LowPassC   -> pistonLowPassCapacitance
+  LowPassQ   -> pistonLowPassQ
+  LowPassFc  -> pistonLowPassFrequency
+  lowPassFlag -> pistonLowPassActive
+  ```
+
+  This remains the historical 0 dB-normalized second-order physical Driver-model
+  approximation. Its original parameter derivation is still not present in the
+  Qt6 code, so the path remains dormant but intentionally preserved. No UI or
+  setter was added.
+
+- `L2/C2/R2`, `Norm`, `calibrate`, `show_reflex_only`, and `Unit[49]` remain
+  unchanged. Patch 272 is a naming/documentation patch only.

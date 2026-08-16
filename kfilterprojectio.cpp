@@ -147,6 +147,7 @@ bool parseDriverParameters(const QStringList& lines,
         QString line;
         double doubleValue = 0.0;
         int intValue = 0;
+        int enclosureTypeProposalValue = 0;
         bool boolValue = false;
 
 #define READ_DOUBLE_FIELD(fieldName, setterCall) \
@@ -193,19 +194,20 @@ bool parseDriverParameters(const QStringList& lines,
         READ_DOUBLE_FIELD("Vb", currentDriver.Vb = doubleValue);
         READ_DOUBLE_FIELD("Fb", currentDriver.Fb = doubleValue);
         READ_DOUBLE_FIELD("V2", currentDriver.V2 = doubleValue);
-        READ_INT_FIELD("GTypProposal", currentDriver.GTypProposal);
+        READ_INT_FIELD("GTypProposal", enclosureTypeProposalValue);
+        currentDriver.enclosureTypeProposal = static_cast<EnclosureType>(enclosureTypeProposalValue);
         READ_DOUBLE_FIELD("Gain", currentDriver.gain = doubleValue);
-        READ_BOOL_FIELD("Pressure", currentDriver.PressureisActive);
-        READ_BOOL_FIELD("Impedanz", currentDriver.ImpedanzisActive);
-        READ_BOOL_FIELD("Summary", currentDriver.SummaryisActive);
+        READ_BOOL_FIELD("Pressure", currentDriver.pressureIsActive);
+        READ_BOOL_FIELD("Impedanz", currentDriver.impedanceIsActive);
+        READ_BOOL_FIELD("Summary", currentDriver.summaryIsActive);
         READ_BOOL_FIELD("ScalarSummary", currentDriver.ScalarSummaryisActive);
-        READ_BOOL_FIELD("ImpedanzSummary", currentDriver.ImpedanzSummaryisActive);
+        READ_BOOL_FIELD("ImpedanzSummary", currentDriver.ImpedanceSummaryisActive);
         READ_BOOL_FIELD("InvertPhase", currentDriver.InvertPhase);
 
         if (!readRequiredDataLine(lines, index, line, QStringLiteral("Title"), driverNumber, errorMessage)) {
             return false;
         }
-        currentDriver.SetTitle(valueAfterEquals(line));
+        currentDriver.setTitle(valueAfterEquals(line));
 
 #undef READ_BOOL_FIELD
 #undef READ_INT_FIELD
@@ -1099,7 +1101,7 @@ bool jsonToDriverParameters(const QJsonObject& parameters,
         return false;
     }
 
-    currentDriver.SetTitle(title);
+    currentDriver.setTitle(title);
     currentDriver.setRdc(rdc);
     currentDriver.setLsp(lsp);
     currentDriver.setF0(fs);
@@ -1112,13 +1114,13 @@ bool jsonToDriverParameters(const QJsonObject& parameters,
     currentDriver.setQl(ql);
     currentDriver.Fb = fb;
     currentDriver.V2 = v2;
-    currentDriver.GTypProposal = enclosureTypeProposal;
+    currentDriver.enclosureTypeProposal = static_cast<EnclosureType>(enclosureTypeProposal);
     currentDriver.gain = gain;
-    currentDriver.PressureisActive = pressureActive;
-    currentDriver.ImpedanzisActive = impedanceActive;
-    currentDriver.SummaryisActive = summaryActive;
+    currentDriver.pressureIsActive = pressureActive;
+    currentDriver.impedanceIsActive = impedanceActive;
+    currentDriver.summaryIsActive = summaryActive;
     currentDriver.ScalarSummaryisActive = scalarSummaryActive;
-    currentDriver.ImpedanzSummaryisActive = impedanceSummaryActive;
+    currentDriver.ImpedanceSummaryisActive = impedanceSummaryActive;
     currentDriver.InvertPhase = invertPhase;
     currentDriver.setFullCircuit(fullCircuit);
     return true;
@@ -1575,7 +1577,7 @@ bool jsonToFloorReflectionSettings(const QJsonObject& driverObject,
 QJsonObject driverParametersToJson(const driver& currentDriver)
 {
     QJsonObject parameters;
-    parameters.insert(QStringLiteral("title"), currentDriver.GetTitle());
+    parameters.insert(QStringLiteral("title"), currentDriver.getTitle());
     parameters.insert(QStringLiteral("rdc_ohm"), currentDriver.getRdc());
     parameters.insert(QStringLiteral("lsp_h"), currentDriver.getLsp());
     parameters.insert(QStringLiteral("fs_hz"), currentDriver.getF0());
@@ -1588,13 +1590,13 @@ QJsonObject driverParametersToJson(const driver& currentDriver)
     parameters.insert(QStringLiteral("ql"), currentDriver.getQl());
     parameters.insert(QStringLiteral("fb_hz"), currentDriver.Fb);
     parameters.insert(QStringLiteral("v2_l"), currentDriver.V2);
-    parameters.insert(QStringLiteral("enclosureTypeProposal"), currentDriver.GTypProposal);
+    parameters.insert(QStringLiteral("enclosureTypeProposal"), static_cast<int>(currentDriver.enclosureTypeProposal));
     parameters.insert(QStringLiteral("gainLinear"), currentDriver.gain);
-    parameters.insert(QStringLiteral("pressureActive"), currentDriver.PressureisActive);
-    parameters.insert(QStringLiteral("impedanceActive"), currentDriver.ImpedanzisActive);
-    parameters.insert(QStringLiteral("summaryActive"), currentDriver.SummaryisActive);
+    parameters.insert(QStringLiteral("pressureActive"), currentDriver.pressureIsActive);
+    parameters.insert(QStringLiteral("impedanceActive"), currentDriver.impedanceIsActive);
+    parameters.insert(QStringLiteral("summaryActive"), currentDriver.summaryIsActive);
     parameters.insert(QStringLiteral("scalarSummaryActive"), currentDriver.ScalarSummaryisActive);
-    parameters.insert(QStringLiteral("impedanceSummaryActive"), currentDriver.ImpedanzSummaryisActive);
+    parameters.insert(QStringLiteral("impedanceSummaryActive"), currentDriver.ImpedanceSummaryisActive);
     parameters.insert(QStringLiteral("invertPhase"), currentDriver.InvertPhase);
     parameters.insert(QStringLiteral("fullCircuit"), currentDriver.getFullCircuit());
     return parameters;
@@ -2104,8 +2106,8 @@ qsizetype firstSignificantByte(const QByteArray& data)
 void finalizeDrivers(driver (&drivers)[KFilterProjectIo::DriverCount])
 {
     for (driver& currentDriver : drivers) {
-        currentDriver.Berechneparameter();
-        currentDriver.setmodified();
+        currentDriver.calculateParameters();
+        currentDriver.setModified();
     }
 }
 }

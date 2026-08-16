@@ -200,7 +200,7 @@ bool loadNetworkValues(const QJsonObject& networkObject,
 QJsonObject driverToJson(const driver& drv)
 {
     QJsonObject driverObject;
-    driverObject.insert(QStringLiteral("title"), drv.GetTitle());
+    driverObject.insert(QStringLiteral("title"), drv.getTitle());
     driverObject.insert(QStringLiteral("rdc_ohm"), drv.getRdc());
     driverObject.insert(QStringLiteral("lsp_h"), drv.getLsp());
     driverObject.insert(QStringLiteral("fs_hz"), drv.getF0());
@@ -213,13 +213,13 @@ QJsonObject driverToJson(const driver& drv)
     driverObject.insert(QStringLiteral("ql"), drv.getQl());
     driverObject.insert(QStringLiteral("fb_hz"), drv.Fb);
     driverObject.insert(QStringLiteral("v2_l"), drv.V2);
-    driverObject.insert(QStringLiteral("enclosureTypeProposal"), drv.GTypProposal);
+    driverObject.insert(QStringLiteral("enclosureTypeProposal"), static_cast<int>(drv.enclosureTypeProposal));
     driverObject.insert(QStringLiteral("gainLinear"), drv.gain);
-    writeBool(driverObject, QStringLiteral("pressureActive"), drv.PressureisActive);
-    writeBool(driverObject, QStringLiteral("impedanceActive"), drv.ImpedanzisActive);
-    writeBool(driverObject, QStringLiteral("summaryActive"), drv.SummaryisActive);
+    writeBool(driverObject, QStringLiteral("pressureActive"), drv.pressureIsActive);
+    writeBool(driverObject, QStringLiteral("impedanceActive"), drv.impedanceIsActive);
+    writeBool(driverObject, QStringLiteral("summaryActive"), drv.summaryIsActive);
     writeBool(driverObject, QStringLiteral("scalarSummaryActive"), drv.ScalarSummaryisActive);
-    writeBool(driverObject, QStringLiteral("impedanceSummaryActive"), drv.ImpedanzSummaryisActive);
+    writeBool(driverObject, QStringLiteral("impedanceSummaryActive"), drv.ImpedanceSummaryisActive);
     writeBool(driverObject, QStringLiteral("invertPhase"), drv.InvertPhase);
     writeBool(driverObject, QStringLiteral("fullCircuit"), drv.getFullCircuit());
     return driverObject;
@@ -292,7 +292,7 @@ bool jsonToDriver(const QJsonObject& driverObject,
         return false;
     }
 
-    drv.SetTitle(title);
+    drv.setTitle(title);
     drv.setRdc(rdc);
     drv.setLsp(lsp);
     drv.setF0(fs);
@@ -305,17 +305,17 @@ bool jsonToDriver(const QJsonObject& driverObject,
     drv.setQl(ql);
     drv.Fb = fb;
     drv.V2 = v2;
-    drv.GTypProposal = enclosureTypeProposal;
+    drv.enclosureTypeProposal = static_cast<EnclosureType>(enclosureTypeProposal);
     drv.gain = gain;
-    drv.PressureisActive = pressureActive;
-    drv.ImpedanzisActive = impedanceActive;
-    drv.SummaryisActive = summaryActive;
+    drv.pressureIsActive = pressureActive;
+    drv.impedanceIsActive = impedanceActive;
+    drv.summaryIsActive = summaryActive;
     drv.ScalarSummaryisActive = scalarSummaryActive;
-    drv.ImpedanzSummaryisActive = impedanceSummaryActive;
+    drv.ImpedanceSummaryisActive = impedanceSummaryActive;
     drv.InvertPhase = invertPhase;
     drv.setFullCircuit(fullCircuit);
-    drv.Berechneparameter();
-    drv.setmodified();
+    drv.calculateParameters();
+    drv.setModified();
 
     return true;
 }
@@ -347,8 +347,8 @@ bool KFilterDriverIo::applyDriverSlotToDocument(KFilterDoc& document,
     const bool existingMergeState = document.measurementMergeEnabled();
 
     document.m_driverDriver[driverIndex] = slot.driverData;
-    document.m_driverDriver[driverIndex].Berechneparameter();
-    document.m_driverDriver[driverIndex].setmodified();
+    document.m_driverDriver[driverIndex].calculateParameters();
+    document.m_driverDriver[driverIndex].setModified();
     document.splCorrectionCurve(driverIndex) = slot.measurementCurve;
     document.activeFilterChain(driverIndex) = slot.activeFilterChain;
     document.baffleSettings(driverIndex) = slot.baffleSettings;
@@ -461,8 +461,8 @@ bool KFilterDriverIo::loadDriverSlotFromFile(const QString& filePath,
         }
     }
 
-    parsedSlot.driverData.Berechneparameter();
-    parsedSlot.driverData.setmodified();
+    parsedSlot.driverData.calculateParameters();
+    parsedSlot.driverData.setModified();
     slot = parsedSlot;
     return true;
 }

@@ -25,6 +25,7 @@
  */
 
 #include "driver.h"
+#include "kfilterfrequencygrid.h"
 #include <cmath>
 
 driver::driver()
@@ -39,8 +40,6 @@ driver::~driver()
 
 void driver::initContents()
 {
-	Faktor=1.047128548;
-	Anzahl = 0;
 	Rdc=5.1;
 	Lsp=0.00017;
 	F0=307;
@@ -50,52 +49,46 @@ void driver::initContents()
 	Vas=10;
 	Dm=7.3;
 	gain = 1.0;
-	PressureisActive=false;
-	ImpedanzisActive=false;
-	SummaryisActive=false;
+	pressureIsActive=false;
+	impedanceIsActive=false;
+	summaryIsActive=false;
 	ScalarSummaryisActive=false;
-	ImpedanzSummaryisActive=false;
+	ImpedanceSummaryisActive=false;
 	InvertPhase=false;
 	show_reflex_only=false;
 	Vb=0;
 	V2=0;
 	Fb=0;
-	F3=0;
-	Fs=0;
 	Ql=10;
-	TiefpassL=0;
-	TiefpassC=0;
-	TiefpassQ=0;
-	Tiefpassfc=0;
-	GTypProposal = 0;
-	Phase_flag=1;
-	Parameter_flag=1;
-	Tiefpass_flag=0;
-	AkustikESB_flag=1;
-	Realschall_flag=0;
+	pistonLowPassInductance=0;
+	pistonLowPassCapacitance=0;
+	pistonLowPassQ=0;
+	pistonLowPassFrequency=0;
+	enclosureTypeProposal = EnclosureType::OpenBaffle;
+	parameterFlag=true;
+	pistonLowPassActive=false;
+	fullCircuitFlag=false;
 	for (int i=0;i<49;i++)
 	{
 		Unit[i]=0;
 	}
 	calibrate = 12.58925412;
 	m_qstringTitle = "This is a default driver";
-	Berechneparameter();
-	setmodified();
+	calculateParameters();
+	setModified();
 }
 
-void driver::setmodified(void)
+void driver::setModified(void)
 {
-	dirty_schall = true;
-	dirty_impedanz = true;
+	dirty_pressure = true;
+	dirty_impedance = true;
 }
 
-void driver::Berechneparameter(void)
+void driver::calculateParameters(void)
 {
 	double pi = 3.141592654;
 
-	Parameter_flag = 1;
-	AkustikESB_flag = 1;
-	Phase_flag = 1;
+	parameterFlag = true;
 
 	if (F0!=0)
 	{
@@ -103,10 +96,13 @@ void driver::Berechneparameter(void)
 		{
 			Dm=10;
 		}
-		StrahlC=1/(2*pi*34000/Dm);	// <----- noch nicht aktiv
-		R=Qms*Rdc/Qe;				// <----- noch nicht aktiv
-		C=Qe/(2*pi*Rdc*F0);
-		L=Rdc/(2*pi*Qe*F0);
+		// Full-circuit ideal-piston model: this normalized capacitance models
+		// the driver's radiation resistance. The simplified model uses the
+		// separate 0 dB-normalized pistonLowPassInductance/pistonLowPassCapacitance approximation instead.
+		radiationCapacitance=1/(2*pi*34000/Dm);
+		motionalResistance=Qms*Rdc/Qe;
+		motionalCapacitance=Qe/(2*pi*Rdc*F0);
+		motionalInductance=Rdc/(2*pi*Qe*F0);
 		//************************************************************************************************
 		//double ii;
 		//for (int i=99; i>-1; i--)
@@ -119,226 +115,177 @@ void driver::Berechneparameter(void)
 		//************************************************************************************************
 
 
-		if ((Vb==0)||(GTypProposal==0))
+		if ((Vb==0)||(enclosureTypeProposal==EnclosureType::OpenBaffle))
 		{
-			Cakustik=Qtc/(2*pi*F0);
-			Lakustik=1/(Qtc*2*pi*F0);
-			L2=L;
-			GTyp=0;
+			acousticHighPassCapacitance=Qtc/(2*pi*F0);
+			acousticHighPassInductance=1/(Qtc*2*pi*F0);
+			L2=motionalInductance;
+			enclosureType=EnclosureType::OpenBaffle;
 		}
 		else
 		{
-			Cakustik=Qtc/(2*pi*F0);
-			Lakustik=1/(2*pi*F0*Qtc*(Vas/Vb+1));
-			Fs=F0*sqrt(Vas/Vb+1);
-			SystemQ=Qtc*sqrt(Vas/Vb+1);
-			GTyp=1;
+			acousticHighPassCapacitance=Qtc/(2*pi*F0);
+			acousticHighPassInductance=1/(2*pi*F0*Qtc*(Vas/Vb+1));
+			enclosureType=EnclosureType::Sealed;
 			//}
 
-			if ((Fb!=0)&&(GTypProposal>=2))
+			if ((Fb!=0)&&(static_cast<int>(enclosureTypeProposal)>=static_cast<int>(EnclosureType::Vented)))
 			{
-				GTyp=2;
-				Phase_flag = 0;
-				L2=Vb*L/Vas;
+				enclosureType=EnclosureType::Vented;
+				L2=Vb*motionalInductance/Vas;
 				C2=1/( L2*pow((2*pi*Fb),2.0) );
 				R2=(2*pi*Fb*L2/Ql); //R2:=sqrt(C2/L2)/Ql; ?
-				Consta=pow((Fb/F0),2.0);
-				Constb=Consta/Qtc + Fb/(Ql*F0);
-				Constc=1 + Consta + Fb/(Ql*F0*Qtc) + Vas/Vb;
-				Constd=1/Qtc + Fb/(Ql*F0);
-				if ((V2!=0)&&(GTypProposal>=3))
+				ventedDenominatorA0=pow((Fb/F0),2.0);
+				ventedDenominatorA1=ventedDenominatorA0/Qtc + Fb/(Ql*F0);
+				ventedDenominatorA2=1 + ventedDenominatorA0 + Fb/(Ql*F0*Qtc) + Vas/Vb;
+				ventedDenominatorA3=1/Qtc + Fb/(Ql*F0);
+				if ((V2!=0)&&(static_cast<int>(enclosureTypeProposal)>=static_cast<int>(EnclosureType::Bandpass)))
 				{
-					Phase_flag = 1;
-					GTyp=3;
-					L2=Vb*L/Vas;
-					L=1/(1/L+Vas/(V2*L));
+					enclosureType=EnclosureType::Bandpass;
+					L2=Vb*motionalInductance/Vas;
+					motionalInductance=1/(1/motionalInductance+Vas/(V2*motionalInductance));
 				}
 			}
 			else         // -> Fb ist jetzt gleich Null s.o.
 			{
-				GTyp=1;
-				L2=1/(1/L+Vas/(Vb*L));
+				enclosureType=EnclosureType::Sealed;
+				L2=1/(1/motionalInductance+Vas/(Vb*motionalInductance));
 			}
 		}			//Vb==0
 	}
 	//if f0 != 0
 	else
 	{
-		Parameter_flag = 0;
-		AkustikESB_flag = 0;
+		parameterFlag = false;
 	}
 
-	if ((TiefpassQ!=0) && (Tiefpassfc!=0))
+	// Historical 0 dB-normalized approximation of the natural upper roll-off
+	// of an ideal piston radiator. pistonLowPassQ/pistonLowPassFrequency currently have no
+	// productive setter/UI path; keep the model dormant until the original
+	// parameter derivation has been reconstructed.
+	if ((pistonLowPassQ!=0) && (pistonLowPassFrequency!=0))
 	{
-		TiefpassL = 1/(2*pi*TiefpassQ*Tiefpassfc);
-		TiefpassC = TiefpassQ/(2*pi*Tiefpassfc);
-		Tiefpass_flag  = 1;
+		pistonLowPassInductance = 1/(2*pi*pistonLowPassQ*pistonLowPassFrequency);
+		pistonLowPassCapacitance = pistonLowPassQ/(2*pi*pistonLowPassFrequency);
+		pistonLowPassActive  = true;
 	}
 	else
 	{
-		Tiefpass_flag = 0;
+		pistonLowPassActive = false;
 	}
 
 	Norm=sqrt(8/Rdc)*calibrate * sqrt(2.0);  //{/sqrt(1 + 1/Qms )}
 
 }
 
-void driver::Schall(void)
+void driver::calculatePressureResponse(void)
 {
-	if (dirty_schall)
+	if (dirty_pressure)
 	{
-		//	double a,b,bw,fakt;
-		Berechneparameter();
-		f = 125.6637061;
-		for (int j=0;j<300;j=j+2)
+		calculateParameters();
+		double omega = 125.6637061;
+		for (std::size_t sampleIndex=0; sampleIndex<ResultPressure.size(); ++sampleIndex)
 		{
-			i=Anzahlcheck()+1;
-			//xwert:=xkoordinate(f);
-			qx=1; qy=0;
-			ESBberechnen();
-			while (i > 1)
+			int sectionOffset = findLastNetworkSectionOffset()+1;
+			std::complex<double> response{1.0, 0.0};
+			std::complex<double> networkImpedance = calculateEquivalentCircuit(omega);
+			while (sectionOffset > 1)
 			{
-				i=i-6;
-				Parallelberechnung();
-				xa=x; ya=y;
-				Reihenberechnung();
-				Quotient();
+				sectionOffset = sectionOffset-6;
+				calculateParallelBranch(networkImpedance, omega, sectionOffset);
+				const std::complex<double> terminationImpedance = networkImpedance;
+				calculateSeriesBranch(networkImpedance, omega, sectionOffset);
+				response *= terminationImpedance / networkImpedance;
 			}
-			if (AkustikESB_flag)
+			if (parameterFlag)
 			{
-				Akustik();
+				calculateAcousticResponse(response, omega);
 			}
 			//berechneaktivefilter;
 			//ausgleichberechnen;
-			if (InvertPhase)
-			{
-				ResultSchall[j]=-qx*gain;
-				ResultSchall[j+1]=-qy*gain;
-			}
-			else
-			{
-				ResultSchall[j]=qx*gain;
-				ResultSchall[j+1]=qy*gain;
-			}
-			f = f*Faktor;
+			ResultPressure[sampleIndex] = (InvertPhase ? -response : response) * gain;
+			omega = omega*KFilterFrequencyStep;
 		}
-		dirty_schall = false;
+		dirty_pressure = false;
 	}
 }
 
-void driver::Impedanz(void)
+void driver::calculateImpedanceResponse(void)
 {
-	if (dirty_impedanz)
+	if (dirty_impedance)
 	{
-
-		// double   a;
-		Berechneparameter();
-		f = 125.6637061;
-		for (int j=0;j<300;j=j+2)
+		calculateParameters();
+		double omega = 125.6637061;
+		for (std::size_t sampleIndex=0; sampleIndex<ResultImpedance.size(); ++sampleIndex)
 		{
-			i=Anzahlcheck()+1;
-			ESBberechnen();
-			while (i > 1)
+			int sectionOffset = findLastNetworkSectionOffset()+1;
+			std::complex<double> networkImpedance = calculateEquivalentCircuit(omega);
+			while (sectionOffset > 1)
 			{
-				i=i-6;
-				Parallelberechnung();
-				Reihenberechnung();
+				sectionOffset = sectionOffset-6;
+				calculateParallelBranch(networkImpedance, omega, sectionOffset);
+				calculateSeriesBranch(networkImpedance, omega, sectionOffset);
 			}
-			//a=f*0.159154943;
-			ResultImpedanz[j]=x; ResultImpedanz[j+1]=y;
-			f=f*Faktor;
+			ResultImpedance[sampleIndex] = networkImpedance;
+			omega=omega*KFilterFrequencyStep;
 		}
-		dirty_impedanz = false;
+		dirty_impedance = false;
 	}
 }
 
-void driver::ESBberechnen()
+std::complex<double> driver::calculateEquivalentCircuit(double omega)
 {
-	double a,b,a2,b2;
-
-	//if Parameter_flag then
-	//BEGIN
-	switch (GTyp)
+	if (!parameterFlag)
 	{
-	case 1 :
-		b=f*C-1/(f*L2);
-		a=1/R;break;
-	case 2 : case 3 :
-		a=1/R;
-		b=f*C-1/(f*L);
-		a2=R2;
-		b2=f*L2-1/(f*C2);
-		inverse(&a2,&b2);
-		a=a+a2;
-		b=b+b2;break;
-	case 0 :
-		a=1/R;
-		b=f*C-1/(f*L);break;
+		return {Rdc, omega * Lsp};
 	}
-    inverse(&a,&b);
-    x=Rdc+a;
-    y=f*Lsp+b;
-	/*   END
-	ELSE
-	BEGIN
-	x:=Rdc[j];
-	y:=f*Lsp[j];
-	END*/
-}
 
-void driver::inverse(double *a,double *b)
-{
-	double hilfe;
-	if ((*a) == 0)
+	std::complex<double> admittance;
+
+	switch (enclosureType)
 	{
-		(*b) = -1.0 / (*b);
-	}
-	else
-	{
-		if ((*a) == 1.0)
+	case EnclosureType::Sealed :
+		admittance = {1/motionalResistance, omega*motionalCapacitance-1/(omega*L2)};
+		break;
+	case EnclosureType::Vented : case EnclosureType::Bandpass :
 		{
-			(*a) =  1.0 / (1.0 + pow((*b),2.0));
-			(*b) = (-*b) * (*a);
+			admittance = {1/motionalResistance, omega*motionalCapacitance-1/(omega*motionalInductance)};
+			const std::complex<double> branchImpedance{R2, omega*L2-1/(omega*C2)};
+			admittance += 1.0 / branchImpedance;
+			break;
 		}
-		else
-		{
-			hilfe = 1.0/(pow((*a),2.0)+pow((*b),2.0));
-			(*a) =  (*a) * hilfe;
-			(*b) = (-*b) * hilfe;
-		}
+	case EnclosureType::OpenBaffle :
+		admittance = {1/motionalResistance, omega*motionalCapacitance-1/(omega*motionalInductance)};
+		break;
 	}
+	return std::complex<double>{Rdc, omega*Lsp} + 1.0 / admittance;
 }
 
-void driver::Akustik(void)
+void driver::calculateAcousticResponse(std::complex<double>& response, double omega)
 {
-	double fakt;
-	double a;
-	double b;
+	std::complex<double> networkImpedance;
+	std::complex<double> terminationImpedance;
+	double factor;
 	double bw;
 	double bu;
 	double bx;//,hilfe;
 
 	//if hub then BEGIN berechnehub;exit END;
 
-	if (Tiefpass_flag)
+	// Physical Driver-model component, not the user-configurable Active Filter
+	// low-pass. The historical implementation contributes magnitude only and
+	// is normalized to 0 dB in its pass band.
+	if (pistonLowPassActive)
 	{
-		x=1; y = f * TiefpassC;
-		inverse(&x,&y);
-		xa=x;
-		ya=y;
-		y= y + f * TiefpassL;
-		bw = pow(x,2.0);
-		fakt = 1/(bw+pow(y,2.0));
-		a = (bw+ya*y) * fakt;       // a = (xa*x+ya*y)/(sqr(x)+sqr(y));
-		b = x*(ya-y) * fakt;        // b = (-xa*y+x*ya)/(sqr(x)+sqr(y));
-		fakt=sqrt(pow(a,2.0)+pow(b,2.0));
-		qx=qx * fakt;
-		qy=qy * fakt;
+		networkImpedance = 1.0 / std::complex<double>{1.0, omega * pistonLowPassCapacitance};
+		terminationImpedance = networkImpedance;
+		networkImpedance += std::complex<double>{0.0, omega * pistonLowPassInductance};
+		response *= std::abs(terminationImpedance / networkImpedance);
 	}
 
-	switch (GTyp)
+	switch (enclosureType)
 	{
-	case 0 :  if (Realschall_flag)
+	case EnclosureType::OpenBaffle :  if (fullCircuitFlag)
 			  {
 				  //********************************************************************************test
 				  //xa=1; ya=f*Cline[99];	inverse(&xa,&ya);
@@ -351,206 +298,109 @@ void driver::Akustik(void)
 
 				  //********************************************************************************test
 
-				  xa=1/R;
-				  ya=f*C-1/(f*L2);				inverse(&xa,&ya);
-				  x=xa+Rdc;
-				  y=ya+f*Lsp;					Quotient();
-				  xa=1;
-				  ya=0;
-				  x=1;
-				  y=-1/(f*StrahlC);
-				  Quotient(); //Strahlungswiederstand
-				  qx=qx*Norm;
-				  qy=qy*Norm;
+				  terminationImpedance = 1.0 / std::complex<double>{1/motionalResistance, omega*motionalCapacitance-1/(omega*L2)};
+				  networkImpedance = terminationImpedance + std::complex<double>{Rdc, omega*Lsp};
+				  response *= terminationImpedance / networkImpedance;
+				  terminationImpedance = {1.0, 0.0};
+				  networkImpedance = {1.0, -1/(omega*radiationCapacitance)};
+				  response *= terminationImpedance / networkImpedance; //Strahlungswiederstand
+				  response *= Norm;
 			  }
 		else
 		{
-			x=1;
-			y=-1/(f*Lakustik);
-			inverse(&x,&y);
-			xa=x;
-			ya=y;
-			y=y-1/(f*Cakustik);
-			bw = pow(x,2.0);
-			fakt = bw+pow(y,2.0);
-			a = (bw+ya*y) / fakt;   // a = (xa*x+ya*y)/(sqr(x)+sqr(y));
-			b = x*(ya-y) / fakt;    // b = (-xa*y+x*ya)/(sqr(x)+sqr(y));
-			if (Phase_flag)
-			{
-				fakt = qx;
-				qx = qx*a-qy*b;
-				qy = fakt*b+qy*a;
-			}
-			else
-			{
-				fakt=sqrt(pow(a,2.0)+pow(b,2.0));
-				qx=qx*fakt;
-				qy=qy*fakt;
-			}
+			networkImpedance = 1.0 / std::complex<double>{1.0, -1/(omega*acousticHighPassInductance)};
+			terminationImpedance = networkImpedance;
+			networkImpedance += std::complex<double>{0.0, -1/(omega*acousticHighPassCapacitance)};
+			const std::complex<double> transfer = terminationImpedance / networkImpedance;
+			response *= transfer;
 
 		}         //ELSE von realschall
 		break;
 
-	case 1 :  if (Realschall_flag)
+	case EnclosureType::Sealed :  if (fullCircuitFlag)
 			  {
 
-				  xa=1/R;
-				  ya=f*C-1/(f*L2);				inverse(&xa,&ya);
-				  x=xa+Rdc;
-				  y=ya+f*Lsp;					Quotient();
-				  xa=1;
-				  ya=0;
-				  x=1;
-				  y=-1/(f*StrahlC);
-				  Quotient(); //Strahlungswiederstand
-				  qx=qx*Norm;
-				  qy=qy*Norm;
+				  terminationImpedance = 1.0 / std::complex<double>{1/motionalResistance, omega*motionalCapacitance-1/(omega*L2)};
+				  networkImpedance = terminationImpedance + std::complex<double>{Rdc, omega*Lsp};
+				  response *= terminationImpedance / networkImpedance;
+				  terminationImpedance = {1.0, 0.0};
+				  networkImpedance = {1.0, -1/(omega*radiationCapacitance)};
+				  response *= terminationImpedance / networkImpedance; //Strahlungswiederstand
+				  response *= Norm;
 			  }
 		else
 		{
-			x=1;
-			y=-1/(f*Lakustik);
-			inverse(&x,&y);
-			xa=x;
-			ya=y;
-			y=y-1/(f*Cakustik);
-			bw = pow(x,2.0);
-			fakt = bw+pow(y,2.0);
-			a = (bw+ya*y) / fakt;   // a = (xa*x+ya*y)/(sqr(x)+sqr(y));
-			b = x*(ya-y) / fakt;    // b = (-xa*y+x*ya)/(sqr(x)+sqr(y));
-			if (Phase_flag)
-			{
-				fakt = qx;
-				qx = qx*a-qy*b;
-				qy = fakt*b+qy*a;
-			}
-			else
-			{
-				fakt=sqrt(pow(a,2.0)+pow(b,2.0));
-				qx=qx*fakt;
-				qy=qy*fakt;
-			}
+			networkImpedance = 1.0 / std::complex<double>{1.0, -1/(omega*acousticHighPassInductance)};
+			terminationImpedance = networkImpedance;
+			networkImpedance += std::complex<double>{0.0, -1/(omega*acousticHighPassCapacitance)};
+			const std::complex<double> transfer = terminationImpedance / networkImpedance;
+			response *= transfer;
 
 		}         //ELSE von realschall
 		break;
 
-	case 2 :
-		if (Realschall_flag)
+	case EnclosureType::Vented :
+		if (fullCircuitFlag)
 		{
-			xa=0;
-			ya=f*L2;
-			x=R2;
-			y=ya-1/(f*C2);
-			Quotient();
-			inverse(&x,&y);
-			xa=x+1/R;
-			ya=y+f*C-1/(f*L);
-			inverse(&xa,&ya);
-			x=xa+Rdc;
-			y=ya+f*Lsp;
-			Quotient();
-			xa=1;
-			ya=0;
-			x=1;
-			y=-1/(f*StrahlC);
-			Quotient(); //Strahlungswiederstand
-			qx=qx*Norm;
-			qy=qy*Norm;
+			terminationImpedance = {0.0, omega*L2};
+			networkImpedance = {R2, omega*L2-1/(omega*C2)};
+			response *= terminationImpedance / networkImpedance;
+			networkImpedance = 1.0 / networkImpedance;
+			terminationImpedance = networkImpedance + std::complex<double>{1/motionalResistance, omega*motionalCapacitance-1/(omega*motionalInductance)};
+			terminationImpedance = 1.0 / terminationImpedance;
+			networkImpedance = terminationImpedance + std::complex<double>{Rdc, omega*Lsp};
+			response *= terminationImpedance / networkImpedance;
+			terminationImpedance = {1.0, 0.0};
+			networkImpedance = {1.0, -1/(omega*radiationCapacitance)};
+			response *= terminationImpedance / networkImpedance; //Strahlungswiederstand
+			response *= Norm;
 		}
 		else
 		{
 			if (!show_reflex_only)
 			{
-				bw=f*0.159154943/F0;    //f/(2*pi)
+				bw=omega*0.159154943/F0;    //omega/(2*pi)
 				bu=pow(bw,2.0);
 				bx=pow(bu,2.0);
-				fakt=bx/sqrt(pow(bx-Constc*bu+Consta,2.0)+pow(Constb*bw-Constd*bu*bw,2.0));
-				qx=qx*fakt;
-				qy=qy*fakt;
+				factor=bx/sqrt(pow(bx-ventedDenominatorA2*bu+ventedDenominatorA0,2.0)+pow(ventedDenominatorA1*bw-ventedDenominatorA3*bu*bw,2.0));
+				response *= factor;
 			}
 			else
 			{
-				xa=0;
-				ya=-1/(f*C2);
-				x=R2;
-				y=ya+f*L2;
-				Quotient();
-				inverse(&x,&y);
-				xa=x+1/R;
-				ya=y+f*C-1/(f*L);
-				inverse(&xa,&ya);
-				x=xa+Rdc;
-				y=ya+f*Lsp;
-				Quotient();
-				xa=1;
-				ya=0;
-				x=1;
-				y=-1/(f*StrahlC);
-				Quotient(); //Strahlungswiederstand
-				qx=qx*Norm;
-				qy=qy*Norm;
+				terminationImpedance = {0.0, -1/(omega*C2)};
+				networkImpedance = {R2, -1/(omega*C2)+omega*L2};
+				response *= terminationImpedance / networkImpedance;
+				networkImpedance = 1.0 / networkImpedance;
+				terminationImpedance = networkImpedance + std::complex<double>{1/motionalResistance, omega*motionalCapacitance-1/(omega*motionalInductance)};
+				terminationImpedance = 1.0 / terminationImpedance;
+				networkImpedance = terminationImpedance + std::complex<double>{Rdc, omega*Lsp};
+				response *= terminationImpedance / networkImpedance;
+				terminationImpedance = {1.0, 0.0};
+				networkImpedance = {1.0, -1/(omega*radiationCapacitance)};
+				response *= terminationImpedance / networkImpedance; //Strahlungswiederstand
+				response *= Norm;
 			}
 		}
 		break;
-	case 3 :
+	case EnclosureType::Bandpass :
 		{
-			xa=0;
-			ya=-1/(f*C2);
-			x=R2;
-			y=ya+f*L2;
-			Quotient();
-			inverse(&x,&y);
-			xa=x+1/R;
-			ya=y+f*C-1/(f*L);
-			inverse(&xa,&ya);
-			x=xa+Rdc;
-			y=ya+f*Lsp;
-			Quotient();
-			xa=1;
-			ya=0;
-			x=1;
-			y=-1/(f*StrahlC);
-			Quotient(); //Strahlungswiederstand
-			qx=qx*Norm;
-			qy=qy*Norm;
+			terminationImpedance = {0.0, -1/(omega*C2)};
+			networkImpedance = {R2, -1/(omega*C2)+omega*L2};
+			response *= terminationImpedance / networkImpedance;
+			networkImpedance = 1.0 / networkImpedance;
+			terminationImpedance = networkImpedance + std::complex<double>{1/motionalResistance, omega*motionalCapacitance-1/(omega*motionalInductance)};
+			terminationImpedance = 1.0 / terminationImpedance;
+			networkImpedance = terminationImpedance + std::complex<double>{Rdc, omega*Lsp};
+			response *= terminationImpedance / networkImpedance;
+			terminationImpedance = {1.0, 0.0};
+			networkImpedance = {1.0, -1/(omega*radiationCapacitance)};
+			response *= terminationImpedance / networkImpedance; //Strahlungswiederstand
+			response *= Norm;
 		}
-	}		//switch
+	}       //switch
 }
 
-void driver::Quotient(void)
-
-{
-	double a;
-	double b;
-	double hilfe;
-
-	hilfe = pow(x,2.0)+pow(y,2.0);
-	if (x == xa)
-	{
-		a = (pow(x,2.0)+ya*y) / hilfe;
-		b = x*(ya-y) / hilfe;
-	}
-	else
-	{
-		if (y == ya)
-		{
-			a = (xa*x+ya*y) / hilfe;
-			b = y*(x-xa) / hilfe;
-		}
-		else
-		{
-			a = (xa*x+ya*y) / hilfe;
-			b = (-xa*y+x*ya) / hilfe;
-		}
-	}
-	hilfe=qx;
-	qx=qx*a-qy*b;
-	qy=hilfe*b+qy*a;
-}
-
-
-
-int driver::Anzahlcheck(void)
+int driver::findLastNetworkSectionOffset(void)
 {
 	for (int j=48;j>=0;j--)
 	{
@@ -569,166 +419,149 @@ int driver::Anzahlcheck(void)
 	return 0;
 }
 
-void driver::Parallelberechnung(void)
+void driver::calculateParallelBranch(std::complex<double>& networkImpedance, double omega, int sectionOffset)
 {
-	double a;
-	double b;
-	double invx;
-	double invy;
+	std::complex<double> branchImpedance;
 
-	a = Unit[i+3];
-	if (Unit[i+4]==0)
+	const double resistance = Unit[sectionOffset+3];
+	if (Unit[sectionOffset+4]==0)
 	{
-		if (Unit[i+5]==0)
+		if (Unit[sectionOffset+5]==0)
 		{
-			if (Unit[i+3]==0)
+			if (Unit[sectionOffset+3]==0)
 			{
 				return;
 			}
 			else
 			{
-				b = 0;
+				branchImpedance = {resistance, 0.0};
 			}
 		}
 		else
 		{
-			b = f*Unit[i+5];
+			branchImpedance = {resistance, omega*Unit[sectionOffset+5]};
 		}
 	}
 	else
 	{
-		if (Unit[i+5]==0)
+		if (Unit[sectionOffset+5]==0)
 		{
-			b = -1/(f*Unit[i+4]);
+			branchImpedance = {resistance, -1/(omega*Unit[sectionOffset+4])};
 		}
 		else
 		{
-			b = f*Unit[i+5] - 1/(f*Unit[i+4]);
+			branchImpedance = {resistance, omega*Unit[sectionOffset+5] - 1/(omega*Unit[sectionOffset+4])};
 		}
 	}
-	invx=x;
-	invy=y;
-	inverse(&invx,&invy);
-	inverse(&a,&b);
-	a=invx+a;
-	b=invy+b;
-	inverse(&a,&b);
-	x=a;
-	y=b;
+	networkImpedance = 1.0 / (1.0 / networkImpedance + 1.0 / branchImpedance);
 }
 
-void driver::Reihenberechnung(void)
+void driver::calculateSeriesBranch(std::complex<double>& networkImpedance, double omega, int sectionOffset)
 {
-	double a,b;
-	if (Unit[i+1]==0)
-    {
-		if (Unit[i+2]==0)
+	if (Unit[sectionOffset+1]==0)
+	{
+		if (Unit[sectionOffset+2]==0)
 		{
-			x = x + Unit[i];
+			networkImpedance += std::complex<double>{Unit[sectionOffset], 0.0};
 		}
 		else
 		{
-			x = x + Unit[i];
-			y = y + f*Unit[i+2];
+			networkImpedance += std::complex<double>{Unit[sectionOffset], omega*Unit[sectionOffset+2]};
 		}
-    }
+	}
 	else
 	{
-		if (Unit[i+2]==0)
+		double susceptance;
+		if (Unit[sectionOffset+2]==0)
 		{
-			b = f*Unit[i+1];
+			susceptance = omega*Unit[sectionOffset+1];
 		}
 		else
 		{
-			b = f*Unit[i+1] - 1/(f*Unit[i+2]);
+			susceptance = omega*Unit[sectionOffset+1] - 1/(omega*Unit[sectionOffset+2]);
 		}
-		if (Unit[i]==0)
+		if (Unit[sectionOffset]==0)
 		{
-			y = y + (-1 / b);
+			networkImpedance += std::complex<double>{0.0, -1/susceptance};
 		}
 		else
 		{
-			a = 1 / Unit[i];
-			inverse(&a,&b);
-			x = x+a;
-			y = y+b;
+			const std::complex<double> branchAdmittance{1/Unit[sectionOffset], susceptance};
+			networkImpedance += 1.0 / branchAdmittance;
 		}
 	}
 }
 
-void driver::invertImpedanz(void)
+void driver::invertImpedance(void)
 {
-	for (int i=0;i<300;i=i+2)
+	for (std::complex<double>& impedance : ResultImpedance)
 	{
-		inverse(&ResultImpedanz[i],&ResultImpedanz[i+1]);
+		impedance = 1.0 / impedance;
 	}
 }
 
-QString driver::GetTitle() const
+QString driver::getTitle() const
 {
 	return m_qstringTitle;
 }
 
-void driver::SetTitle( const QString& a_qstringTitle )
+void driver::setTitle( const QString& a_qstringTitle )
 {
 	m_qstringTitle = a_qstringTitle;
 }
 /** Sets Rdc value */
 void driver::setRdc(double rdc){
 Rdc = rdc;
-setmodified();
+setModified();
 }
 /** Sets Lsp value */
 void driver::setLsp(double lsp){
 Lsp = lsp;
-setmodified();
+setModified();
 }
 /** Sets F0 value*/
 void driver::setF0(double f0){
 F0 = f0;
-setmodified();
+setModified();
 }
 /** Sets Qtc value */
 void driver::setQtc(double qtc){
 Qtc = qtc;
-setmodified();
+setModified();
 }
 /** Sets Qes value */
 void driver::setQes(double qes){
 Qe = qes;
-setmodified();
+setModified();
 }
 /** Sets the full circuit flag */
 void driver::setFullCircuit(bool toggle){
-if (toggle)
-  Realschall_flag = 1;
-    else
-      Realschall_flag = 0;
-setmodified();
+fullCircuitFlag = toggle;
+setModified();
 }
 /** Gives the full circuit flag */
 bool driver::getFullCircuit() const{
-return (Realschall_flag == 1);
+return fullCircuitFlag;
 }
 /** Sets Qms value */
 void driver::setQms(double qms){
 Qms = qms;
-setmodified();
+setModified();
 }
 /** Sets Vas value */
 void driver::setVas(double vas){
 Vas = vas;
-setmodified();
+setModified();
 }
 /** Sets Dm value */
 void driver::setDm(double dm){
 Dm = dm;
-setmodified();
+setModified();
 }
 /** Sets Ql value */
 void driver::setQl(double ql){
 Ql = ql;
-setmodified();
+setModified();
 }
 /** No descriptions */
 double driver::getRdc() const{
@@ -772,7 +605,7 @@ void driver::setUnit(int unit, double val){
 if ((unit>-1)&&(unit<49))
 	{
 	Unit[unit] = val;
-  this->setmodified();
+  this->setModified();
 	}
 }
 
@@ -786,6 +619,6 @@ double driver::getUnit(int unit) const{
 void driver::cleanupNetwork(void){
 	for ( int intI = 0; intI < 49; intI++ )
 		Unit[intI] = 0;
-	setmodified();
+	setModified();
 }
 

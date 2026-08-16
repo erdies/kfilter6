@@ -164,11 +164,11 @@ int perceivedBrightness(const QColor& color)
 
 bool driverHasActiveCurveOrTotalFlag(const driver& drv)
 {
-    return drv.PressureisActive ||
-           drv.ImpedanzisActive ||
-           drv.SummaryisActive ||
+    return drv.pressureIsActive ||
+           drv.impedanceIsActive ||
+           drv.summaryIsActive ||
            drv.ScalarSummaryisActive ||
-           drv.ImpedanzSummaryisActive;
+           drv.ImpedanceSummaryisActive;
 }
 
 int allDriversPreviewHeight(int driverCount)
@@ -272,8 +272,8 @@ CircuitOut::DriverSnapshot CircuitOut::snapshotFromDriver(driver& drv, int drive
 {
     DriverSnapshot snapshot;
     snapshot.driverNumber = driverNumber;
-    snapshot.title = drv.GetTitle();
-    snapshot.boxTypeProposal = drv.GTypProposal;
+    snapshot.title = drv.getTitle();
+    snapshot.boxTypeProposal = static_cast<int>(drv.enclosureTypeProposal);
     snapshot.vb = drv.Vb;
     snapshot.fb = drv.Fb;
     snapshot.v2 = drv.V2;

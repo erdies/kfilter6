@@ -13,31 +13,46 @@
 */
 
 #include <QString>
+#include <array>
+#include <complex>
+
+enum class EnclosureType : int {
+	OpenBaffle = 0,
+	Sealed = 1,
+	Vented = 2,
+	Bandpass = 3
+};
+
+static_assert(static_cast<int>(EnclosureType::OpenBaffle) == 0);
+static_assert(static_cast<int>(EnclosureType::Sealed) == 1);
+static_assert(static_cast<int>(EnclosureType::Vented) == 2);
+static_assert(static_cast<int>(EnclosureType::Bandpass) == 3);
 
 class driver {
 public:
 	driver();
 	~driver();
 
-	double Vb,Fb,F3,Ql,Fs,V2,gain;
+	double Vb,Fb,Ql,V2,gain;
 
-	double	ResultSchall[300],ResultImpedanz[300],Unit[49];
-	int		GTyp,GTypProposal,Phase_flag,Parameter_flag,Tiefpass_flag,AkustikESB_flag,Realschall_flag,
-		Anzahl,i;
-	bool 	PressureisActive,ImpedanzisActive,SummaryisActive,ScalarSummaryisActive,
-		ImpedanzSummaryisActive,InvertPhase;
+	std::array<std::complex<double>, 150> ResultPressure, ResultImpedance;
+	double	Unit[49];
+	EnclosureType enclosureType, enclosureTypeProposal;
+	bool	parameterFlag,pistonLowPassActive,fullCircuitFlag;
+	bool 	pressureIsActive,impedanceIsActive,summaryIsActive,ScalarSummaryisActive,
+		ImpedanceSummaryisActive,InvertPhase;
 
-	void setmodified(void);
+	void setModified(void);
 	void initContents(void);
 
-	void Schall(void);
-	void Impedanz (void);
-	void Berechneparameter(void);
-	void invertImpedanz(void);
+	void calculatePressureResponse(void);
+	void calculateImpedanceResponse (void);
+	void calculateParameters(void);
+	void invertImpedance(void);
 	void cleanupNetwork(void);
 
-	QString	GetTitle() const;
-	void	SetTitle( const QString& a_qstringTitle );
+	QString	getTitle() const;
+	void	setTitle( const QString& a_qstringTitle );
   /** Sets Rdc value */
   void setRdc(double rdc);
   /** No descriptions */
@@ -84,24 +99,36 @@ public:
   double getUnit(int unit) const;
 private:
 
-	void ESBberechnen(void);
-	void Akustik(void);
-	void Quotient(void);
-	void inverse(double *a,double *b);
-	int  Anzahlcheck(void);
-	void Parallelberechnung(void);
-	void Reihenberechnung(void);
+	std::complex<double> calculateEquivalentCircuit(double omega);
+	void calculateAcousticResponse(std::complex<double>& response, double omega);
+	int  findLastNetworkSectionOffset(void);
+	void calculateParallelBranch(std::complex<double>& networkImpedance, double omega, int sectionOffset);
+	void calculateSeriesBranch(std::complex<double>& networkImpedance, double omega, int sectionOffset);
 
-	bool dirty_schall,dirty_impedanz,show_reflex_only;
+	bool dirty_pressure,dirty_impedance;
+	// Historical diagnostic switch retained intentionally: legacy KFilter could
+	// display only the bass-reflex-port contribution for a vented enclosure.
+	// There is currently no UI/API toggle for this mode, but the calculation
+	// path remains available for possible future diagnostic use.
+	bool show_reflex_only;
 
 	double
 		Rdc,Lsp,F0,Qtc,Qms,Qe,Dm,Vas,
 		//    Anpassung,Ausgleichsfaktor,Versatz,
-		Consta,Constb,Constc,Constd,AktivC1,
-		AktivC2,AktivL1,AktivL2,AktivF,TiefpassL,TiefpassC,TiefpassQ,Tiefpassfc,
-		AktivQ,MembranDm,StrahlC,Norm,calibrate,Faktor,
-		f,qx,qy,x,y,xa,ya, //Real und Im-Teile zur Laufzeit
-		SystemQ,C2,L2,R2,C,L,R,Cakustik,Lakustik;
+		ventedDenominatorA0,ventedDenominatorA1,ventedDenominatorA2,ventedDenominatorA3,
+		// Historical physical-model approximation of the driver's natural upper
+		// roll-off as an ideal piston radiator. This is a 0 dB-normalized model
+		// component, not a user Active Filter. The present Qt6 code no longer has
+		// a productive write path for pistonLowPassQ/pistonLowPassFrequency, so the path is dormant
+		// but retained until its original parameter derivation is reconstructed.
+		pistonLowPassInductance,pistonLowPassCapacitance,pistonLowPassQ,pistonLowPassFrequency,
+		// Full-circuit ideal-piston radiation-resistance approximation. Keep
+		// this model alongside the simplified normalized LowPass* path; the
+		// two alternatives are useful for different Driver-analysis tasks.
+		radiationCapacitance,Norm,calibrate,
+		C2,L2,R2,
+		motionalCapacitance,motionalInductance,motionalResistance,
+		acousticHighPassCapacitance,acousticHighPassInductance;
 
 	QString	m_qstringTitle;
 };

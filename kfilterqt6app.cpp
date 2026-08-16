@@ -1554,7 +1554,7 @@ void KFilterQt6App::clearNetworkSectionFromPreview(int driverIndex, int sectionI
     drv.setUnit(resistanceUnit, 0.0);
     drv.setUnit(capacitanceUnit, 0.0);
     drv.setUnit(inductanceUnit, 0.0);
-    drv.Berechneparameter();
+    drv.calculateParameters();
 
     m_lastNetworkParametersDriverIndex = driverIndex;
     m_doc->setModified(true);
@@ -1649,7 +1649,7 @@ void KFilterQt6App::editNetworkSectionFromPreview(int driverIndex, int sectionIn
         targetDriver.setUnit(resistanceUnit, values.resistance);
         targetDriver.setUnit(capacitanceUnit, values.capacitance);
         targetDriver.setUnit(inductanceUnit, values.inductance);
-        targetDriver.Berechneparameter();
+        targetDriver.calculateParameters();
     };
     auto sameInternalValues = [](const SectionInternalValues& lhs, const SectionInternalValues& rhs) {
         return nearlyEqual(lhs.resistance, rhs.resistance) &&
@@ -2443,7 +2443,7 @@ QString KFilterQt6App::circuitPreviewDriverMenuText(int driverIndex) const
         return fallback;
     }
 
-    QString title = m_doc->m_driverDriver[driverIndex].GetTitle().trimmed();
+    QString title = m_doc->m_driverDriver[driverIndex].getTitle().trimmed();
     if (title.isEmpty() || title == QStringLiteral("This is a default driver")) {
         return fallback;
     }
@@ -2626,44 +2626,44 @@ void KFilterQt6App::toggleDriverPlotVisibilityFromPreview(int driverIndex)
     }
 
     driver& selectedDriver = m_doc->m_driverDriver[driverIndex];
-    const bool hasActivePlotFlag = selectedDriver.PressureisActive ||
-                                   selectedDriver.ImpedanzisActive ||
-                                   selectedDriver.SummaryisActive ||
+    const bool hasActivePlotFlag = selectedDriver.pressureIsActive ||
+                                   selectedDriver.impedanceIsActive ||
+                                   selectedDriver.summaryIsActive ||
                                    selectedDriver.ScalarSummaryisActive ||
-                                   selectedDriver.ImpedanzSummaryisActive;
+                                   selectedDriver.ImpedanceSummaryisActive;
 
     DriverPlotVisibilityMemory& rememberedVisibility = m_driverPlotVisibilityMemory[driverIndex];
 
     if (hasActivePlotFlag) {
         rememberedVisibility.valid = true;
-        rememberedVisibility.pressure = selectedDriver.PressureisActive;
-        rememberedVisibility.impedance = selectedDriver.ImpedanzisActive;
-        rememberedVisibility.vectorSum = selectedDriver.SummaryisActive;
+        rememberedVisibility.pressure = selectedDriver.pressureIsActive;
+        rememberedVisibility.impedance = selectedDriver.impedanceIsActive;
+        rememberedVisibility.vectorSum = selectedDriver.summaryIsActive;
         rememberedVisibility.scalarSum = selectedDriver.ScalarSummaryisActive;
-        rememberedVisibility.impedanceSum = selectedDriver.ImpedanzSummaryisActive;
+        rememberedVisibility.impedanceSum = selectedDriver.ImpedanceSummaryisActive;
 
-        selectedDriver.PressureisActive = false;
-        selectedDriver.ImpedanzisActive = false;
-        selectedDriver.SummaryisActive = false;
+        selectedDriver.pressureIsActive = false;
+        selectedDriver.impedanceIsActive = false;
+        selectedDriver.summaryIsActive = false;
         selectedDriver.ScalarSummaryisActive = false;
-        selectedDriver.ImpedanzSummaryisActive = false;
+        selectedDriver.ImpedanceSummaryisActive = false;
 
         statusBar()->showMessage(tr("All plot flags disabled for Driver %1.").arg(driverIndex + 1), 3000);
     } else if (rememberedVisibility.valid) {
-        selectedDriver.PressureisActive = rememberedVisibility.pressure;
-        selectedDriver.ImpedanzisActive = rememberedVisibility.impedance;
-        selectedDriver.SummaryisActive = rememberedVisibility.vectorSum;
+        selectedDriver.pressureIsActive = rememberedVisibility.pressure;
+        selectedDriver.impedanceIsActive = rememberedVisibility.impedance;
+        selectedDriver.summaryIsActive = rememberedVisibility.vectorSum;
         selectedDriver.ScalarSummaryisActive = rememberedVisibility.scalarSum;
-        selectedDriver.ImpedanzSummaryisActive = rememberedVisibility.impedanceSum;
+        selectedDriver.ImpedanceSummaryisActive = rememberedVisibility.impedanceSum;
         rememberedVisibility = DriverPlotVisibilityMemory{};
 
         statusBar()->showMessage(tr("Previous plot flags restored for Driver %1.").arg(driverIndex + 1), 3000);
     } else {
-        selectedDriver.PressureisActive = true;
-        selectedDriver.ImpedanzisActive = false;
-        selectedDriver.SummaryisActive = false;
+        selectedDriver.pressureIsActive = true;
+        selectedDriver.impedanceIsActive = false;
+        selectedDriver.summaryIsActive = false;
         selectedDriver.ScalarSummaryisActive = false;
-        selectedDriver.ImpedanzSummaryisActive = false;
+        selectedDriver.ImpedanceSummaryisActive = false;
 
         statusBar()->showMessage(tr("SPL curve enabled for Driver %1.").arg(driverIndex + 1), 3000);
     }

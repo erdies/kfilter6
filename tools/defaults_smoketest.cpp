@@ -47,8 +47,8 @@ bool expectInt(const QString &prefix, const char *name, int actual, int expected
 
 bool checkHistoricalDefaults(driver &drv, const QString &prefix)
 {
-    if (drv.GetTitle() != QStringLiteral("This is a default driver")) {
-        QTextStream(stderr) << prefix << " title mismatch: " << drv.GetTitle() << '\n';
+    if (drv.getTitle() != QStringLiteral("This is a default driver")) {
+        QTextStream(stderr) << prefix << " title mismatch: " << drv.getTitle() << '\n';
         return false;
     }
 
@@ -67,18 +67,16 @@ bool checkHistoricalDefaults(driver &drv, const QString &prefix)
     ok = expectDouble(prefix, "V2", drv.V2, 0.0) && ok;
     ok = expectDouble(prefix, "Ql", drv.getQl(), 10.0) && ok;
 
-    ok = expectInt(prefix, "GTypProposal", drv.GTypProposal, 0) && ok;
-    ok = expectInt(prefix, "Phase_flag", drv.Phase_flag, 1) && ok;
-    ok = expectInt(prefix, "Parameter_flag", drv.Parameter_flag, 1) && ok;
-    ok = expectInt(prefix, "Tiefpass_flag", drv.Tiefpass_flag, 0) && ok;
-    ok = expectInt(prefix, "AkustikESB_flag", drv.AkustikESB_flag, 1) && ok;
-    ok = expectInt(prefix, "Realschall_flag", drv.Realschall_flag, 0) && ok;
+    ok = expectInt(prefix, "GTypProposal", static_cast<int>(drv.enclosureTypeProposal), 0) && ok;
+    ok = expectBool(prefix, "parameterFlag", drv.parameterFlag, true) && ok;
+    ok = expectBool(prefix, "Tiefpass_flag", drv.pistonLowPassActive, false) && ok;
+    ok = expectBool(prefix, "Realschall_flag", drv.fullCircuitFlag, false) && ok;
 
-    ok = expectBool(prefix, "PressureisActive", drv.PressureisActive, false) && ok;
-    ok = expectBool(prefix, "ImpedanzisActive", drv.ImpedanzisActive, false) && ok;
-    ok = expectBool(prefix, "SummaryisActive", drv.SummaryisActive, false) && ok;
+    ok = expectBool(prefix, "pressureIsActive", drv.pressureIsActive, false) && ok;
+    ok = expectBool(prefix, "ImpedanzisActive", drv.impedanceIsActive, false) && ok;
+    ok = expectBool(prefix, "summaryIsActive", drv.summaryIsActive, false) && ok;
     ok = expectBool(prefix, "ScalarSummaryisActive", drv.ScalarSummaryisActive, false) && ok;
-    ok = expectBool(prefix, "ImpedanzSummaryisActive", drv.ImpedanzSummaryisActive, false) && ok;
+    ok = expectBool(prefix, "ImpedanzSummaryisActive", drv.ImpedanceSummaryisActive, false) && ok;
     ok = expectBool(prefix, "InvertPhase", drv.InvertPhase, false) && ok;
     ok = expectBool(prefix, "Full circuit", drv.getFullCircuit(), false) && ok;
 

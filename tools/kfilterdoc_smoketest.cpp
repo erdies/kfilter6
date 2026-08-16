@@ -27,7 +27,7 @@ bool fuzzyEqual(double left, double right)
 
 void fillDriver(driver& d, int driverIndex)
 {
-    d.SetTitle(QStringLiteral("Document driver %1").arg(driverIndex + 1));
+    d.setTitle(QStringLiteral("Document driver %1").arg(driverIndex + 1));
     d.setRdc(6.0 + driverIndex);
     d.setLsp(0.9 + driverIndex);
     d.setF0(35.0 + driverIndex);
@@ -40,13 +40,13 @@ void fillDriver(driver& d, int driverIndex)
     d.setQl(7.0 + driverIndex);
     d.Fb = 38.0 + driverIndex;
     d.V2 = 10.0 + driverIndex;
-    d.GTypProposal = driverIndex + 1;
+    d.enclosureTypeProposal = static_cast<EnclosureType>(driverIndex);
     d.gain = 2.0 + driverIndex;
-    d.PressureisActive = (driverIndex % 2) == 0;
-    d.ImpedanzisActive = true;
-    d.SummaryisActive = (driverIndex == 0);
+    d.pressureIsActive = (driverIndex % 2) == 0;
+    d.impedanceIsActive = true;
+    d.summaryIsActive = (driverIndex == 0);
     d.ScalarSummaryisActive = (driverIndex == 1);
-    d.ImpedanzSummaryisActive = (driverIndex == 2);
+    d.ImpedanceSummaryisActive = (driverIndex == 2);
     d.InvertPhase = (driverIndex % 2) != 0;
     d.setFullCircuit((driverIndex % 2) == 0);
 
@@ -289,7 +289,7 @@ bool checkMeasurementSummaryMerge()
 
     KFilterDoc singleDriverDocument;
     driver& singleDriver = singleDriverDocument.m_driverDriver[0];
-    singleDriver.SummaryisActive = true;
+    singleDriver.summaryIsActive = true;
     singleDriver.ScalarSummaryisActive = false;
 
     KFilterMeasurementCurve& singleDriverCurve = singleDriverDocument.splCorrectionCurve(0);
@@ -328,7 +328,7 @@ bool checkMeasurementSummaryMerge()
 
     singleDriverCurve.setPointValue(0, CorrectionDb);
     singleDriverCurve.setPointValue(1, CorrectionDb);
-    singleDriver.SummaryisActive = false;
+    singleDriver.summaryIsActive = false;
     singleDriver.ScalarSummaryisActive = true;
     singleDriverDocument.setMeasurementMergeEnabled(false);
     singleDriverDocument.PressureScalarSummary();
@@ -359,7 +359,7 @@ bool checkMeasurementSummaryMerge()
         return false;
     }
 
-    singleDriver.SummaryisActive = true;
+    singleDriver.summaryIsActive = true;
     singleDriver.ScalarSummaryisActive = false;
     singleDriverCurve.clear();
     singleDriverCurve.appendPoint(100.0, CorrectionDb);
@@ -377,10 +377,10 @@ bool checkMeasurementSummaryMerge()
     KFilterDoc phaseDocument;
     driver& normalDriver = phaseDocument.m_driverDriver[0];
     driver& invertedDriver = phaseDocument.m_driverDriver[1];
-    normalDriver.SummaryisActive = true;
-    invertedDriver.SummaryisActive = true;
+    normalDriver.summaryIsActive = true;
+    invertedDriver.summaryIsActive = true;
     invertedDriver.InvertPhase = true;
-    invertedDriver.setmodified();
+    invertedDriver.setModified();
 
     constexpr double PhaseTestCorrectionDb = 12.0;
     KFilterMeasurementCurve& phaseCurve = phaseDocument.splCorrectionCurve(0);
@@ -388,10 +388,9 @@ bool checkMeasurementSummaryMerge()
     phaseCurve.appendPoint(20000.0, PhaseTestCorrectionDb);
     phaseDocument.setMeasurementMergeEnabled(true);
 
-    normalDriver.Schall();
-    const int resultIndex = TestSampleIndex * 2;
+    normalDriver.calculatePressureResponse();
     const double individualMagnitude =
-        std::hypot(normalDriver.ResultSchall[resultIndex], normalDriver.ResultSchall[resultIndex + 1]);
+        std::abs(normalDriver.ResultPressure[static_cast<std::size_t>(TestSampleIndex)]);
     const double amplitudeFactor = std::pow(10.0, PhaseTestCorrectionDb / 20.0);
     const double expectedVectorDb = phaseDocument.DB(individualMagnitude * (amplitudeFactor - 1.0));
 
@@ -412,7 +411,7 @@ bool checkActiveFilterSimulationIntegration()
 
     KFilterDoc document;
     driver& d = document.m_driverDriver[0];
-    d.PressureisActive = true;
+    d.pressureIsActive = true;
 
     if (!document.Sound(0)) {
         QTextStream(stderr) << "Active-filter single-driver baseline could not be calculated\n";
@@ -464,7 +463,7 @@ bool checkActiveFilterSimulationIntegration()
     document.setMeasurementHiddenForDriver(0, false);
     document.Sound(0);
 
-    d.SummaryisActive = true;
+    d.summaryIsActive = true;
     d.ScalarSummaryisActive = true;
     document.PressureSummary();
     if (!expectNear("Single-driver vector summary uses effective response",
@@ -488,15 +487,14 @@ bool checkActiveFilterSimulationIntegration()
     KFilterDoc phaseDocument;
     driver& filteredDriver = phaseDocument.m_driverDriver[0];
     driver& rawDriver = phaseDocument.m_driverDriver[1];
-    filteredDriver.SummaryisActive = true;
-    rawDriver.SummaryisActive = true;
+    filteredDriver.summaryIsActive = true;
+    rawDriver.summaryIsActive = true;
     filteredDriver.ScalarSummaryisActive = true;
     rawDriver.ScalarSummaryisActive = true;
 
-    rawDriver.Schall();
-    const int resultIndex = static_cast<int>(TestSampleIndex) * 2;
-    const double rawMagnitude = std::hypot(rawDriver.ResultSchall[resultIndex],
-                                           rawDriver.ResultSchall[resultIndex + 1]);
+    rawDriver.calculatePressureResponse();
+    const double rawMagnitude =
+        std::abs(rawDriver.ResultPressure[TestSampleIndex]);
 
     ActiveFilterChain& phaseChain = phaseDocument.activeFilterChain(0);
     phaseChain.setEnabled(true);
@@ -524,7 +522,7 @@ bool checkActiveFilterSimulationIntegration()
     // Patch 186 Linkwitz-Riley integration: LR4 is -6.0206 dB at the
     // crossover frequency and must use the same centralized complex path.
     KFilterDoc linkwitzRileyDocument;
-    linkwitzRileyDocument.m_driverDriver[0].PressureisActive = true;
+    linkwitzRileyDocument.m_driverDriver[0].pressureIsActive = true;
     linkwitzRileyDocument.Sound(0);
     const double linkwitzRileyBaselineDb =
         linkwitzRileyDocument.m_doubleXContainer[0][TestSampleIndex];
@@ -555,7 +553,7 @@ bool checkActiveFilterSimulationIntegration()
     // the expected attenuation is finite and can be compared in dB directly.
     constexpr std::size_t NotchSampleIndex = TestSampleIndex - 1;
     KFilterDoc notchDocument;
-    notchDocument.m_driverDriver[0].PressureisActive = true;
+    notchDocument.m_driverDriver[0].pressureIsActive = true;
     notchDocument.Sound(0);
     const double notchBaselineDb = notchDocument.m_doubleXContainer[0][NotchSampleIndex];
     ActiveFilterChain& notchChain = notchDocument.activeFilterChain(0);
@@ -583,7 +581,7 @@ bool checkActiveFilterSimulationIntegration()
     // Patch 183 Band-pass integration: the crossover-style Band-pass is applied
     // through the same centralized complex driver path as LP/HP and Notch.
     KFilterDoc bandPassDocument;
-    bandPassDocument.m_driverDriver[0].PressureisActive = true;
+    bandPassDocument.m_driverDriver[0].pressureIsActive = true;
     bandPassDocument.Sound(0);
     const double bandPassBaselineDb =
         bandPassDocument.m_doubleXContainer[0][TestSampleIndex];
@@ -618,12 +616,11 @@ bool checkActiveFilterSimulationIntegration()
     KFilterDoc elementaryDocument;
     driver& elementaryFilteredDriver = elementaryDocument.m_driverDriver[0];
     driver& elementaryRawDriver = elementaryDocument.m_driverDriver[1];
-    elementaryFilteredDriver.SummaryisActive = true;
-    elementaryRawDriver.SummaryisActive = true;
-    elementaryRawDriver.Schall();
+    elementaryFilteredDriver.summaryIsActive = true;
+    elementaryRawDriver.summaryIsActive = true;
+    elementaryRawDriver.calculatePressureResponse();
     const double elementaryRawMagnitude =
-        std::hypot(elementaryRawDriver.ResultSchall[resultIndex],
-                   elementaryRawDriver.ResultSchall[resultIndex + 1]);
+        std::abs(elementaryRawDriver.ResultPressure[TestSampleIndex]);
 
     ActiveFilterChain& elementaryChain = elementaryDocument.activeFilterChain(0);
     elementaryChain.setEnabled(true);
@@ -651,7 +648,7 @@ bool checkActiveFilterSimulationIntegration()
     // Unsupported chains must bypass the complete active-filter stage instead
     // of applying only the supported prefix or propagating NaNs into the plot.
     KFilterDoc unsupportedDocument;
-    unsupportedDocument.m_driverDriver[0].PressureisActive = true;
+    unsupportedDocument.m_driverDriver[0].pressureIsActive = true;
     unsupportedDocument.Sound(0);
     const double unsupportedBaseline =
         unsupportedDocument.m_doubleXContainer[0][TestSampleIndex];
@@ -687,7 +684,7 @@ bool checkBaffleSimulationIntegration()
 
     KFilterDoc document;
     driver& d = document.m_driverDriver[0];
-    d.PressureisActive = true;
+    d.pressureIsActive = true;
 
     if (!document.Sound(0)) {
         QTextStream(stderr) << "Baffle single-driver baseline could not be calculated\n";
@@ -774,7 +771,7 @@ bool checkBaffleSimulationIntegration()
     // Patch 192: Rectangular Edge Diffraction uses the same centralized complex
     // H_baffle stage. Verify productive Stage-2 magnitude and invalid-geometry bypass.
     KFilterDoc rectangularDocument;
-    rectangularDocument.m_driverDriver[0].PressureisActive = true;
+    rectangularDocument.m_driverDriver[0].pressureIsActive = true;
     rectangularDocument.Sound(0);
     const double rectangularBaselineDb =
         rectangularDocument.m_doubleXContainer[0][TestSampleIndex];
@@ -904,15 +901,14 @@ bool checkBaffleSimulationIntegration()
     KFilterDoc phaseDocument;
     driver& baffledDriver = phaseDocument.m_driverDriver[0];
     driver& rawDriver = phaseDocument.m_driverDriver[1];
-    baffledDriver.SummaryisActive = true;
-    rawDriver.SummaryisActive = true;
+    baffledDriver.summaryIsActive = true;
+    rawDriver.summaryIsActive = true;
     baffledDriver.ScalarSummaryisActive = true;
     rawDriver.ScalarSummaryisActive = true;
 
-    rawDriver.Schall();
-    const int resultIndex = static_cast<int>(TestSampleIndex) * 2;
-    const double rawMagnitude = std::hypot(rawDriver.ResultSchall[resultIndex],
-                                           rawDriver.ResultSchall[resultIndex + 1]);
+    rawDriver.calculatePressureResponse();
+    const double rawMagnitude =
+        std::abs(rawDriver.ResultPressure[TestSampleIndex]);
 
     BaffleSettings& phaseSettings = phaseDocument.baffleSettings(0);
     phaseSettings.enabled = true;
@@ -949,7 +945,7 @@ bool checkFloorReflectionSimulationIntegration()
 
     KFilterDoc document;
     driver& d = document.m_driverDriver[0];
-    d.PressureisActive = true;
+    d.pressureIsActive = true;
 
     // Vertical source geometry is retained in BaffleSettings even when
     // Baffle/Diffraction processing itself is disabled.
@@ -1066,8 +1062,8 @@ bool checkFloorReflectionSimulationIntegration()
     KFilterDoc phaseDocument;
     driver& reflectedDriver = phaseDocument.m_driverDriver[0];
     driver& rawDriver = phaseDocument.m_driverDriver[1];
-    reflectedDriver.SummaryisActive = true;
-    rawDriver.SummaryisActive = true;
+    reflectedDriver.summaryIsActive = true;
+    rawDriver.summaryIsActive = true;
     reflectedDriver.ScalarSummaryisActive = true;
     rawDriver.ScalarSummaryisActive = true;
 
@@ -1079,10 +1075,9 @@ bool checkFloorReflectionSimulationIntegration()
     phaseFloor.listenerHeightAboveFloorMm = 1050.0;
     phaseFloor.horizontalDistanceMm = 2500.0;
 
-    rawDriver.Schall();
-    const int resultIndex = static_cast<int>(TestSampleIndex) * 2;
-    const double rawMagnitude = std::hypot(rawDriver.ResultSchall[resultIndex],
-                                           rawDriver.ResultSchall[resultIndex + 1]);
+    rawDriver.calculatePressureResponse();
+    const double rawMagnitude =
+        std::abs(rawDriver.ResultPressure[TestSampleIndex]);
     const FloorReflectionResponse& phaseResponse = phaseDocument.floorReflectionResponse(0);
     const std::complex<double> h = phaseResponse.values[TestSampleIndex];
 
@@ -1192,9 +1187,9 @@ bool checkSelectiveMeasurementSums()
     KFilterDoc actual;
     KFilterDoc expected;
     for (int driverIndex = 0; driverIndex < 2; ++driverIndex) {
-        actual.m_driverDriver[driverIndex].SummaryisActive = true;
+        actual.m_driverDriver[driverIndex].summaryIsActive = true;
         actual.m_driverDriver[driverIndex].ScalarSummaryisActive = true;
-        expected.m_driverDriver[driverIndex].SummaryisActive = true;
+        expected.m_driverDriver[driverIndex].summaryIsActive = true;
         expected.m_driverDriver[driverIndex].ScalarSummaryisActive = true;
     }
 
@@ -1249,7 +1244,7 @@ bool checkSelectiveMeasurementSums()
 
 bool compareDriver(driver& expected, driver& actual, int driverIndex)
 {
-    if (expected.GetTitle() != actual.GetTitle() ||
+    if (expected.getTitle() != actual.getTitle() ||
         !fuzzyEqual(expected.getRdc(), actual.getRdc()) ||
         !fuzzyEqual(expected.getLsp(), actual.getLsp()) ||
         !fuzzyEqual(expected.getF0(), actual.getF0()) ||
@@ -1262,13 +1257,13 @@ bool compareDriver(driver& expected, driver& actual, int driverIndex)
         !fuzzyEqual(expected.getQl(), actual.getQl()) ||
         !fuzzyEqual(expected.Fb, actual.Fb) ||
         !fuzzyEqual(expected.V2, actual.V2) ||
-        expected.GTypProposal != actual.GTypProposal ||
+        expected.enclosureTypeProposal != actual.enclosureTypeProposal ||
         !fuzzyEqual(expected.gain, actual.gain) ||
-        expected.PressureisActive != actual.PressureisActive ||
-        expected.ImpedanzisActive != actual.ImpedanzisActive ||
-        expected.SummaryisActive != actual.SummaryisActive ||
+        expected.pressureIsActive != actual.pressureIsActive ||
+        expected.impedanceIsActive != actual.impedanceIsActive ||
+        expected.summaryIsActive != actual.summaryIsActive ||
         expected.ScalarSummaryisActive != actual.ScalarSummaryisActive ||
-        expected.ImpedanzSummaryisActive != actual.ImpedanzSummaryisActive ||
+        expected.ImpedanceSummaryisActive != actual.ImpedanceSummaryisActive ||
         expected.InvertPhase != actual.InvertPhase ||
         expected.getFullCircuit() != actual.getFullCircuit()) {
         QTextStream(stderr) << "Document round-trip mismatch for driver " << (driverIndex + 1) << '\n';

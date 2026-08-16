@@ -62,7 +62,7 @@ int main(int argc, char **argv)
     preview.resize(1140, 330);
 
     driver singleDriver;
-    singleDriver.SetTitle(QStringLiteral("Preview driver"));
+    singleDriver.setTitle(QStringLiteral("Preview driver"));
     preview.setDriver(singleDriver, 1);
     preview.show();
     QApplication::processEvents();
@@ -108,7 +108,7 @@ int main(int argc, char **argv)
 
     std::array<driver, 4> drivers;
     for (int index = 0; index < static_cast<int>(drivers.size()); ++index) {
-        drivers[index].SetTitle(QStringLiteral("Driver %1").arg(index + 1));
+        drivers[index].setTitle(QStringLiteral("Driver %1").arg(index + 1));
     }
 
     preview.setDrivers(drivers.data(), static_cast<int>(drivers.size()));

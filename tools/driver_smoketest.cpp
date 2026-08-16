@@ -11,22 +11,22 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
 
 namespace
 {
-constexpr int ResultValueCount = 300;
-using ResultArray = std::array<double, ResultValueCount>;
+constexpr std::size_t ResultSampleCount = 150;
+using ResultArray = std::array<std::complex<double>, ResultSampleCount>;
 
-ResultArray copyResult(const double* values)
+ResultArray copyResult(const ResultArray& values)
 {
-    ResultArray result{};
-    std::copy_n(values, ResultValueCount, result.begin());
-    return result;
+    return values;
 }
 
-bool nearlyEqual(double left, double right)
+bool nearlyEqual(const std::complex<double>& left, const std::complex<double>& right)
 {
-    if (!std::isfinite(left) || !std::isfinite(right)) {
+    if (!std::isfinite(left.real()) || !std::isfinite(left.imag()) ||
+        !std::isfinite(right.real()) || !std::isfinite(right.imag())) {
         return false;
     }
 
@@ -34,25 +34,25 @@ bool nearlyEqual(double left, double right)
     return std::abs(left - right) <= 1.0e-10 * scale;
 }
 
-bool resultArraysEqual(const ResultArray& left, const double* right)
+bool resultArraysEqual(const ResultArray& left, const ResultArray& right)
 {
-    for (int index = 0; index < ResultValueCount; ++index) {
-        if (!nearlyEqual(left[static_cast<std::size_t>(index)], right[index])) {
+    for (std::size_t index = 0; index < ResultSampleCount; ++index) {
+        if (!nearlyEqual(left[index], right[index])) {
             return false;
         }
     }
     return true;
 }
 
-bool resultArraysDiffer(const ResultArray& left, const double* right)
+bool resultArraysDiffer(const ResultArray& left, const ResultArray& right)
 {
     return !resultArraysEqual(left, right);
 }
 
 void calculateResults(driver& drv)
 {
-    drv.Schall();
-    drv.Impedanz();
+    drv.calculatePressureResponse();
+    drv.calculateImpedanceResponse();
 }
 
 void configureDefault(driver&)
@@ -64,8 +64,8 @@ void configureClosed(driver& drv)
     drv.Vb = 20.0;
     drv.Fb = 0.0;
     drv.V2 = 0.0;
-    drv.GTypProposal = 1;
-    drv.setmodified();
+    drv.enclosureTypeProposal = EnclosureType::Sealed;
+    drv.setModified();
 }
 
 void configureVented(driver& drv)
@@ -73,9 +73,9 @@ void configureVented(driver& drv)
     drv.Vb = 20.0;
     drv.Fb = 40.0;
     drv.V2 = 0.0;
-    drv.GTypProposal = 2;
+    drv.enclosureTypeProposal = EnclosureType::Vented;
     drv.setQl(7.0);
-    drv.setmodified();
+    drv.setModified();
 }
 
 void configureFullCircuit(driver& drv)
@@ -89,8 +89,8 @@ bool checkSetterInvalidation(const char* label, Configure configure, Mutate muta
     driver cachedDriver;
     configure(cachedDriver);
     calculateResults(cachedDriver);
-    const ResultArray baselineSound = copyResult(cachedDriver.ResultSchall);
-    const ResultArray baselineImpedance = copyResult(cachedDriver.ResultImpedanz);
+    const ResultArray baselineSound = copyResult(cachedDriver.ResultPressure);
+    const ResultArray baselineImpedance = copyResult(cachedDriver.ResultImpedance);
 
     mutate(cachedDriver);
     calculateResults(cachedDriver);
@@ -100,14 +100,14 @@ bool checkSetterInvalidation(const char* label, Configure configure, Mutate muta
     mutate(freshDriver);
     calculateResults(freshDriver);
 
-    if (!resultArraysEqual(copyResult(freshDriver.ResultSchall), cachedDriver.ResultSchall) ||
-        !resultArraysEqual(copyResult(freshDriver.ResultImpedanz), cachedDriver.ResultImpedanz)) {
+    if (!resultArraysEqual(copyResult(freshDriver.ResultPressure), cachedDriver.ResultPressure) ||
+        !resultArraysEqual(copyResult(freshDriver.ResultImpedance), cachedDriver.ResultImpedance)) {
         QTextStream(stderr) << label << " left stale cached results\n";
         return false;
     }
 
-    if (!resultArraysDiffer(baselineSound, cachedDriver.ResultSchall) &&
-        !resultArraysDiffer(baselineImpedance, cachedDriver.ResultImpedanz)) {
+    if (!resultArraysDiffer(baselineSound, cachedDriver.ResultPressure) &&
+        !resultArraysDiffer(baselineImpedance, cachedDriver.ResultImpedance)) {
         QTextStream(stderr) << label << " did not affect either calculated result; test setup is ineffective\n";
         return false;
     }
@@ -145,8 +145,8 @@ bool checkNetworkCleanupInvalidation()
     driver drv;
     drv.setUnit(1, 10.0);
     calculateResults(drv);
-    const ResultArray networkSound = copyResult(drv.ResultSchall);
-    const ResultArray networkImpedance = copyResult(drv.ResultImpedanz);
+    const ResultArray networkSound = copyResult(drv.ResultPressure);
+    const ResultArray networkImpedance = copyResult(drv.ResultImpedance);
 
     drv.cleanupNetwork();
     calculateResults(drv);
@@ -154,14 +154,14 @@ bool checkNetworkCleanupInvalidation()
     driver freshDriver;
     calculateResults(freshDriver);
 
-    if (!resultArraysEqual(copyResult(freshDriver.ResultSchall), drv.ResultSchall) ||
-        !resultArraysEqual(copyResult(freshDriver.ResultImpedanz), drv.ResultImpedanz)) {
+    if (!resultArraysEqual(copyResult(freshDriver.ResultPressure), drv.ResultPressure) ||
+        !resultArraysEqual(copyResult(freshDriver.ResultImpedance), drv.ResultImpedance)) {
         QTextStream(stderr) << "cleanupNetwork left stale cached results\n";
         return false;
     }
 
-    if (!resultArraysDiffer(networkSound, drv.ResultSchall) &&
-        !resultArraysDiffer(networkImpedance, drv.ResultImpedanz)) {
+    if (!resultArraysDiffer(networkSound, drv.ResultPressure) &&
+        !resultArraysDiffer(networkImpedance, drv.ResultImpedance)) {
         QTextStream(stderr) << "cleanupNetwork regression setup is ineffective\n";
         return false;
     }
@@ -169,33 +169,93 @@ bool checkNetworkCleanupInvalidation()
     return true;
 }
 
-bool checkPhaseStateReset()
+bool checkEnclosureTransitionConsistency()
 {
     driver transitionedDriver;
     configureVented(transitionedDriver);
-    transitionedDriver.Schall();
-    if (transitionedDriver.GTyp != 2 || transitionedDriver.Phase_flag != 0) {
-        QTextStream(stderr) << "Vented-box phase setup failed\n";
+    transitionedDriver.calculatePressureResponse();
+    if (transitionedDriver.enclosureType != EnclosureType::Vented) {
+        QTextStream(stderr) << "Vented-box setup failed\n";
         return false;
     }
 
     transitionedDriver.Vb = 0.0;
     transitionedDriver.Fb = 0.0;
     transitionedDriver.V2 = 0.0;
-    transitionedDriver.GTypProposal = 0;
-    transitionedDriver.setmodified();
-    transitionedDriver.Schall();
+    transitionedDriver.enclosureTypeProposal = EnclosureType::OpenBaffle;
+    transitionedDriver.setModified();
+    transitionedDriver.calculatePressureResponse();
 
-    if (transitionedDriver.GTyp != 0 || transitionedDriver.Phase_flag != 1) {
-        QTextStream(stderr) << "Phase_flag was not reset after changing from vented to free-air\n";
+    if (transitionedDriver.enclosureType != EnclosureType::OpenBaffle) {
+        QTextStream(stderr) << "Free-air enclosure state was not restored after vented operation\n";
         return false;
     }
 
     driver directDriver;
     directDriver.setQl(7.0);
-    directDriver.Schall();
-    if (!resultArraysEqual(copyResult(directDriver.ResultSchall), transitionedDriver.ResultSchall)) {
+    directDriver.calculatePressureResponse();
+    if (!resultArraysEqual(copyResult(directDriver.ResultPressure), transitionedDriver.ResultPressure)) {
         QTextStream(stderr) << "Identical free-air end states produced different complex SPL results\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool checkZeroF0ImpedanceModel()
+{
+    auto verifyVoiceCoilOnly = [](driver& drv, const char* label) {
+        drv.calculateImpedanceResponse();
+
+        if (drv.parameterFlag) {
+            QTextStream(stderr) << label << " did not disable TS-parameter calculation\n";
+            return false;
+        }
+
+        double omega = 125.6637061;
+        constexpr double frequencyFactor = 1.047128548;
+        for (std::size_t index = 0; index < ResultSampleCount; ++index) {
+            const std::complex<double> expected{drv.getRdc(), omega * drv.getLsp()};
+            if (!nearlyEqual(drv.ResultImpedance[index], expected)) {
+                QTextStream(stderr)
+                    << label << " produced a non-voice-coil impedance at sample "
+                    << static_cast<unsigned long long>(index) << '\n';
+                return false;
+            }
+            omega *= frequencyFactor;
+        }
+        return true;
+    };
+
+    driver directZeroDriver;
+    directZeroDriver.setF0(0.0);
+    if (!verifyVoiceCoilOnly(directZeroDriver, "Direct F0 == 0")) {
+        return false;
+    }
+
+    driver transitionedToZeroDriver;
+    transitionedToZeroDriver.setF0(180.0);
+    transitionedToZeroDriver.calculateImpedanceResponse();
+    transitionedToZeroDriver.setF0(0.0);
+    if (!verifyVoiceCoilOnly(transitionedToZeroDriver, "F0 > 0 -> F0 == 0")) {
+        return false;
+    }
+
+    if (!resultArraysEqual(copyResult(directZeroDriver.ResultImpedance),
+                           transitionedToZeroDriver.ResultImpedance)) {
+        QTextStream(stderr) << "Direct and transitioned F0 == 0 impedances differ\n";
+        return false;
+    }
+
+    transitionedToZeroDriver.setF0(180.0);
+    transitionedToZeroDriver.calculateImpedanceResponse();
+
+    driver directValidDriver;
+    directValidDriver.setF0(180.0);
+    directValidDriver.calculateImpedanceResponse();
+    if (!resultArraysEqual(copyResult(directValidDriver.ResultImpedance),
+                           transitionedToZeroDriver.ResultImpedance)) {
+        QTextStream(stderr) << "F0 == 0 -> F0 > 0 did not restore the TS impedance model\n";
         return false;
     }
 
@@ -206,23 +266,23 @@ bool checkCalculationFlagRecovery()
 {
     driver recoveredDriver;
     recoveredDriver.setF0(0.0);
-    recoveredDriver.Schall();
-    if (recoveredDriver.Parameter_flag != 0 || recoveredDriver.AkustikESB_flag != 0) {
+    recoveredDriver.calculatePressureResponse();
+    if (recoveredDriver.parameterFlag) {
         QTextStream(stderr) << "F0 == 0 did not disable invalid parameter calculation\n";
         return false;
     }
 
     recoveredDriver.setF0(180.0);
-    recoveredDriver.Schall();
-    if (recoveredDriver.Parameter_flag != 1 || recoveredDriver.AkustikESB_flag != 1) {
-        QTextStream(stderr) << "Valid F0 did not restore calculation flags\n";
+    recoveredDriver.calculatePressureResponse();
+    if (!recoveredDriver.parameterFlag) {
+        QTextStream(stderr) << "Valid F0 did not restore TS-parameter calculation\n";
         return false;
     }
 
     driver directDriver;
     directDriver.setF0(180.0);
-    directDriver.Schall();
-    if (!resultArraysEqual(copyResult(directDriver.ResultSchall), recoveredDriver.ResultSchall)) {
+    directDriver.calculatePressureResponse();
+    if (!resultArraysEqual(copyResult(directDriver.ResultPressure), recoveredDriver.ResultPressure)) {
         QTextStream(stderr) << "Recovered and directly valid drivers produced different SPL results\n";
         return false;
     }
@@ -234,7 +294,7 @@ bool checkCalculationFlagRecovery()
 int main()
 {
     driver d;
-    d.SetTitle(QStringLiteral("Qt6 driver smoke test"));
+    d.setTitle(QStringLiteral("Qt6 driver smoke test"));
     d.setRdc(5.6);
     d.setF0(300.0);
     d.setQl(7.5);
@@ -242,17 +302,19 @@ int main()
 
     if (!checkAllSetterInvalidations() ||
         !checkNetworkCleanupInvalidation() ||
-        !checkPhaseStateReset() ||
+        !checkEnclosureTransitionConsistency() ||
+        !checkZeroF0ImpedanceModel() ||
         !checkCalculationFlagRecovery()) {
         return 1;
     }
 
     QTextStream out(stdout);
-    out << d.GetTitle() << '\n';
+    out << d.getTitle() << '\n';
     out << "Rdc=" << d.getRdc() << '\n';
     out << "Ql=" << d.getQl() << '\n';
-    out << "Sound active=" << d.PressureisActive << '\n';
-    out << "Impedance[0]=" << d.ResultImpedanz[0] << '\n';
+    out << "Sound active=" << d.pressureIsActive << '\n';
+    out << "Impedance[0]=" << d.ResultImpedance[0].real()
+        << "+j" << d.ResultImpedance[0].imag() << '\n';
     out << "Driver state regression smoke test passed\n";
     return 0;
 }

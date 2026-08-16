@@ -246,7 +246,7 @@ QString sanitizedFileNamePart(QString text)
 
 QString suggestedDriverSlotPath(const driver& drv, int driverIndex)
 {
-    const QString titlePart = sanitizedFileNamePart(drv.GetTitle());
+    const QString titlePart = sanitizedFileNamePart(drv.getTitle());
     return QDir::home().filePath(QStringLiteral("kfilter_driver_%1_%2.kfd")
                                      .arg(driverIndex + 1)
                                      .arg(titlePart));
@@ -560,7 +560,7 @@ void DriverParametersDialog::loadPageFromDriver(int index,
     DriverPage& page = m_pages.at(index);
     driver& drv = m_drivers[index];
 
-    page.title->setText(drv.GetTitle());
+    page.title->setText(drv.getTitle());
     page.rdc->setValue(drv.getRdc());
     page.lspMilliHenry->setValue(drv.getLsp() * 1000.0);
     page.f0->setValue(drv.getF0());
@@ -578,14 +578,14 @@ void DriverParametersDialog::loadPageFromDriver(int index,
     page.v2->setValue(drv.V2);
     page.gainDb->setValue(linearGainToDb(drv.gain));
 
-    const int alignmentIndex = page.alignmentProposal->findData(drv.GTypProposal);
+    const int alignmentIndex = page.alignmentProposal->findData(static_cast<int>(drv.enclosureTypeProposal));
     page.alignmentProposal->setCurrentIndex(alignmentIndex >= 0 ? alignmentIndex : 0);
 
-    page.pressureActive->setChecked(drv.PressureisActive);
-    page.impedanceActive->setChecked(drv.ImpedanzisActive);
-    page.summaryActive->setChecked(drv.SummaryisActive);
+    page.pressureActive->setChecked(drv.pressureIsActive);
+    page.impedanceActive->setChecked(drv.impedanceIsActive);
+    page.summaryActive->setChecked(drv.summaryIsActive);
     page.scalarSummaryActive->setChecked(drv.ScalarSummaryisActive);
-    page.impedanceSummaryActive->setChecked(drv.ImpedanzSummaryisActive);
+    page.impedanceSummaryActive->setChecked(drv.ImpedanceSummaryisActive);
     page.invertPhase->setChecked(drv.InvertPhase);
     page.fullCircuit->setChecked(drv.getFullCircuit());
     updateTubeLengthForPage(page);
@@ -678,7 +678,7 @@ bool DriverParametersDialog::applyToDrivers(ApplyMode mode, QString *errorMessag
         const ParsedPage& parsed = parsedPages.at(index);
         driver& drv = m_drivers[index];
 
-        drv.SetTitle(parsed.title);
+        drv.setTitle(parsed.title);
         drv.setRdc(parsed.rdc);
         drv.setLsp(parsed.lspMilliHenry / 1000.0);
         drv.setF0(parsed.f0);
@@ -691,7 +691,7 @@ bool DriverParametersDialog::applyToDrivers(ApplyMode mode, QString *errorMessag
         drv.setQl(parsed.ql);
         drv.Fb = parsed.fb;
         drv.V2 = parsed.v2;
-        drv.GTypProposal = parsed.alignmentProposal;
+        drv.enclosureTypeProposal = static_cast<EnclosureType>(parsed.alignmentProposal);
         drv.gain = dbToLinearGain(parsed.gainDb);
 
         if (mode == ApplyMode::Commit) {
@@ -702,16 +702,16 @@ bool DriverParametersDialog::applyToDrivers(ApplyMode mode, QString *errorMessag
             }
         }
 
-        drv.PressureisActive = parsed.pressureActive;
-        drv.ImpedanzisActive = parsed.impedanceActive;
-        drv.SummaryisActive = parsed.summaryActive;
+        drv.pressureIsActive = parsed.pressureActive;
+        drv.impedanceIsActive = parsed.impedanceActive;
+        drv.summaryIsActive = parsed.summaryActive;
         drv.ScalarSummaryisActive = parsed.scalarSummaryActive;
-        drv.ImpedanzSummaryisActive = parsed.impedanceSummaryActive;
+        drv.ImpedanceSummaryisActive = parsed.impedanceSummaryActive;
         drv.InvertPhase = parsed.invertPhase;
         drv.setFullCircuit(parsed.fullCircuit);
 
-        drv.Berechneparameter();
-        drv.setmodified();
+        drv.calculateParameters();
+        drv.setModified();
     }
 
     return true;
@@ -739,7 +739,7 @@ void DriverParametersDialog::restoreCommittedState()
     for (int index = 0; index < KFilterProjectIo::DriverCount; ++index) {
         const std::size_t arrayIndex = static_cast<std::size_t>(index);
         m_drivers[index] = m_committedDrivers[arrayIndex];
-        m_drivers[index].setmodified();
+        m_drivers[index].setModified();
         m_document.splCorrectionCurve(index) = m_committedMeasurementCurves[arrayIndex];
         m_document.activeFilterChain(index) = m_committedActiveFilterChains[arrayIndex];
         m_document.baffleSettings(index) = m_committedBaffleSettings[arrayIndex];

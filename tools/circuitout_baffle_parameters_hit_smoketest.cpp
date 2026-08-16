@@ -88,7 +88,7 @@ int main(int argc, char **argv)
     preview.resize(1140, 330);
 
     driver singleDriver;
-    singleDriver.SetTitle(QStringLiteral("Preview driver"));
+    singleDriver.setTitle(QStringLiteral("Preview driver"));
     preview.setDriver(singleDriver, 1);
     preview.show();
     QApplication::processEvents();
@@ -170,9 +170,9 @@ int main(int argc, char **argv)
     // cabinet edge while the bandpass speaker moves to the internal partition.
     for (int boxType = 0; boxType <= 3; ++boxType) {
         driver enclosureDriver;
-        enclosureDriver.SetTitle(QStringLiteral("Enclosure %1").arg(boxType));
+        enclosureDriver.setTitle(QStringLiteral("Enclosure %1").arg(boxType));
         enclosureDriver.Vb = boxType == 0 ? 0.0 : 20.0;
-        enclosureDriver.GTypProposal = boxType;
+        enclosureDriver.enclosureTypeProposal = static_cast<EnclosureType>(boxType);
         if (boxType == 3) {
             enclosureDriver.V2 = 8.0;
         }
@@ -204,7 +204,7 @@ int main(int argc, char **argv)
 
     std::array<driver, 4> drivers;
     for (int index = 0; index < static_cast<int>(drivers.size()); ++index) {
-        drivers[index].SetTitle(QStringLiteral("Driver %1").arg(index + 1));
+        drivers[index].setTitle(QStringLiteral("Driver %1").arg(index + 1));
     }
 
     preview.setDrivers(drivers.data(), static_cast<int>(drivers.size()));

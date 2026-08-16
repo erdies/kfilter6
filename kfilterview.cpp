@@ -314,7 +314,7 @@ QString KFilterView::measurementDriverLabel(int driverIndex) const
         return fallback;
     }
 
-    const QString title = m_document->m_driverDriver[driverIndex].GetTitle().trimmed();
+    const QString title = m_document->m_driverDriver[driverIndex].getTitle().trimmed();
     if (title.isEmpty() || title == QStringLiteral("This is a default driver")) {
         return fallback;
     }
@@ -623,7 +623,7 @@ void KFilterView::drawDriverCurveLabels(QPainter& painter)
             continue;
         }
 
-        QString label = mydoc->m_driverDriver[count].GetTitle();
+        QString label = mydoc->m_driverDriver[count].getTitle();
         if (label.trimmed().isEmpty()) {
             label = tr("Driver %1").arg(count + 1);
         }
@@ -756,7 +756,7 @@ void KFilterView::drawLegend(QPainter& painter)
     };
 
     for (int driverIndex = 0; driverIndex < 4; ++driverIndex) {
-        if (mydoc->m_driverDriver[driverIndex].PressureisActive) {
+        if (mydoc->m_driverDriver[driverIndex].pressureIsActive) {
             const QString pressureLabel = measurementMergeAppliedForDriver(driverIndex)
                                               ? tr("Driver %1 SPL (merged)").arg(driverIndex + 1)
                                               : tr("Driver %1 SPL").arg(driverIndex + 1);
@@ -766,7 +766,7 @@ void KFilterView::drawLegend(QPainter& painter)
                       pressureLabel);
         }
 
-        if (mydoc->m_driverDriver[driverIndex].ImpedanzisActive) {
+        if (mydoc->m_driverDriver[driverIndex].impedanceIsActive) {
             drawEntry(impedanceCurveColor(driverIndex),
                       Qt::DotLine,
                       1,
@@ -812,10 +812,10 @@ void KFilterView::drawLegend(QPainter& painter)
         }
     }
 
-    if (mydoc->m_driverDriver[0].SummaryisActive ||
-        mydoc->m_driverDriver[1].SummaryisActive ||
-        mydoc->m_driverDriver[2].SummaryisActive ||
-        mydoc->m_driverDriver[3].SummaryisActive) {
+    if (mydoc->m_driverDriver[0].summaryIsActive ||
+        mydoc->m_driverDriver[1].summaryIsActive ||
+        mydoc->m_driverDriver[2].summaryIsActive ||
+        mydoc->m_driverDriver[3].summaryIsActive) {
         drawEntry(cpressureS, Qt::SolidLine, 3, tr("Vector SPL sum"));
     }
 
@@ -826,10 +826,10 @@ void KFilterView::drawLegend(QPainter& painter)
         drawEntry(cscalarpressureS, Qt::SolidLine, 2, tr("Energetic SPL sum"));
     }
 
-    if (mydoc->m_driverDriver[0].ImpedanzSummaryisActive ||
-        mydoc->m_driverDriver[1].ImpedanzSummaryisActive ||
-        mydoc->m_driverDriver[2].ImpedanzSummaryisActive ||
-        mydoc->m_driverDriver[3].ImpedanzSummaryisActive) {
+    if (mydoc->m_driverDriver[0].ImpedanceSummaryisActive ||
+        mydoc->m_driverDriver[1].ImpedanceSummaryisActive ||
+        mydoc->m_driverDriver[2].ImpedanceSummaryisActive ||
+        mydoc->m_driverDriver[3].ImpedanceSummaryisActive) {
         drawEntry(cimpedanceS, Qt::DotLine, 2, tr("Total impedance"));
     }
 }

@@ -32,7 +32,7 @@ void populateDrivers(driver (&drivers)[KFilterProjectIo::DriverCount], bool incl
 {
     for (int driverIndex = 0; driverIndex < KFilterProjectIo::DriverCount; ++driverIndex) {
         driver& currentDriver = drivers[driverIndex];
-        currentDriver.SetTitle(QStringLiteral("Driver %1 äöü").arg(driverIndex + 1));
+        currentDriver.setTitle(QStringLiteral("Driver %1 äöü").arg(driverIndex + 1));
         currentDriver.setRdc(5.0 + driverIndex);
         currentDriver.setLsp(0.00075 + driverIndex * 0.0001);
         currentDriver.setF0(40.0 + driverIndex);
@@ -45,13 +45,13 @@ void populateDrivers(driver (&drivers)[KFilterProjectIo::DriverCount], bool incl
         currentDriver.setQl(6.5 + driverIndex);
         currentDriver.Fb = 42.0 + driverIndex;
         currentDriver.V2 = 12.0 + driverIndex;
-        currentDriver.GTypProposal = driverIndex + 1;
+        currentDriver.enclosureTypeProposal = static_cast<EnclosureType>(driverIndex);
         currentDriver.gain = 1.5 + driverIndex;
-        currentDriver.PressureisActive = (driverIndex % 2) == 0;
-        currentDriver.ImpedanzisActive = true;
-        currentDriver.SummaryisActive = false;
+        currentDriver.pressureIsActive = (driverIndex % 2) == 0;
+        currentDriver.impedanceIsActive = true;
+        currentDriver.summaryIsActive = false;
         currentDriver.ScalarSummaryisActive = true;
-        currentDriver.ImpedanzSummaryisActive = false;
+        currentDriver.ImpedanceSummaryisActive = false;
         currentDriver.InvertPhase = (driverIndex % 2) != 0;
         currentDriver.setFullCircuit(includeFullCircuit && (driverIndex % 2) == 0);
 
@@ -70,7 +70,7 @@ bool compareDrivers(driver (&expected)[KFilterProjectIo::DriverCount],
         driver& expectedDriver = expected[driverIndex];
         driver& actualDriver = actual[driverIndex];
 
-        if (expectedDriver.GetTitle() != actualDriver.GetTitle() ||
+        if (expectedDriver.getTitle() != actualDriver.getTitle() ||
             !fuzzyEqual(expectedDriver.getRdc(), actualDriver.getRdc()) ||
             !fuzzyEqual(expectedDriver.getLsp(), actualDriver.getLsp()) ||
             !fuzzyEqual(expectedDriver.getF0(), actualDriver.getF0()) ||
@@ -83,13 +83,13 @@ bool compareDrivers(driver (&expected)[KFilterProjectIo::DriverCount],
             !fuzzyEqual(expectedDriver.getQl(), actualDriver.getQl()) ||
             !fuzzyEqual(expectedDriver.Fb, actualDriver.Fb) ||
             !fuzzyEqual(expectedDriver.V2, actualDriver.V2) ||
-            expectedDriver.GTypProposal != actualDriver.GTypProposal ||
+            expectedDriver.enclosureTypeProposal != actualDriver.enclosureTypeProposal ||
             !fuzzyEqual(expectedDriver.gain, actualDriver.gain) ||
-            expectedDriver.PressureisActive != actualDriver.PressureisActive ||
-            expectedDriver.ImpedanzisActive != actualDriver.ImpedanzisActive ||
-            expectedDriver.SummaryisActive != actualDriver.SummaryisActive ||
+            expectedDriver.pressureIsActive != actualDriver.pressureIsActive ||
+            expectedDriver.impedanceIsActive != actualDriver.impedanceIsActive ||
+            expectedDriver.summaryIsActive != actualDriver.summaryIsActive ||
             expectedDriver.ScalarSummaryisActive != actualDriver.ScalarSummaryisActive ||
-            expectedDriver.ImpedanzSummaryisActive != actualDriver.ImpedanzSummaryisActive ||
+            expectedDriver.ImpedanceSummaryisActive != actualDriver.ImpedanceSummaryisActive ||
             expectedDriver.InvertPhase != actualDriver.InvertPhase ||
             (compareFullCircuit && expectedDriver.getFullCircuit() != actualDriver.getFullCircuit())) {
             error = QStringLiteral("Parameter round-trip mismatch for driver %1").arg(driverIndex + 1);
@@ -522,15 +522,15 @@ QString createLegacyProject(driver (&drivers)[KFilterProjectIo::DriverCount], bo
                << "\nVb=" << currentDriver.Vb
                << "\nFb=" << currentDriver.Fb
                << "\nV2=" << currentDriver.V2
-               << "\nGTypProposal=" << currentDriver.GTypProposal
+               << "\nGTypProposal=" << static_cast<int>(currentDriver.enclosureTypeProposal)
                << "\nGain=" << currentDriver.gain
-               << "\nPressure=" << (currentDriver.PressureisActive ? 1 : 0)
-               << "\nImpedanz=" << (currentDriver.ImpedanzisActive ? 1 : 0)
-               << "\nSummary=" << (currentDriver.SummaryisActive ? 1 : 0)
+               << "\nPressure=" << (currentDriver.pressureIsActive ? 1 : 0)
+               << "\nImpedanz=" << (currentDriver.impedanceIsActive ? 1 : 0)
+               << "\nSummary=" << (currentDriver.summaryIsActive ? 1 : 0)
                << "\nScalarSummary=" << (currentDriver.ScalarSummaryisActive ? 1 : 0)
-               << "\nImpedanzSummary=" << (currentDriver.ImpedanzSummaryisActive ? 1 : 0)
+               << "\nImpedanzSummary=" << (currentDriver.ImpedanceSummaryisActive ? 1 : 0)
                << "\nInvertPhase=" << (currentDriver.InvertPhase ? 1 : 0)
-               << "\nTitle=" << currentDriver.GetTitle();
+               << "\nTitle=" << currentDriver.getTitle();
     }
 
     if (includeQlSection) {
@@ -1325,7 +1325,7 @@ int main(int argc, char** argv)
     }
 
     driver unchanged[KFilterProjectIo::DriverCount];
-    unchanged[0].SetTitle(QStringLiteral("unchanged sentinel"));
+    unchanged[0].setTitle(QStringLiteral("unchanged sentinel"));
     KFilterProjectIo::MeasurementCurves unchangedMeasurements;
     unchangedMeasurements[0].appendPoint(123.0, 4.5);
     bool unchangedMergeEnabled = true;
@@ -1353,7 +1353,7 @@ int main(int argc, char** argv)
         QTextStream(stderr) << "Invalid measurement point ordering was accepted\n";
         return 1;
     }
-    if (unchanged[0].GetTitle() != QStringLiteral("unchanged sentinel") ||
+    if (unchanged[0].getTitle() != QStringLiteral("unchanged sentinel") ||
         unchangedMeasurements[0].size() != 1 ||
         !fuzzyEqual(unchangedMeasurements[0].points().constFirst().frequencyHz, 123.0) ||
         !unchangedMergeEnabled ||
@@ -1403,7 +1403,7 @@ int main(int argc, char** argv)
         QTextStream(stderr) << "Invalid per-driver hidden value was accepted\n";
         return 1;
     }
-    if (unchanged[0].GetTitle() != QStringLiteral("unchanged sentinel") ||
+    if (unchanged[0].getTitle() != QStringLiteral("unchanged sentinel") ||
         unchangedMeasurements[0].size() != 1 ||
         !unchangedMergeEnabled ||
         !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
@@ -1455,7 +1455,7 @@ int main(int argc, char** argv)
         QTextStream(stderr) << "Unknown active-filter type was accepted\n";
         return 1;
     }
-    if (unchanged[0].GetTitle() != QStringLiteral("unchanged sentinel") ||
+    if (unchanged[0].getTitle() != QStringLiteral("unchanged sentinel") ||
         unchangedMeasurements[0].size() != 1 || !unchangedMergeEnabled ||
         !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
                      [](bool hidden) { return hidden; }) ||
@@ -1498,7 +1498,7 @@ int main(int argc, char** argv)
         QTextStream(stderr) << "Invalid Baffle width was accepted\n";
         return 1;
     }
-    if (unchanged[0].GetTitle() != QStringLiteral("unchanged sentinel") ||
+    if (unchanged[0].getTitle() != QStringLiteral("unchanged sentinel") ||
         unchangedMeasurements[0].size() != 1 || !unchangedMergeEnabled ||
         !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
                      [](bool hidden) { return hidden; }) ||
@@ -1541,7 +1541,7 @@ int main(int argc, char** argv)
         QTextStream(stderr) << "Sub-5-mm active chamfer was accepted\n";
         return 1;
     }
-    if (unchanged[0].GetTitle() != QStringLiteral("unchanged sentinel") ||
+    if (unchanged[0].getTitle() != QStringLiteral("unchanged sentinel") ||
         unchangedMeasurements[0].size() != 1 || !unchangedMergeEnabled ||
         !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
                      [](bool hidden) { return hidden; }) ||
@@ -1706,7 +1706,7 @@ int main(int argc, char** argv)
         QTextStream(stderr) << "Unsupported JSON project version was accepted\n";
         return 1;
     }
-    if (unchanged[0].GetTitle() != QStringLiteral("unchanged sentinel") ||
+    if (unchanged[0].getTitle() != QStringLiteral("unchanged sentinel") ||
         unchangedMeasurements[0].size() != 1 ||
         !unchangedMergeEnabled ||
         !std::all_of(unchangedHiddenStates.cbegin(), unchangedHiddenStates.cend(),
