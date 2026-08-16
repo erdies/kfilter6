@@ -1136,3 +1136,49 @@ changed.
   toward the Free-field Simple Baffle Step. Existing floor diagnostics remain raw.
 - No UI control and no project-format field is added. The exponent is deliberately
   fixed as a model constant rather than exposed as a user-tunable compensation knob.
+
+## Patch 250: Remove persistent Baffle-dialog explanatory banner
+
+- Removed the multi-line explanatory label from the top of the
+  **Baffle / Diffraction / Floor Reflection** dialog. The dialog now starts directly
+  with the per-driver tabs, leaving persistent UI space to controls and live status.
+- No replacement info button, tooltip or collapsible banner was introduced. Stable
+  model descriptions and operating semantics belong in the documentation rather than
+  occupying permanent dialog space.
+- Extended `README.md` so the removed operational details remain documented: field
+  edits use live preview, the geometry-preview driver can be dragged in Rectangular
+  mode with response recalculation on release, and Apply/OK/Cancel retain their
+  existing commit/restore semantics.
+- Extended `kfilter_baffle_dialog_smoketest` to ensure the obsolete
+  `baffleStageNotice` widget is no longer created.
+- No Baffle, Floor Reflection, persistence, cache, project-format or DSP behavior is
+  changed.
+
+
+## Patch 251: Complete `.kfd` driver-slot state
+
+- Advanced the private KFilter driver-slot format from version 1 to version 2. Version
+  1 is intentionally rejected; no backward-compatibility path is retained because
+  the format has not yet had compatibility-sensitive external use.
+- `.kfd` now stores the complete state associated with one driver slot: driver and
+  passive-network data, SPL Measurement points plus per-driver Hide state, the
+  project Merge-Measurements state as import metadata, the complete Active Filter
+  chain, Baffle / Diffraction state, Floor Reflection state, and the existing tube-
+  diameter dialog hint.
+- Reused the project-I/O serializers and validators for Measurements, Active Filters,
+  Baffle and Floor Reflection. `.kfp` and `.kfd` therefore share these JSON semantics
+  instead of maintaining a second copy of the new persistence logic.
+- Driver import now operates on `KFilterDoc`, allowing the Driver Parameters dialog to
+  replace all associated per-driver state while retaining its existing live-preview
+  and Apply/OK/Cancel semantics. Cancel restores the complete pre-dialog state, not
+  just the legacy `driver` object.
+- Defined the project-wide Merge import policy explicitly: when no other driver has
+  Measurement data, the imported `.kfd` Merge state is adopted. If any other driver
+  already has Measurement data, the current project's Merge state is retained. The
+  effective document state still disables Merge when no mergeable curve exists.
+- The main window resynchronizes Measurement actions after the Driver Parameters
+  dialog closes so imported/restored Hide and Merge states are reflected immediately.
+- Driver-slot writes now use `QSaveFile`, avoiding a partially replaced `.kfd` if
+  validation, writing or final commit fails.
+- Added `kfilter_driverio_smoketest` for v2 complete-state round trip, the Merge import
+  policy and intentional rejection of v1 files.

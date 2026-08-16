@@ -15,6 +15,7 @@
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QGroupBox>
+#include <QGridLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMouseEvent>
@@ -47,6 +48,11 @@ int main(int argc, char **argv)
     auto *tabs = dialog.findChild<QTabWidget *>(QStringLiteral("baffleDriverTabs"));
     if (tabs == nullptr || tabs->count() != KFilterProjectIo::DriverCount || dialog.currentDriverIndex() != 2) {
         std::cerr << "Baffle driver tabs or initial selection are invalid\n";
+        return 1;
+    }
+
+    if (dialog.findChild<QLabel *>(QStringLiteral("baffleStageNotice")) != nullptr) {
+        std::cerr << "Patch-250 obsolete explanatory notice is still present\n";
         return 1;
     }
 
@@ -472,6 +478,8 @@ int main(int argc, char **argv)
 
     auto *floorGroup = floorDialog.findChild<QGroupBox *>(
         QStringLiteral("floorReflectionGroup1"));
+    auto *floorLayout = floorDialog.findChild<QGridLayout *>(
+        QStringLiteral("floorReflectionLayout1"));
     auto *floorEnable = floorDialog.findChild<QCheckBox *>(
         QStringLiteral("floorReflectionEnableDriver1"));
     auto *floorHeight = floorDialog.findChild<QDoubleSpinBox *>(
@@ -497,12 +505,43 @@ int main(int argc, char **argv)
     auto *floorButtons = floorDialog.findChild<QDialogButtonBox *>(
         QStringLiteral("baffleDialogButtons"));
 
-    if (floorGroup == nullptr || floorEnable == nullptr || floorHeight == nullptr || floorDriverY == nullptr ||
-        floorWidth == nullptr || floorDriverX == nullptr || floorModel == nullptr ||
-        cabinetBottom == nullptr || listenerHeight == nullptr || listeningDistance == nullptr ||
-        surface == nullptr || floorStatus == nullptr || floorButtons == nullptr) {
+    if (floorGroup == nullptr || floorLayout == nullptr || floorEnable == nullptr ||
+        floorHeight == nullptr || floorDriverY == nullptr || floorWidth == nullptr ||
+        floorDriverX == nullptr || floorModel == nullptr || cabinetBottom == nullptr ||
+        listenerHeight == nullptr || listeningDistance == nullptr || surface == nullptr ||
+        floorStatus == nullptr || floorButtons == nullptr) {
         std::cerr << "Patch-227 Floor Reflection controls are missing\n";
         return 40;
+    }
+
+    // Patch 249: keep the two vertical geometry fields in the left form column,
+    // place distance/surface in the right column, and let the status information
+    // span the remaining full width below both columns.
+    auto checkFloorGridPosition = [floorLayout](QWidget *widget,
+                                                int expectedRow,
+                                                int expectedColumn,
+                                                int expectedRowSpan = 1,
+                                                int expectedColumnSpan = 1) {
+        const int index = floorLayout->indexOf(widget);
+        if (index < 0) {
+            return false;
+        }
+        int row = -1;
+        int column = -1;
+        int rowSpan = -1;
+        int columnSpan = -1;
+        floorLayout->getItemPosition(index, &row, &column, &rowSpan, &columnSpan);
+        return row == expectedRow && column == expectedColumn &&
+               rowSpan == expectedRowSpan && columnSpan == expectedColumnSpan;
+    };
+    if (!checkFloorGridPosition(floorEnable, 0, 0, 1, 4) ||
+        !checkFloorGridPosition(cabinetBottom, 1, 1) ||
+        !checkFloorGridPosition(listenerHeight, 2, 1) ||
+        !checkFloorGridPosition(listeningDistance, 1, 3) ||
+        !checkFloorGridPosition(surface, 2, 3) ||
+        !checkFloorGridPosition(floorStatus, 3, 1, 1, 3)) {
+        std::cerr << "Patch-249 compact Floor Reflection grid layout is inconsistent\n";
+        return 51;
     }
 
     if (!floorGroup->title().contains(QStringLiteral("Experimental"), Qt::CaseInsensitive)) {
@@ -605,6 +644,6 @@ int main(int argc, char **argv)
         return 48;
     }
 
-    std::cout << "Baffle / Diffraction + Floor Reflection Patch-233 dialog smoke test passed\n";
+    std::cout << "Baffle / Diffraction + Floor Reflection Patch-250 dialog smoke test passed\n";
     return 0;
 }

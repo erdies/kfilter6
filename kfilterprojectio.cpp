@@ -2110,6 +2110,88 @@ void finalizeDrivers(driver (&drivers)[KFilterProjectIo::DriverCount])
 }
 }
 
+bool KFilterProjectIo::writeDriverSupplementToJson(
+    QJsonObject& driverObject,
+    const KFilterMeasurementCurve& measurementCurve,
+    bool measurementHidden,
+    const ActiveFilterChain& activeFilterChain,
+    const BaffleSettings& baffleSettings,
+    const FloorReflectionSettings& floorReflectionSettings,
+    int driverIndex,
+    QString* errorMessage)
+{
+    if (!validateMeasurementCurve(measurementCurve, driverIndex, errorMessage) ||
+        !validateActiveFilterChain(activeFilterChain, driverIndex, errorMessage) ||
+        !validateBaffleSettings(baffleSettings, driverIndex, errorMessage) ||
+        !validateFloorReflectionSettings(floorReflectionSettings, driverIndex, errorMessage)) {
+        return false;
+    }
+
+    driverObject.insert(
+        QStringLiteral("measurements"),
+        driverMeasurementsToJson(measurementCurve, measurementHidden && !measurementCurve.isEmpty()));
+    driverObject.insert(QStringLiteral("activeFilter"), activeFilterChainToJson(activeFilterChain));
+    driverObject.insert(QStringLiteral("baffle"), baffleSettingsToJson(baffleSettings));
+    driverObject.insert(QStringLiteral("floorReflection"),
+                        floorReflectionSettingsToJson(floorReflectionSettings));
+    return true;
+}
+
+bool KFilterProjectIo::readDriverSupplementFromJson(
+    const QJsonObject& driverObject,
+    KFilterMeasurementCurve& measurementCurve,
+    bool& measurementHidden,
+    ActiveFilterChain& activeFilterChain,
+    BaffleSettings& baffleSettings,
+    FloorReflectionSettings& floorReflectionSettings,
+    const QString& context,
+    QString* errorMessage)
+{
+    QJsonObject measurementsObject;
+    if (!readObject(driverObject,
+                    QStringLiteral("measurements"),
+                    measurementsObject,
+                    context,
+                    errorMessage)) {
+        return false;
+    }
+
+    KFilterMeasurementCurve parsedMeasurementCurve;
+    bool parsedMeasurementHidden = false;
+    ActiveFilterChain parsedActiveFilterChain;
+    BaffleSettings parsedBaffleSettings;
+    FloorReflectionSettings parsedFloorReflectionSettings;
+
+    if (!jsonToDriverMeasurements(driverObject,
+                                  parsedMeasurementCurve,
+                                  parsedMeasurementHidden,
+                                  JsonFormatVersion,
+                                  context,
+                                  errorMessage) ||
+        !jsonToActiveFilterChain(driverObject,
+                                 parsedActiveFilterChain,
+                                 context,
+                                 errorMessage) ||
+        !jsonToBaffleSettings(driverObject,
+                              parsedBaffleSettings,
+                              JsonFormatVersion,
+                              context,
+                              errorMessage) ||
+        !jsonToFloorReflectionSettings(driverObject,
+                                       parsedFloorReflectionSettings,
+                                       context,
+                                       errorMessage)) {
+        return false;
+    }
+
+    measurementCurve = parsedMeasurementCurve;
+    measurementHidden = parsedMeasurementHidden && !measurementCurve.isEmpty();
+    activeFilterChain = parsedActiveFilterChain;
+    baffleSettings = parsedBaffleSettings;
+    floorReflectionSettings = parsedFloorReflectionSettings;
+    return true;
+}
+
 bool KFilterProjectIo::loadFromFile(const QString& filePath,
                                     driver (&drivers)[DriverCount],
                                     MeasurementCurves& splCorrectionCurves,
@@ -2194,42 +2276,24 @@ bool KFilterProjectIo::saveToFile(const QString& filePath,
         const driver& currentDriver = drivers[driverIndex];
         const KFilterMeasurementCurve& correctionCurve =
             splCorrectionCurves[static_cast<std::size_t>(driverIndex)];
-        if (!validateFiniteDriverData(currentDriver, driverIndex, errorMessage) ||
-            !validateMeasurementCurve(correctionCurve, driverIndex, errorMessage) ||
-            !validateActiveFilterChain(
-                activeFilterChains[static_cast<std::size_t>(driverIndex)],
-                driverIndex,
-                errorMessage) ||
-            !validateBaffleSettings(
-                baffleSettings[static_cast<std::size_t>(driverIndex)],
-                driverIndex,
-                errorMessage) ||
-            !validateFloorReflectionSettings(
-                floorReflectionSettings[static_cast<std::size_t>(driverIndex)],
-                driverIndex,
-                errorMessage)) {
+        if (!validateFiniteDriverData(currentDriver, driverIndex, errorMessage)) {
             return false;
         }
 
         QJsonObject driverObject;
         driverObject.insert(QStringLiteral("parameters"), driverParametersToJson(currentDriver));
         driverObject.insert(QStringLiteral("network"), driverNetworkToJson(currentDriver));
-        driverObject.insert(
-            QStringLiteral("measurements"),
-            driverMeasurementsToJson(
+        if (!writeDriverSupplementToJson(
+                driverObject,
                 correctionCurve,
-                measurementHiddenForDrivers[static_cast<std::size_t>(driverIndex)] &&
-                    !correctionCurve.isEmpty()));
-        driverObject.insert(
-            QStringLiteral("activeFilter"),
-            activeFilterChainToJson(activeFilterChains[static_cast<std::size_t>(driverIndex)]));
-        driverObject.insert(
-            QStringLiteral("baffle"),
-            baffleSettingsToJson(baffleSettings[static_cast<std::size_t>(driverIndex)]));
-        driverObject.insert(
-            QStringLiteral("floorReflection"),
-            floorReflectionSettingsToJson(
-                floorReflectionSettings[static_cast<std::size_t>(driverIndex)]));
+                measurementHiddenForDrivers[static_cast<std::size_t>(driverIndex)],
+                activeFilterChains[static_cast<std::size_t>(driverIndex)],
+                baffleSettings[static_cast<std::size_t>(driverIndex)],
+                floorReflectionSettings[static_cast<std::size_t>(driverIndex)],
+                driverIndex,
+                errorMessage)) {
+            return false;
+        }
         driverArray.append(driverObject);
     }
 

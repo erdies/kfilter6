@@ -6,17 +6,20 @@
 
 #include "kfilterdriverio.h"
 
+#include "kfilterdoc.h"
+
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QSaveFile>
 
 #include <cmath>
 
 namespace
 {
-constexpr int FormatVersion = 1;
+constexpr int FormatVersion = 2;
 const QString FormatName = QStringLiteral("KFilter driver slot");
 const QString ApplicationName = QStringLiteral("KFilter6");
 
@@ -318,6 +321,44 @@ bool jsonToDriver(const QJsonObject& driverObject,
 }
 }
 
+bool KFilterDriverIo::mergeMeasurementsEnabledAfterImport(
+    bool existingProjectState,
+    bool otherDriversHaveMeasurements,
+    bool importedState)
+{
+    return otherDriversHaveMeasurements ? existingProjectState : importedState;
+}
+
+bool KFilterDriverIo::applyDriverSlotToDocument(KFilterDoc& document,
+                                                    int driverIndex,
+                                                    const DriverSlot& slot)
+{
+    if (driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount) {
+        return false;
+    }
+
+    bool otherDriversHaveMeasurements = false;
+    for (int otherIndex = 0; otherIndex < KFilterProjectIo::DriverCount; ++otherIndex) {
+        if (otherIndex != driverIndex && !document.splCorrectionCurve(otherIndex).isEmpty()) {
+            otherDriversHaveMeasurements = true;
+            break;
+        }
+    }
+    const bool existingMergeState = document.measurementMergeEnabled();
+
+    document.m_driverDriver[driverIndex] = slot.driverData;
+    document.m_driverDriver[driverIndex].Berechneparameter();
+    document.m_driverDriver[driverIndex].setmodified();
+    document.splCorrectionCurve(driverIndex) = slot.measurementCurve;
+    document.activeFilterChain(driverIndex) = slot.activeFilterChain;
+    document.baffleSettings(driverIndex) = slot.baffleSettings;
+    document.floorReflectionSettings(driverIndex) = slot.floorReflectionSettings;
+    document.setMeasurementHiddenForDriver(driverIndex, slot.measurementHidden);
+    document.setMeasurementMergeEnabled(mergeMeasurementsEnabledAfterImport(
+        existingMergeState, otherDriversHaveMeasurements, slot.mergeMeasurementsEnabled));
+    return true;
+}
+
 bool KFilterDriverIo::loadDriverSlotFromFile(const QString& filePath,
                                              DriverSlot& slot,
                                              QString* errorMessage)
@@ -373,7 +414,28 @@ bool KFilterDriverIo::loadDriverSlotFromFile(const QString& filePath,
 
     DriverSlot parsedSlot;
     if (!jsonToDriver(driverObject, parsedSlot.driverData, errorMessage) ||
-        !loadNetworkValues(networkObject, parsedSlot.driverData, errorMessage)) {
+        !loadNetworkValues(networkObject, parsedSlot.driverData, errorMessage) ||
+        !KFilterProjectIo::readDriverSupplementFromJson(
+            root,
+            parsedSlot.measurementCurve,
+            parsedSlot.measurementHidden,
+            parsedSlot.activeFilterChain,
+            parsedSlot.baffleSettings,
+            parsedSlot.floorReflectionSettings,
+            QStringLiteral("root"),
+            errorMessage)) {
+        return false;
+    }
+
+    QJsonObject measurementSettings;
+    if (!readObject(root,
+                    QStringLiteral("measurementSettings"),
+                    measurementSettings,
+                    errorMessage) ||
+        !readRequiredBool(measurementSettings,
+                          QStringLiteral("mergeCorrectionCurves"),
+                          parsedSlot.mergeMeasurementsEnabled,
+                          errorMessage)) {
         return false;
     }
 
@@ -409,14 +471,6 @@ bool KFilterDriverIo::saveDriverSlotToFile(const QString& filePath,
                                            const DriverSlot& slot,
                                            QString* errorMessage)
 {
-    QFile file(filePath);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
-        setError(errorMessage,
-                 QStringLiteral("Cannot open driver slot file '%1' for writing: %2")
-                     .arg(filePath, file.errorString()));
-        return false;
-    }
-
     QJsonObject root;
     root.insert(QStringLiteral("format"), FormatName);
     root.insert(QStringLiteral("formatVersion"), FormatVersion);
@@ -433,12 +487,54 @@ bool KFilterDriverIo::saveDriverSlotToFile(const QString& filePath,
     networkObject.insert(QStringLiteral("values"), networkValues);
     root.insert(QStringLiteral("network"), networkObject);
 
+    if (!KFilterProjectIo::writeDriverSupplementToJson(
+            root,
+            slot.measurementCurve,
+            slot.measurementHidden,
+            slot.activeFilterChain,
+            slot.baffleSettings,
+            slot.floorReflectionSettings,
+            0,
+            errorMessage)) {
+        return false;
+    }
+
+    QJsonObject measurementSettings;
+    measurementSettings.insert(QStringLiteral("mergeCorrectionCurves"),
+                               slot.mergeMeasurementsEnabled);
+    root.insert(QStringLiteral("measurementSettings"), measurementSettings);
+
     if (slot.hasTubeDiameterCm) {
+        if (!std::isfinite(slot.tubeDiameterCm) || slot.tubeDiameterCm < 0.0) {
+            setError(errorMessage,
+                     QStringLiteral("Field 'tubeDiameter_cm' must be finite and not negative."));
+            return false;
+        }
         QJsonObject dialogHints;
         dialogHints.insert(QStringLiteral("tubeDiameter_cm"), slot.tubeDiameterCm);
         root.insert(QStringLiteral("dialogHints"), dialogHints);
     }
 
-    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    const QByteArray output = QJsonDocument(root).toJson(QJsonDocument::Indented);
+    QSaveFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        setError(errorMessage,
+                 QStringLiteral("Cannot open driver slot file '%1' for writing: %2")
+                     .arg(filePath, file.errorString()));
+        return false;
+    }
+    if (file.write(output) != static_cast<qint64>(output.size())) {
+        setError(errorMessage,
+                 QStringLiteral("Cannot write driver slot file '%1': %2")
+                     .arg(filePath, file.errorString()));
+        file.cancelWriting();
+        return false;
+    }
+    if (!file.commit()) {
+        setError(errorMessage,
+                 QStringLiteral("Cannot finalize driver slot file '%1': %2")
+                     .arg(filePath, file.errorString()));
+        return false;
+    }
     return true;
 }

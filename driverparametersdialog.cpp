@@ -8,6 +8,7 @@
 
 #include "driver.h"
 #include "kfilterdriverio.h"
+#include "kfilterdoc.h"
 #include "networkvalueutils.h"
 
 #include <QAbstractSpinBox>
@@ -252,11 +253,12 @@ QString suggestedDriverSlotPath(const driver& drv, int driverIndex)
 }
 }
 
-DriverParametersDialog::DriverParametersDialog(driver (&drivers)[KFilterProjectIo::DriverCount],
+DriverParametersDialog::DriverParametersDialog(KFilterDoc& document,
                                                QWidget *parent,
                                                int initialDriverIndex)
     : QDialog(parent),
-      m_drivers(drivers)
+      m_document(document),
+      m_drivers(document.m_driverDriver)
 {
     setWindowTitle(tr("Driver parameters"));
     resize(740, 520);
@@ -290,7 +292,7 @@ DriverParametersDialog::DriverParametersDialog(driver (&drivers)[KFilterProjectI
     mainLayout->addWidget(buttonBox);
 
     loadFromDrivers();
-    rememberCommittedDrivers();
+    rememberCommittedState();
 }
 
 int DriverParametersDialog::currentDriverIndex() const
@@ -376,8 +378,8 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     driverIoLayout->setContentsMargins(0, 0, 0, 0);
     auto *importButton = new QPushButton(tr("Import Driver..."), driverIoWidget);
     auto *exportButton = new QPushButton(tr("Export Driver..."), driverIoWidget);
-    importButton->setToolTip(tr("Import a complete driver slot including network values into this driver."));
-    exportButton->setToolTip(tr("Export this complete driver slot including network values."));
+    importButton->setToolTip(tr("Import a complete driver slot including network, measurement, active-filter, baffle, and floor-reflection state into this driver."));
+    exportButton->setToolTip(tr("Export this complete driver slot including network, measurement, active-filter, baffle, and floor-reflection state."));
     driverIoLayout->addWidget(importButton);
     driverIoLayout->addWidget(exportButton);
     leftForm->addRow(QString(), driverIoWidget);
@@ -715,20 +717,37 @@ bool DriverParametersDialog::applyToDrivers(ApplyMode mode, QString *errorMessag
     return true;
 }
 
-void DriverParametersDialog::rememberCommittedDrivers()
+void DriverParametersDialog::rememberCommittedState()
 {
     for (int index = 0; index < KFilterProjectIo::DriverCount; ++index) {
-        m_committedDrivers[index] = m_drivers[index];
+        const std::size_t arrayIndex = static_cast<std::size_t>(index);
+        m_committedDrivers[arrayIndex] = m_drivers[index];
+        m_committedMeasurementCurves[arrayIndex] = m_document.splCorrectionCurve(index);
+        m_committedMeasurementHiddenStates[arrayIndex] =
+            m_document.measurementHiddenForDriver(index);
+        m_committedActiveFilterChains[arrayIndex] = m_document.activeFilterChain(index);
+        m_committedBaffleSettings[arrayIndex] = m_document.baffleSettings(index);
+        m_committedFloorReflectionSettings[arrayIndex] =
+            m_document.floorReflectionSettings(index);
     }
+    m_committedMeasurementMergeEnabled = m_document.measurementMergeEnabled();
 }
 
-void DriverParametersDialog::restoreCommittedDrivers()
+void DriverParametersDialog::restoreCommittedState()
 {
     m_restoringDrivers = true;
     for (int index = 0; index < KFilterProjectIo::DriverCount; ++index) {
-        m_drivers[index] = m_committedDrivers[index];
+        const std::size_t arrayIndex = static_cast<std::size_t>(index);
+        m_drivers[index] = m_committedDrivers[arrayIndex];
         m_drivers[index].setmodified();
+        m_document.splCorrectionCurve(index) = m_committedMeasurementCurves[arrayIndex];
+        m_document.activeFilterChain(index) = m_committedActiveFilterChains[arrayIndex];
+        m_document.baffleSettings(index) = m_committedBaffleSettings[arrayIndex];
+        m_document.floorReflectionSettings(index) = m_committedFloorReflectionSettings[arrayIndex];
+        m_document.setMeasurementHiddenForDriver(
+            index, m_committedMeasurementHiddenStates[arrayIndex]);
     }
+    m_document.setMeasurementMergeEnabled(m_committedMeasurementMergeEnabled);
     m_restoringDrivers = false;
 }
 
@@ -764,7 +783,7 @@ void DriverParametersDialog::applyClicked()
         return;
     }
 
-    rememberCommittedDrivers();
+    rememberCommittedState();
     emit parametersApplied();
 }
 
@@ -780,7 +799,7 @@ void DriverParametersDialog::accept()
         return;
     }
 
-    rememberCommittedDrivers();
+    rememberCommittedState();
     emit parametersApplied();
     QDialog::accept();
 }
@@ -791,7 +810,7 @@ void DriverParametersDialog::reject()
         m_previewTimer->stop();
     }
 
-    restoreCommittedDrivers();
+    restoreCommittedState();
     emit parametersRestored();
     QDialog::reject();
 }
@@ -815,6 +834,12 @@ void DriverParametersDialog::exportDriver(int index)
 
     KFilterDriverIo::DriverSlot slot;
     slot.driverData = m_drivers[index];
+    slot.measurementCurve = m_document.splCorrectionCurve(index);
+    slot.measurementHidden = m_document.measurementHiddenForDriver(index);
+    slot.mergeMeasurementsEnabled = m_document.measurementMergeEnabled();
+    slot.activeFilterChain = m_document.activeFilterChain(index);
+    slot.baffleSettings = m_document.baffleSettings(index);
+    slot.floorReflectionSettings = m_document.floorReflectionSettings(index);
     slot.hasTubeDiameterCm = true;
     slot.tubeDiameterCm = m_pages.at(index).tubeDiameter->value();
 
@@ -865,7 +890,8 @@ void DriverParametersDialog::importDriver(int index)
     const QMessageBox::StandardButton answer = QMessageBox::question(
         this,
         tr("Import driver"),
-        tr("Importing this file will replace Driver %1 including all network values.\n\nContinue?")
+        tr("Importing this file will replace Driver %1 including network values, measurements, "
+           "active filters, baffle settings, and floor-reflection settings.\n\nContinue?")
             .arg(index + 1),
         QMessageBox::Yes | QMessageBox::No,
         QMessageBox::No);
@@ -874,9 +900,11 @@ void DriverParametersDialog::importDriver(int index)
         return;
     }
 
-    m_drivers[index] = slot.driverData;
-    m_drivers[index].Berechneparameter();
-    m_drivers[index].setmodified();
+    if (!KFilterDriverIo::applyDriverSlotToDocument(m_document, index, slot)) {
+        QMessageBox::warning(this, tr("Import driver"), tr("The selected driver slot is invalid."));
+        return;
+    }
+
     loadPageFromDriver(index, slot.hasTubeDiameterCm, slot.tubeDiameterCm);
     m_tabs->setCurrentIndex(index);
     emit parametersPreviewed();

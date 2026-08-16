@@ -14,6 +14,7 @@
 
 #include <array>
 
+class KFilterDoc;
 class QTimer;
 
 class QCheckBox;
@@ -35,7 +36,7 @@ class DriverParametersDialog : public QDialog
     Q_OBJECT
 
 public:
-    explicit DriverParametersDialog(driver (&drivers)[KFilterProjectIo::DriverCount],
+    explicit DriverParametersDialog(KFilterDoc& document,
                                     QWidget *parent = nullptr,
                                     int initialDriverIndex = 0);
 
@@ -93,8 +94,8 @@ private:
     void loadFromDrivers();
     void loadPageFromDriver(int index, bool useTubeDiameterOverride = false, double tubeDiameterCm = 0.0);
     bool applyToDrivers(ApplyMode mode, QString *errorMessage = nullptr);
-    void rememberCommittedDrivers();
-    void restoreCommittedDrivers();
+    void rememberCommittedState();
+    void restoreCommittedState();
     void schedulePreview();
     void emitPreview();
     void connectPreviewSignals(const DriverPage& page);
@@ -109,9 +110,16 @@ private:
     void updateTubeLengthForPage(DriverPage& page);
     void calculateHogeForPage(DriverPage& page);
 
+    KFilterDoc& m_document;
     driver (&m_drivers)[KFilterProjectIo::DriverCount];
     std::array<DriverPage, KFilterProjectIo::DriverCount> m_pages;
     std::array<driver, KFilterProjectIo::DriverCount> m_committedDrivers;
+    KFilterProjectIo::MeasurementCurves m_committedMeasurementCurves;
+    KFilterProjectIo::MeasurementHiddenStates m_committedMeasurementHiddenStates{};
+    KFilterProjectIo::ActiveFilterChains m_committedActiveFilterChains;
+    KFilterProjectIo::BaffleSettingsPerDriver m_committedBaffleSettings;
+    KFilterProjectIo::FloorReflectionSettingsPerDriver m_committedFloorReflectionSettings;
+    bool m_committedMeasurementMergeEnabled = false;
     QTabWidget *m_tabs = nullptr;
     QTimer *m_previewTimer = nullptr;
     bool m_loadingFromDrivers = false;

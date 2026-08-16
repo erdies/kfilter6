@@ -19,6 +19,7 @@
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QGroupBox>
+#include <QGridLayout>
 #include <QLabel>
 #include <QPushButton>
 #include <QSignalBlocker>
@@ -223,20 +224,6 @@ BaffleParametersDialog::BaffleParametersDialog(
     resize(980, 760);
 
     auto *mainLayout = new QVBoxLayout(this);
-
-    auto *notice = new QLabel(
-        tr("Simple Baffle Step uses only the baffle width. Rectangular Edge Diffraction "
-           "uses width, height and driver position; its left and right side edges can remain "
-           "Sharp or use straight 45-degree chamfers. Field edits are previewed live. The "
-           "driver symbol can be dragged in the geometry preview; X/Y follow the drag, while "
-           "the acoustic response is recalculated only when the mouse button is released. "
-           "Floor Reflection is an independent receiver-dependent stage and derives source height "
-           "from cabinet elevation plus Baffle height minus Driver Y. Apply/OK commits both stages; "
-           "Cancel restores the last applied state."),
-        this);
-    notice->setWordWrap(true);
-    notice->setObjectName(QStringLiteral("baffleStageNotice"));
-    mainLayout->addWidget(notice);
 
     m_tabs = new QTabWidget(this);
     m_tabs->setObjectName(QStringLiteral("baffleDriverTabs"));
@@ -468,7 +455,10 @@ QWidget *BaffleParametersDialog::createDriverPage(int driverIndex)
 
     auto *floorGroup = new QGroupBox(tr("Floor Reflection (Experimental)"), page.page);
     floorGroup->setObjectName(QStringLiteral("floorReflectionGroup%1").arg(driverIndex + 1));
-    auto *floorLayout = new QFormLayout(floorGroup);
+    auto *floorLayout = new QGridLayout(floorGroup);
+    floorLayout->setObjectName(QStringLiteral("floorReflectionLayout%1").arg(driverIndex + 1));
+    floorLayout->setColumnStretch(1, 1);
+    floorLayout->setColumnStretch(3, 1);
 
     page.floorReflectionEnabled = new QCheckBox(
         tr("Enable floor reflection for this driver"), floorGroup);
@@ -477,7 +467,7 @@ QWidget *BaffleParametersDialog::createDriverPage(int driverIndex)
     page.floorReflectionEnabled->setToolTip(
         tr("Enables the receiver-dependent first specular floor reflection. This is independent "
            "of the Baffle / Diffraction processing stage and its rigid-floor-contact boundary option."));
-    floorLayout->addRow(page.floorReflectionEnabled);
+    floorLayout->addWidget(page.floorReflectionEnabled, 0, 0, 1, 4);
 
     page.cabinetBottomAboveFloor = createGeometrySpinBox(
         floorGroup, QStringLiteral("floorReflectionCabinetBottomSpin%1").arg(driverIndex + 1));
@@ -485,21 +475,24 @@ QWidget *BaffleParametersDialog::createDriverPage(int driverIndex)
     page.cabinetBottomAboveFloor->setToolTip(
         tr("Vertical distance between the cabinet bottom and the floor. Source height is derived from "
            "this value plus Baffle height minus Driver Y from top."));
-    floorLayout->addRow(tr("Cabinet bottom above floor:"), page.cabinetBottomAboveFloor);
+    floorLayout->addWidget(new QLabel(tr("Cabinet bottom above floor:"), floorGroup), 1, 0);
+    floorLayout->addWidget(page.cabinetBottomAboveFloor, 1, 1);
 
     page.listenerHeightAboveFloor = createGeometrySpinBox(
         floorGroup, QStringLiteral("floorReflectionListenerHeightSpin%1").arg(driverIndex + 1));
     page.listenerHeightAboveFloor->setRange(0.0, 10000.0);
     page.listenerHeightAboveFloor->setToolTip(
         tr("Height of the listening position above the floor."));
-    floorLayout->addRow(tr("Listener height above floor:"), page.listenerHeightAboveFloor);
+    floorLayout->addWidget(new QLabel(tr("Listener height above floor:"), floorGroup), 2, 0);
+    floorLayout->addWidget(page.listenerHeightAboveFloor, 2, 1);
 
     page.listeningDistance = createGeometrySpinBox(
         floorGroup, QStringLiteral("floorReflectionDistanceSpin%1").arg(driverIndex + 1));
     page.listeningDistance->setRange(0.0, 100000.0);
     page.listeningDistance->setToolTip(
         tr("Horizontal distance between the loudspeaker source plane and the listening position."));
-    floorLayout->addRow(tr("Listening distance:"), page.listeningDistance);
+    floorLayout->addWidget(new QLabel(tr("Listening distance:"), floorGroup), 1, 2);
+    floorLayout->addWidget(page.listeningDistance, 1, 3);
 
     page.floorSurface = new QComboBox(floorGroup);
     page.floorSurface->setObjectName(
@@ -512,13 +505,15 @@ QWidget *BaffleParametersDialog::createDriverPage(int driverIndex)
         tr("Hard / rigid uses Gamma = +1. The Miki reference is an experimental 10 mm porous layer "
            "with flow resistivity 100000 Pa*s/m^2 on a rigid backing. It is a documented engineering "
            "reference, not a claim to represent one specific carpet."));
-    floorLayout->addRow(tr("Surface:"), page.floorSurface);
+    floorLayout->addWidget(new QLabel(tr("Surface:"), floorGroup), 2, 2);
+    floorLayout->addWidget(page.floorSurface, 2, 3);
 
     page.floorReflectionStatus = new QLabel(floorGroup);
     page.floorReflectionStatus->setObjectName(
         QStringLiteral("floorReflectionStatus%1").arg(driverIndex + 1));
     page.floorReflectionStatus->setWordWrap(true);
-    floorLayout->addRow(tr("Status:"), page.floorReflectionStatus);
+    floorLayout->addWidget(new QLabel(tr("Status:"), floorGroup), 3, 0);
+    floorLayout->addWidget(page.floorReflectionStatus, 3, 1, 1, 3);
 
     layout->addWidget(floorGroup);
     layout->addStretch(1);

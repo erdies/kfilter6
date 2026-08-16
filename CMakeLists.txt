@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(kfilter VERSION 0.1.0 LANGUAGES CXX)
 
-set(KFILTER_PATCH_LEVEL "246")
+set(KFILTER_PATCH_LEVEL "251")
 set(KFILTER_LICENSE_STRING "GPL-3.0-or-later")
 
 set(CMAKE_CXX_STANDARD 17)
@@ -19,6 +19,7 @@ set(CMAKE_AUTORCC ON)
 
 option(KFILTER_ENABLE_WIZARD "Build the optional legacy wizard component" OFF)
 option(KFILTER_BUILD_DRIVER_SMOKETEST "Build a small compile/link test for the UI-independent driver core" ON)
+option(KFILTER_BUILD_DRIVERIO_SMOKETEST "Build a complete KFD driver-slot round-trip smoke test" ON)
 option(KFILTER_BUILD_PROJECTIO_SMOKETEST "Build a round-trip test for Qt6 project file serialization" ON)
 option(KFILTER_BUILD_DOCUMENT_SMOKETEST "Build a KFilterDoc smoke test on top of the Qt6 core" ON)
 option(KFILTER_BUILD_DEFAULTS_SMOKETEST "Build a regression test for historical driver defaults" ON)
@@ -423,6 +424,17 @@ if(KFILTER_BUILD_DRIVER_SMOKETEST)
 
     enable_testing()
     add_test(NAME kfilter_driver_smoketest COMMAND kfilter_driver_smoketest)
+endif()
+
+
+if(KFILTER_BUILD_DRIVERIO_SMOKETEST)
+    add_executable(kfilter_driverio_smoketest
+        tools/driverio_smoketest.cpp
+    )
+    target_link_libraries(kfilter_driverio_smoketest PRIVATE kfilter_core)
+
+    enable_testing()
+    add_test(NAME kfilter_driverio_smoketest COMMAND kfilter_driverio_smoketest)
 endif()
 
 

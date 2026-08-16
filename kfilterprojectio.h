@@ -17,6 +17,8 @@
 
 #include <array>
 
+class QJsonObject;
+
 class KFilterProjectIo
 {
 public:
@@ -30,6 +32,24 @@ public:
     using FloorReflectionSettingsPerDriver = std::array<FloorReflectionSettings, DriverCount>;
     using MeasurementCurves = std::array<KFilterMeasurementCurve, DriverCount>;
     using MeasurementHiddenStates = std::array<bool, DriverCount>;
+
+    static bool writeDriverSupplementToJson(QJsonObject& driverObject,
+                                            const KFilterMeasurementCurve& measurementCurve,
+                                            bool measurementHidden,
+                                            const ActiveFilterChain& activeFilterChain,
+                                            const BaffleSettings& baffleSettings,
+                                            const FloorReflectionSettings& floorReflectionSettings,
+                                            int driverIndex,
+                                            QString* errorMessage = nullptr);
+
+    static bool readDriverSupplementFromJson(const QJsonObject& driverObject,
+                                             KFilterMeasurementCurve& measurementCurve,
+                                             bool& measurementHidden,
+                                             ActiveFilterChain& activeFilterChain,
+                                             BaffleSettings& baffleSettings,
+                                             FloorReflectionSettings& floorReflectionSettings,
+                                             const QString& context,
+                                             QString* errorMessage = nullptr);
 
     static bool loadFromFile(const QString& filePath,
                              driver (&drivers)[DriverCount],

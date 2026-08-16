@@ -275,6 +275,12 @@ dash-dot plot style. Diagnostic visibility never controls whether the Baffle sta
 itself is active. **Hide Measurement** affects only the Measurement correction and
 therefore does not bypass Baffle processing.
 
+The dialog uses live preview for field edits. In Rectangular Edge Diffraction mode,
+the driver symbol in the geometry preview can also be dragged: X/Y follow the pointer
+while dragging, and the acoustic response is recalculated when the mouse button is
+released. **Apply** or **OK** commits the current Baffle and Floor Reflection settings;
+**Cancel** restores the last applied state.
+
 Baffle persistence was introduced with `.kfp` format version 6 and remains part of
 the current format version 10. Each driver's Baffle enable state, model, width,
 rectangular geometry, diagnostic visibility, and edge-source count are stored. The
@@ -442,6 +448,31 @@ Calculate Qts from Qes and Qms
 ```
 
 updates `Qts` from the entered `Qes` and `Qms` values.
+
+#### Complete driver-slot import/export (`.kfd`)
+
+`Import Driver...` and `Export Driver...` in the Driver Parameters dialog use the
+KFilter driver-slot format (`.kfd`). Format version 2 stores the complete state
+associated with that driver slot:
+
+- driver parameters, curve/total enable flags, polarity and enclosure state
+- all 48 passive network values
+- the driver's SPL measurement/correction curve and its per-driver Hide state
+- the current project `Merge Measurements` state as import metadata
+- the complete Active Filter chain, including enable/diagnostic state
+- Baffle / Diffraction settings, including enable/diagnostic state and chamfers
+- Floor Reflection settings, including enable state and surface preset
+- the Driver Parameters dialog's bass-reflex tube-diameter hint
+
+The Merge flag is project-wide rather than driver-local. Import therefore uses a
+conflict-avoiding rule: if no **other** driver already has Measurement data, the
+project adopts the Merge state stored in the imported `.kfd`. If another driver
+already has Measurement data, the current project's Merge state is retained. The
+imported driver's Hide state is always restored when a measurement curve is present.
+
+`.kfd` version 1 is intentionally not supported. The format had not yet been released
+for compatibility-sensitive use, so version 2 stays simpler by requiring the complete
+driver-slot state instead of maintaining partial legacy semantics.
 
 ### 3. Enable curves and totals
 

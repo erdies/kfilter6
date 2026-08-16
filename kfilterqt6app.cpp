@@ -2677,7 +2677,7 @@ void KFilterQt6App::openDriverParametersDialog(int initialDriverIndex)
     const int safeInitialDriverIndex =
         std::clamp(initialDriverIndex, 0, KFilterProjectIo::DriverCount - 1);
 
-    DriverParametersDialog dialog(m_doc->m_driverDriver, this, safeInitialDriverIndex);
+    DriverParametersDialog dialog(*m_doc, this, safeInitialDriverIndex);
     connect(&dialog, &DriverParametersDialog::parametersPreviewed, this, [this]() {
         m_doc->viewrefresh();
     });
@@ -2692,6 +2692,7 @@ void KFilterQt6App::openDriverParametersDialog(int initialDriverIndex)
 
     dialog.exec();
     m_lastDriverParametersDriverIndex = dialog.currentDriverIndex();
+    updateActionState();
 }
 
 void KFilterQt6App::editNetworkParameters()
