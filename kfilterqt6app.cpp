@@ -1513,21 +1513,13 @@ void KFilterQt6App::clearNetworkSectionFromPreview(int driverIndex, int sectionI
     }
 
     const bool clearSeriesGroup = groupValue == seriesGroupValue;
-    const int firstRow = clearSeriesGroup ? 0 : 3;
+    const NetworkBranchType branch = clearSeriesGroup ? NetworkBranchType::Series : NetworkBranchType::Shunt;
     const QString groupName = clearSeriesGroup ? tr("Series") : tr("Shunt");
 
-    auto unitIndex = [](int row, int section) {
-        return section * 6 + row + 1;
-    };
-
     driver& drv = m_doc->m_driverDriver[driverIndex];
-    const int resistanceUnit = unitIndex(firstRow, sectionIndex);
-    const int capacitanceUnit = unitIndex(firstRow + 1, sectionIndex);
-    const int inductanceUnit = unitIndex(firstRow + 2, sectionIndex);
-
-    if (nearlyEqual(drv.getUnit(resistanceUnit), 0.0) &&
-        nearlyEqual(drv.getUnit(capacitanceUnit), 0.0) &&
-        nearlyEqual(drv.getUnit(inductanceUnit), 0.0)) {
+    if (nearlyEqual(drv.getNetworkValue(sectionIndex, branch, NetworkComponent::Resistance), 0.0) &&
+        nearlyEqual(drv.getNetworkValue(sectionIndex, branch, NetworkComponent::Capacitance), 0.0) &&
+        nearlyEqual(drv.getNetworkValue(sectionIndex, branch, NetworkComponent::Inductance), 0.0)) {
         statusBar()->showMessage(tr("Driver %1, Section %2, %3 R/C/L already clear.")
                                      .arg(driverIndex + 1)
                                      .arg(sectionIndex + 1)
@@ -1551,10 +1543,9 @@ void KFilterQt6App::clearNetworkSectionFromPreview(int driverIndex, int sectionI
         return;
     }
 
-    drv.setUnit(resistanceUnit, 0.0);
-    drv.setUnit(capacitanceUnit, 0.0);
-    drv.setUnit(inductanceUnit, 0.0);
-    drv.calculateParameters();
+    drv.setNetworkValue(sectionIndex, branch, NetworkComponent::Resistance, 0.0);
+    drv.setNetworkValue(sectionIndex, branch, NetworkComponent::Capacitance, 0.0);
+    drv.setNetworkValue(sectionIndex, branch, NetworkComponent::Inductance, 0.0);
 
     m_lastNetworkParametersDriverIndex = driverIndex;
     m_doc->setModified(true);
@@ -1584,36 +1575,28 @@ void KFilterQt6App::editNetworkSectionFromPreview(int driverIndex, int sectionIn
     }
 
     const bool editSeriesGroup = groupValue == seriesGroupValue;
-    const int firstRow = editSeriesGroup ? 0 : 3;
+    const NetworkBranchType branch = editSeriesGroup ? NetworkBranchType::Series : NetworkBranchType::Shunt;
     const QString groupName = editSeriesGroup ? tr("Series") : tr("Shunt");
 
-    auto unitIndex = [](int row, int section) {
-        return section * 6 + row + 1;
-    };
-
-    auto displayFromInternal = [](int row, double value) {
-        if (row == 1 || row == 4) {
+    auto displayFromInternal = [](NetworkComponent component, double value) {
+        if (component == NetworkComponent::Capacitance) {
             return value * 1000000.0; // F -> uF
         }
-        if (row == 2 || row == 5) {
+        if (component == NetworkComponent::Inductance) {
             return value * 1000.0; // H -> mH
         }
         return value;
     };
 
-    auto internalFromDisplay = [](int row, double value) {
-        if (row == 1 || row == 4) {
+    auto internalFromDisplay = [](NetworkComponent component, double value) {
+        if (component == NetworkComponent::Capacitance) {
             return value / 1000000.0; // uF -> F
         }
-        if (row == 2 || row == 5) {
+        if (component == NetworkComponent::Inductance) {
             return value / 1000.0; // mH -> H
         }
         return value;
     };
-
-    const int resistanceUnit = unitIndex(firstRow, sectionIndex);
-    const int capacitanceUnit = unitIndex(firstRow + 1, sectionIndex);
-    const int inductanceUnit = unitIndex(firstRow + 2, sectionIndex);
 
     struct SectionInternalValues
     {
@@ -1623,33 +1606,32 @@ void KFilterQt6App::editNetworkSectionFromPreview(int driverIndex, int sectionIn
     };
 
     driver& drv = m_doc->m_driverDriver[driverIndex];
-    auto readInternalValues = [&drv, resistanceUnit, capacitanceUnit, inductanceUnit]() {
+    auto readInternalValues = [&drv, sectionIndex, branch]() {
         SectionInternalValues values;
-        values.resistance = drv.getUnit(resistanceUnit);
-        values.capacitance = drv.getUnit(capacitanceUnit);
-        values.inductance = drv.getUnit(inductanceUnit);
+        values.resistance = drv.getNetworkValue(sectionIndex, branch, NetworkComponent::Resistance);
+        values.capacitance = drv.getNetworkValue(sectionIndex, branch, NetworkComponent::Capacitance);
+        values.inductance = drv.getNetworkValue(sectionIndex, branch, NetworkComponent::Inductance);
         return values;
     };
-    auto displayValuesFromInternal = [displayFromInternal, firstRow](const SectionInternalValues& values) {
+    auto displayValuesFromInternal = [displayFromInternal](const SectionInternalValues& values) {
         NetworkSectionEditDialog::Values displayValues;
-        displayValues.resistanceOhm = displayFromInternal(firstRow, values.resistance);
-        displayValues.capacitanceMicroFarad = displayFromInternal(firstRow + 1, values.capacitance);
-        displayValues.inductanceMilliHenry = displayFromInternal(firstRow + 2, values.inductance);
+        displayValues.resistanceOhm = displayFromInternal(NetworkComponent::Resistance, values.resistance);
+        displayValues.capacitanceMicroFarad = displayFromInternal(NetworkComponent::Capacitance, values.capacitance);
+        displayValues.inductanceMilliHenry = displayFromInternal(NetworkComponent::Inductance, values.inductance);
         return displayValues;
     };
-    auto internalValuesFromDisplay = [internalFromDisplay, firstRow](const NetworkSectionEditDialog::Values& values) {
+    auto internalValuesFromDisplay = [internalFromDisplay](const NetworkSectionEditDialog::Values& values) {
         SectionInternalValues internalValues;
-        internalValues.resistance = internalFromDisplay(firstRow, values.resistanceOhm);
-        internalValues.capacitance = internalFromDisplay(firstRow + 1, values.capacitanceMicroFarad);
-        internalValues.inductance = internalFromDisplay(firstRow + 2, values.inductanceMilliHenry);
+        internalValues.resistance = internalFromDisplay(NetworkComponent::Resistance, values.resistanceOhm);
+        internalValues.capacitance = internalFromDisplay(NetworkComponent::Capacitance, values.capacitanceMicroFarad);
+        internalValues.inductance = internalFromDisplay(NetworkComponent::Inductance, values.inductanceMilliHenry);
         return internalValues;
     };
-    auto applyInternalValues = [this, driverIndex, resistanceUnit, capacitanceUnit, inductanceUnit](const SectionInternalValues& values) {
+    auto applyInternalValues = [this, driverIndex, sectionIndex, branch](const SectionInternalValues& values) {
         driver& targetDriver = m_doc->m_driverDriver[driverIndex];
-        targetDriver.setUnit(resistanceUnit, values.resistance);
-        targetDriver.setUnit(capacitanceUnit, values.capacitance);
-        targetDriver.setUnit(inductanceUnit, values.inductance);
-        targetDriver.calculateParameters();
+        targetDriver.setNetworkValue(sectionIndex, branch, NetworkComponent::Resistance, values.resistance);
+        targetDriver.setNetworkValue(sectionIndex, branch, NetworkComponent::Capacitance, values.capacitance);
+        targetDriver.setNetworkValue(sectionIndex, branch, NetworkComponent::Inductance, values.inductance);
     };
     auto sameInternalValues = [](const SectionInternalValues& lhs, const SectionInternalValues& rhs) {
         return nearlyEqual(lhs.resistance, rhs.resistance) &&
@@ -2626,44 +2608,26 @@ void KFilterQt6App::toggleDriverPlotVisibilityFromPreview(int driverIndex)
     }
 
     driver& selectedDriver = m_doc->m_driverDriver[driverIndex];
-    const bool hasActivePlotFlag = selectedDriver.pressureIsActive ||
-                                   selectedDriver.impedanceIsActive ||
-                                   selectedDriver.summaryIsActive ||
-                                   selectedDriver.ScalarSummaryisActive ||
-                                   selectedDriver.ImpedanceSummaryisActive;
+    const DriverPlotState currentPlotState = selectedDriver.plotState();
+    const bool hasActivePlotFlag = currentPlotState.anyEnabled();
 
     DriverPlotVisibilityMemory& rememberedVisibility = m_driverPlotVisibilityMemory[driverIndex];
 
     if (hasActivePlotFlag) {
         rememberedVisibility.valid = true;
-        rememberedVisibility.pressure = selectedDriver.pressureIsActive;
-        rememberedVisibility.impedance = selectedDriver.impedanceIsActive;
-        rememberedVisibility.vectorSum = selectedDriver.summaryIsActive;
-        rememberedVisibility.scalarSum = selectedDriver.ScalarSummaryisActive;
-        rememberedVisibility.impedanceSum = selectedDriver.ImpedanceSummaryisActive;
-
-        selectedDriver.pressureIsActive = false;
-        selectedDriver.impedanceIsActive = false;
-        selectedDriver.summaryIsActive = false;
-        selectedDriver.ScalarSummaryisActive = false;
-        selectedDriver.ImpedanceSummaryisActive = false;
+        rememberedVisibility.state = currentPlotState;
+        selectedDriver.setPlotState(DriverPlotState{});
 
         statusBar()->showMessage(tr("All plot flags disabled for Driver %1.").arg(driverIndex + 1), 3000);
     } else if (rememberedVisibility.valid) {
-        selectedDriver.pressureIsActive = rememberedVisibility.pressure;
-        selectedDriver.impedanceIsActive = rememberedVisibility.impedance;
-        selectedDriver.summaryIsActive = rememberedVisibility.vectorSum;
-        selectedDriver.ScalarSummaryisActive = rememberedVisibility.scalarSum;
-        selectedDriver.ImpedanceSummaryisActive = rememberedVisibility.impedanceSum;
+        selectedDriver.setPlotState(rememberedVisibility.state);
         rememberedVisibility = DriverPlotVisibilityMemory{};
 
         statusBar()->showMessage(tr("Previous plot flags restored for Driver %1.").arg(driverIndex + 1), 3000);
     } else {
-        selectedDriver.pressureIsActive = true;
-        selectedDriver.impedanceIsActive = false;
-        selectedDriver.summaryIsActive = false;
-        selectedDriver.ScalarSummaryisActive = false;
-        selectedDriver.ImpedanceSummaryisActive = false;
+        DriverPlotState defaultPlotState;
+        defaultPlotState.pressure = true;
+        selectedDriver.setPlotState(defaultPlotState);
 
         statusBar()->showMessage(tr("SPL curve enabled for Driver %1.").arg(driverIndex + 1), 3000);
     }

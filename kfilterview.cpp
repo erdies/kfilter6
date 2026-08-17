@@ -756,7 +756,7 @@ void KFilterView::drawLegend(QPainter& painter)
     };
 
     for (int driverIndex = 0; driverIndex < 4; ++driverIndex) {
-        if (mydoc->m_driverDriver[driverIndex].pressureIsActive) {
+        if (mydoc->m_driverDriver[driverIndex].plotState().pressure) {
             const QString pressureLabel = measurementMergeAppliedForDriver(driverIndex)
                                               ? tr("Driver %1 SPL (merged)").arg(driverIndex + 1)
                                               : tr("Driver %1 SPL").arg(driverIndex + 1);
@@ -766,7 +766,7 @@ void KFilterView::drawLegend(QPainter& painter)
                       pressureLabel);
         }
 
-        if (mydoc->m_driverDriver[driverIndex].impedanceIsActive) {
+        if (mydoc->m_driverDriver[driverIndex].plotState().impedance) {
             drawEntry(impedanceCurveColor(driverIndex),
                       Qt::DotLine,
                       1,
@@ -812,24 +812,24 @@ void KFilterView::drawLegend(QPainter& painter)
         }
     }
 
-    if (mydoc->m_driverDriver[0].summaryIsActive ||
-        mydoc->m_driverDriver[1].summaryIsActive ||
-        mydoc->m_driverDriver[2].summaryIsActive ||
-        mydoc->m_driverDriver[3].summaryIsActive) {
+    if (mydoc->m_driverDriver[0].plotState().vectorSummary ||
+        mydoc->m_driverDriver[1].plotState().vectorSummary ||
+        mydoc->m_driverDriver[2].plotState().vectorSummary ||
+        mydoc->m_driverDriver[3].plotState().vectorSummary) {
         drawEntry(cpressureS, Qt::SolidLine, 3, tr("Vector SPL sum"));
     }
 
-    if (mydoc->m_driverDriver[0].ScalarSummaryisActive ||
-        mydoc->m_driverDriver[1].ScalarSummaryisActive ||
-        mydoc->m_driverDriver[2].ScalarSummaryisActive ||
-        mydoc->m_driverDriver[3].ScalarSummaryisActive) {
+    if (mydoc->m_driverDriver[0].plotState().scalarSummary ||
+        mydoc->m_driverDriver[1].plotState().scalarSummary ||
+        mydoc->m_driverDriver[2].plotState().scalarSummary ||
+        mydoc->m_driverDriver[3].plotState().scalarSummary) {
         drawEntry(cscalarpressureS, Qt::SolidLine, 2, tr("Energetic SPL sum"));
     }
 
-    if (mydoc->m_driverDriver[0].ImpedanceSummaryisActive ||
-        mydoc->m_driverDriver[1].ImpedanceSummaryisActive ||
-        mydoc->m_driverDriver[2].ImpedanceSummaryisActive ||
-        mydoc->m_driverDriver[3].ImpedanceSummaryisActive) {
+    if (mydoc->m_driverDriver[0].plotState().impedanceSummary ||
+        mydoc->m_driverDriver[1].plotState().impedanceSummary ||
+        mydoc->m_driverDriver[2].plotState().impedanceSummary ||
+        mydoc->m_driverDriver[3].plotState().impedanceSummary) {
         drawEntry(cimpedanceS, Qt::DotLine, 2, tr("Total impedance"));
     }
 }

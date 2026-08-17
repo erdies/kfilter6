@@ -1586,3 +1586,162 @@ or physical normalization provenance still needs further analysis.
 
 - `L2/C2/R2`, `Norm`, `calibrate`, `show_reflex_only`, and `Unit[49]` remain
   unchanged. Patch 272 is a naming/documentation patch only.
+
+## Patch 283: Driver reset API and obsolete network cleanup removal
+
+- Renamed the historical public `driver::initContents()` operation to
+  `driver::resetToDefaults()`. The operation still restores the same complete
+  historical default Driver state and remains the reset path used by the
+  constructor and `KFilterDoc::deleteContents()`.
+- Removed the public `driver::cleanupNetwork()` method. No productive caller
+  remained; network editing and clearing already use the semantic
+  `setNetworkValue(section, branch, component, value)` API.
+- The Driver smoke test now verifies network-cache invalidation by clearing a
+  populated network value through `setNetworkValue()` itself, rather than
+  relying on the obsolete whole-network cleanup helper.
+- Semantic network mapping coverage still clears and rechecks all 48 network
+  values, now exclusively through the public semantic network API.
+- Historical references to the old method names in earlier PORTING sections are
+  intentionally retained as historical patch documentation.
+- No Driver mathematics, serialized file layout, project format, `.kfd` format,
+  default values, or frequency-grid behaviour changed.
+
+## Patch 284: Driver Qts/Qes semantic naming cleanup
+
+- Audited the remaining public `driver` method surface after Patch 283. All
+  remaining operations have productive callers; no further method was hidden or
+  removed merely to reduce API size.
+- Corrected the historical C++ name `Qtc` to `Qts`. The value has always been
+  treated as the driver's total Q by the Driver Parameters dialog, project I/O,
+  `.kfd` I/O, defaults, and the acoustic-model equations; there is no separate
+  closed-box `Qtc` state in the current Driver model.
+- Corrected the private historical member `Qe` to `Qes`, matching the existing
+  public `setQes()/getQes()` API and the electrical-Q meaning used by the
+  motional equivalent-circuit equations.
+- Renamed the public C++ accessors only:
+
+  ```text
+  setQtc() -> setQts()
+  getQtc() -> getQts()
+  ```
+
+- Preserved all serialized field names and layouts. In particular, the legacy
+  text-project key `Qe` remains unchanged for compatibility, while current JSON
+  and `.kfd` fields continue to use `qes`.
+- No default values, formulas, operation order, cache behaviour, enclosure
+  selection, or response calculation changed.
+
+## Patch 285: Split overloaded L2/C2/R2 enclosure-equivalent state
+
+- Re-audited the historical `L2/C2/R2` family before renaming it. The earlier
+  Stage-D analysis was confirmed: `L2` had two distinct meanings depending on
+  enclosure type, while `C2` and `R2` belonged only to the tuned vented/bandpass
+  secondary branch.
+- Removed the overloaded `L2` state instead of mechanically renaming it:
+  - Open Baffle full/equivalent-circuit calculations now use
+    `motionalInductance` directly, which is exactly the value previously copied
+    into `L2` for that alignment.
+  - Sealed calculations use the dedicated
+    `sealedEffectiveMotionalInductance`, retaining exactly the historical
+    parallel-combination formula
+
+    ```text
+    sealedEffectiveMotionalInductance
+      = 1 / (1/motionalInductance + Vas/(Vb*motionalInductance))
+    ```
+
+  - Vented and Bandpass calculations use a separately named tuned enclosure
+    branch:
+
+    ```text
+    enclosureBranchInductance  = Vb * motionalInductance / Vas
+    enclosureBranchCapacitance = 1 / (enclosureBranchInductance * (2*pi*Fb)^2)
+    enclosureBranchResistance  = 2*pi*Fb*enclosureBranchInductance / Ql
+    ```
+
+    with unchanged series impedance
+
+    ```text
+    Zbranch = enclosureBranchResistance
+              + j*(omega*enclosureBranchInductance
+                   - 1/(omega*enclosureBranchCapacitance))
+    ```
+
+- Bandpass mode still derives the tuned enclosure branch from the primary `Vb`
+  before applying the existing `V2` modification to `motionalInductance`; this
+  preserves the historical calculation order and meaning.
+- Added Driver regression coverage for full-equivalent-circuit transitions
+  between Sealed, Vented, Bandpass, and Open Baffle states. The test verifies
+  that no enclosure-derived state from the previous alignment leaks into the
+  final response.
+- Direct Patch-284-vs-Patch-285 response comparison covers Open Baffle, Sealed,
+  Vented, and Bandpass in simplified/full-circuit variants. All 150 complex SPL
+  and impedance samples are bit-identical at both `-O0` and `-O2`.
+- No public Driver API, file format, defaults, passive-network representation,
+  Active Filter, Baffle, Measurement, or frequency-grid behaviour changed.
+
+## Patch 286: Full-circuit normalization state cleanup
+
+- Re-audited the historical `Norm/calibrate` pair. No surviving source explains
+  the absolute reference behind the calibration constant, so Patch 286 does not
+  assign a speculative physical meaning to it.
+- The observed behaviour is nevertheless unambiguous:
+
+  ```text
+  calibrate = 12.58925412
+  Norm = sqrt(8/Rdc) * calibrate * sqrt(2)
+  ```
+
+  `Norm` is multiplied only into the full/equivalent-circuit acoustic response
+  after the normalized radiation-capacitance transfer term. The calibration
+  constant is numerically approximately +22 dB in linear-gain form.
+- Removed `calibrate` as mutable per-driver state and replaced it with the
+  compile-time constant:
+
+  ```text
+  LegacyFullCircuitCalibrationGain = 12.58925412
+  ```
+
+  The `Legacy` qualifier is intentional: the numeric value is preserved while
+  its original absolute-reference provenance remains unknown.
+- Renamed the private `Norm` member to `fullCircuitNormalizationFactor`, which
+  describes its proven computational role without claiming an unsupported
+  physical reference.
+- Preserved the normalization expression and floating-point operation order:
+
+  ```text
+  fullCircuitNormalizationFactor
+      = sqrt(8/Rdc) * LegacyFullCircuitCalibrationGain * sqrt(2.0)
+  ```
+
+- No public Driver API, defaults visible to users, serialized file format,
+  enclosure model, passive network, Active Filter, Baffle, Measurement, or
+  frequency-grid behaviour changed.
+
+
+## Patch 287: Remove redundant T/S parameter flag
+
+- Re-audited the private `parameterFlag` before removing it. In the retained
+  calculation core it had exactly one source of truth: `calculateParameters()`
+  set it true for `F0 != 0` and false for `F0 == 0`. No independent UI, I/O,
+  setter, or historical control path remains in the current code.
+- Removed `parameterFlag` and branch directly on the underlying driver
+  parameter instead:
+
+  ```text
+  F0 == 0  -> equivalent circuit is Rdc + j*omega*Lsp
+  F0 != 0  -> T/S equivalent/acoustic model is evaluated
+  ```
+
+- Preserved the existing `F0 == 0` and `F0 != 0` calculation order. The change
+  removes only the redundant cached Boolean state.
+- Explicitly did **not** remove or derive `pistonLowPassActive`. Although the
+  current code recomputes it from `pistonLowPassQ` and
+  `pistonLowPassFrequency`, the original enable/disable semantics of that
+  dormant historical piston model are not sufficiently reconstructed. The
+  complete piston-low-pass block therefore remains unchanged.
+- Existing Driver regression coverage for direct and transitioned `F0 == 0`
+  verifies the voice-coil-only impedance path and the acoustic-response bypass,
+  including recovery when `F0` is set non-zero again.
+- No public Driver API, file format, defaults, passive network, enclosure model,
+  Active Filter, Baffle, Measurement, or piston-low-pass behaviour changed.

@@ -164,11 +164,7 @@ int perceivedBrightness(const QColor& color)
 
 bool driverHasActiveCurveOrTotalFlag(const driver& drv)
 {
-    return drv.pressureIsActive ||
-           drv.impedanceIsActive ||
-           drv.summaryIsActive ||
-           drv.ScalarSummaryisActive ||
-           drv.ImpedanceSummaryisActive;
+    return drv.plotState().anyEnabled();
 }
 
 int allDriversPreviewHeight(int driverCount)
@@ -273,15 +269,21 @@ CircuitOut::DriverSnapshot CircuitOut::snapshotFromDriver(driver& drv, int drive
     DriverSnapshot snapshot;
     snapshot.driverNumber = driverNumber;
     snapshot.title = drv.getTitle();
-    snapshot.boxTypeProposal = static_cast<int>(drv.enclosureTypeProposal);
-    snapshot.vb = drv.Vb;
-    snapshot.fb = drv.Fb;
-    snapshot.v2 = drv.V2;
-    if (drv.Vb == 0.0 || snapshot.boxTypeProposal < 0) {
+    snapshot.boxTypeProposal = static_cast<int>(drv.getEnclosureTypeProposal());
+    snapshot.vb = drv.getVb();
+    snapshot.fb = drv.getFb();
+    snapshot.v2 = drv.getV2();
+    if (drv.getVb() == 0.0 || snapshot.boxTypeProposal < 0) {
         snapshot.boxTypeProposal = 0;
     }
-    for (int unitIndex = 1; unitIndex <= NetworkUnitCount; ++unitIndex) {
-        snapshot.network[unitIndex] = drv.getUnit(unitIndex);
+    for (int sectionIndex = 0; sectionIndex < SectionCount; ++sectionIndex) {
+        const int firstUnit = sectionIndex * RowsPerSection + 1;
+        snapshot.network[firstUnit + SeriesR] = drv.getNetworkValue(sectionIndex, NetworkBranchType::Series, NetworkComponent::Resistance);
+        snapshot.network[firstUnit + SeriesC] = drv.getNetworkValue(sectionIndex, NetworkBranchType::Series, NetworkComponent::Capacitance);
+        snapshot.network[firstUnit + SeriesL] = drv.getNetworkValue(sectionIndex, NetworkBranchType::Series, NetworkComponent::Inductance);
+        snapshot.network[firstUnit + ShuntR] = drv.getNetworkValue(sectionIndex, NetworkBranchType::Shunt, NetworkComponent::Resistance);
+        snapshot.network[firstUnit + ShuntC] = drv.getNetworkValue(sectionIndex, NetworkBranchType::Shunt, NetworkComponent::Capacitance);
+        snapshot.network[firstUnit + ShuntL] = drv.getNetworkValue(sectionIndex, NetworkBranchType::Shunt, NetworkComponent::Inductance);
     }
     snapshot.curveOrTotalFlagActive = driverHasActiveCurveOrTotalFlag(drv);
     snapshot.valid = true;

@@ -425,7 +425,7 @@ void KFilterDoc::deleteContents()
 {
   for (int intI = 0; intI < 4; intI++ )
   {
-    m_driverDriver[ intI ].initContents();
+    m_driverDriver[ intI ].resetToDefaults();
     m_splCorrectionCurves[static_cast<std::size_t>(intI)].clear();
   }
   m_measurementMergeEnabled = false;
@@ -461,11 +461,6 @@ void KFilterDoc::resetFloorReflectionSettings()
 void KFilterDoc::markLoadedContentsReady()
 {
   invalidateSplCorrectionCaches();
-  for ( int intI = 0; intI < 4; intI++ )
-  {
-    m_driverDriver[ intI ].calculateParameters();
-    m_driverDriver[ intI ].setModified();
-  }
   emit forceviewrefresh();
   modified = false;
 }
@@ -489,7 +484,7 @@ std::complex<double> KFilterDoc::effectivePressureSample(
   }
 
   std::complex<double> sample =
-      m_driverDriver[driverIndex].ResultPressure[static_cast<std::size_t>(sampleIndex)];
+      m_driverDriver[driverIndex].pressureResponse()[static_cast<std::size_t>(sampleIndex)];
 
   // Patch 179: the active-filter stage is the first complex post-driver stage.
   // Unsupported/invalid chains deliberately bypass here; the response status is
@@ -525,7 +520,7 @@ std::complex<double> KFilterDoc::effectivePressureSample(
 
 bool KFilterDoc::Sound( int a_intIndex )
 {
-  if (m_driverDriver[ a_intIndex ].pressureIsActive )
+  if (m_driverDriver[ a_intIndex ].plotState().pressure )
   {
     m_driverDriver[ a_intIndex ].calculatePressureResponse();
     const ActiveFilterResponse& activeFilter = activeFilterResponse(a_intIndex);
@@ -543,21 +538,21 @@ bool KFilterDoc::Sound( int a_intIndex )
                                              correctionCache)));
     }
   }
-  return m_driverDriver[ a_intIndex ].pressureIsActive;
+  return m_driverDriver[ a_intIndex ].plotState().pressure;
 }
 
 bool KFilterDoc::Impedance( int a_intIndex )
 {
-	if (m_driverDriver[ a_intIndex ].impedanceIsActive)
+	if (m_driverDriver[ a_intIndex ].plotState().impedance)
 	{
 		m_driverDriver[ a_intIndex ].calculateImpedanceResponse();
 		for (int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex)
 		{
 			m_doubleXContainer[ a_intIndex ][ sampleIndex ] =
-				std::abs(m_driverDriver[ a_intIndex ].ResultImpedance[static_cast<std::size_t>(sampleIndex)]);
+				std::abs(m_driverDriver[ a_intIndex ].impedanceResponse()[static_cast<std::size_t>(sampleIndex)]);
 		}
 	}
-	return m_driverDriver[ a_intIndex ].impedanceIsActive;
+	return m_driverDriver[ a_intIndex ].plotState().impedance;
 }
 
 bool KFilterDoc::PressureSummary()
@@ -567,7 +562,7 @@ bool KFilterDoc::PressureSummary()
 	////////////////////////////// calculate vector summary for active drivers
 	for( int intIndex = 0; intIndex < 4; intIndex++ )
 	{
-		if ( m_driverDriver[ intIndex ].summaryIsActive )
+		if ( m_driverDriver[ intIndex ].plotState().vectorSummary )
 		{
 			m_driverDriver[ intIndex ].calculatePressureResponse();
 			const ActiveFilterResponse& activeFilter = activeFilterResponse(intIndex);
@@ -594,8 +589,8 @@ bool KFilterDoc::PressureSummary()
 			DB(std::abs(complexSum[static_cast<std::size_t>(sampleIndex)]));
 	}
 	///////////////////////////////
-	return ( m_driverDriver[ 0 ].summaryIsActive || m_driverDriver[ 1 ].summaryIsActive || \
-		m_driverDriver[ 2 ].summaryIsActive || m_driverDriver[ 3 ].summaryIsActive);
+	return ( m_driverDriver[ 0 ].plotState().vectorSummary || m_driverDriver[ 1 ].plotState().vectorSummary || \
+		m_driverDriver[ 2 ].plotState().vectorSummary || m_driverDriver[ 3 ].plotState().vectorSummary);
 }
 
 bool KFilterDoc::PressureScalarSummary()
@@ -608,7 +603,7 @@ bool KFilterDoc::PressureScalarSummary()
 
 	for ( int intIndex = 0; intIndex < 4; intIndex++ )
 	{
-		if ( m_driverDriver[ intIndex ].ScalarSummaryisActive )
+		if ( m_driverDriver[ intIndex ].plotState().scalarSummary )
 		{
 			m_driverDriver[ intIndex ].calculatePressureResponse();
 			const ActiveFilterResponse& activeFilter = activeFilterResponse(intIndex);
@@ -633,8 +628,8 @@ bool KFilterDoc::PressureScalarSummary()
 		m_doubleXContainer[ 0 ][ intI ] = DB( std::sqrt( m_doubleXContainer[ 0 ][ intI ] ) );
 	}
 	///////////////////////////////
-	return ( m_driverDriver[ 0 ].ScalarSummaryisActive || m_driverDriver[ 1 ].ScalarSummaryisActive || \
-		m_driverDriver[ 2 ].ScalarSummaryisActive || m_driverDriver[ 3 ].ScalarSummaryisActive );
+	return ( m_driverDriver[ 0 ].plotState().scalarSummary || m_driverDriver[ 1 ].plotState().scalarSummary || \
+		m_driverDriver[ 2 ].plotState().scalarSummary || m_driverDriver[ 3 ].plotState().scalarSummary );
 }
 
 bool KFilterDoc::ImpedanceSummary()
@@ -644,16 +639,15 @@ bool KFilterDoc::ImpedanceSummary()
 	////////////////////////////// calculate vector summary for active drivers
 	for ( int intIndex = 0; intIndex < 4; intIndex++ )
 	{
-		if ( m_driverDriver[ intIndex ].ImpedanceSummaryisActive )
+		if ( m_driverDriver[ intIndex ].plotState().impedanceSummary )
 		{
 			m_driverDriver[ intIndex ].calculateImpedanceResponse();
-			m_driverDriver[ intIndex ].invertImpedance();
+			const driver::ResponseArray& impedance = m_driverDriver[ intIndex ].impedanceResponse();
 			for ( int sampleIndex = 0; sampleIndex < PressureSampleCount; ++sampleIndex )
 			{
 				admittanceSum[static_cast<std::size_t>(sampleIndex)] +=
-					m_driverDriver[ intIndex ].ResultImpedance[static_cast<std::size_t>(sampleIndex)];
+					1.0 / impedance[static_cast<std::size_t>(sampleIndex)];
 			}
-			m_driverDriver[ intIndex ].invertImpedance();
 		}
 	}
 	////////////////////////////// vector summary becomes real summary
@@ -663,8 +657,8 @@ bool KFilterDoc::ImpedanceSummary()
 			1.0 / std::abs(admittanceSum[static_cast<std::size_t>(sampleIndex)]);
 	}
 	///////////////////////////////
-	return ( m_driverDriver[ 0 ].ImpedanceSummaryisActive || m_driverDriver[ 1 ].ImpedanceSummaryisActive || \
-		m_driverDriver[ 2 ].ImpedanceSummaryisActive || m_driverDriver[ 3 ].ImpedanceSummaryisActive);
+	return ( m_driverDriver[ 0 ].plotState().impedanceSummary || m_driverDriver[ 1 ].plotState().impedanceSummary || \
+		m_driverDriver[ 2 ].plotState().impedanceSummary || m_driverDriver[ 3 ].plotState().impedanceSummary);
 }
 
 void KFilterDoc::viewrefresh()

@@ -56,35 +56,41 @@ bool checkHistoricalDefaults(driver &drv, const QString &prefix)
     ok = expectDouble(prefix, "Rdc", drv.getRdc(), 5.1) && ok;
     ok = expectDouble(prefix, "Lsp", drv.getLsp(), 0.00017) && ok;
     ok = expectDouble(prefix, "F0", drv.getF0(), 307.0) && ok;
-    ok = expectDouble(prefix, "Qts", drv.getQtc(), 1.14) && ok;
+    ok = expectDouble(prefix, "Qts", drv.getQts(), 1.14) && ok;
     ok = expectDouble(prefix, "Qms", drv.getQms(), 1.9) && ok;
     ok = expectDouble(prefix, "Qes", drv.getQes(), 2.87) && ok;
     ok = expectDouble(prefix, "Vas", drv.getVas(), 10.0) && ok;
     ok = expectDouble(prefix, "Dm", drv.getDm(), 7.3) && ok;
-    ok = expectDouble(prefix, "gain", drv.gain, 1.0) && ok;
-    ok = expectDouble(prefix, "Vb", drv.Vb, 0.0) && ok;
-    ok = expectDouble(prefix, "Fb", drv.Fb, 0.0) && ok;
-    ok = expectDouble(prefix, "V2", drv.V2, 0.0) && ok;
+    ok = expectDouble(prefix, "gain", drv.getGainLinear(), 1.0) && ok;
+    ok = expectDouble(prefix, "Vb", drv.getVb(), 0.0) && ok;
+    ok = expectDouble(prefix, "Fb", drv.getFb(), 0.0) && ok;
+    ok = expectDouble(prefix, "V2", drv.getV2(), 0.0) && ok;
     ok = expectDouble(prefix, "Ql", drv.getQl(), 10.0) && ok;
 
-    ok = expectInt(prefix, "GTypProposal", static_cast<int>(drv.enclosureTypeProposal), 0) && ok;
-    ok = expectBool(prefix, "parameterFlag", drv.parameterFlag, true) && ok;
-    ok = expectBool(prefix, "Tiefpass_flag", drv.pistonLowPassActive, false) && ok;
-    ok = expectBool(prefix, "Realschall_flag", drv.fullCircuitFlag, false) && ok;
+    ok = expectInt(prefix, "GTypProposal", static_cast<int>(drv.getEnclosureTypeProposal()), 0) && ok;
 
-    ok = expectBool(prefix, "pressureIsActive", drv.pressureIsActive, false) && ok;
-    ok = expectBool(prefix, "ImpedanzisActive", drv.impedanceIsActive, false) && ok;
-    ok = expectBool(prefix, "summaryIsActive", drv.summaryIsActive, false) && ok;
-    ok = expectBool(prefix, "ScalarSummaryisActive", drv.ScalarSummaryisActive, false) && ok;
-    ok = expectBool(prefix, "ImpedanzSummaryisActive", drv.ImpedanceSummaryisActive, false) && ok;
-    ok = expectBool(prefix, "InvertPhase", drv.InvertPhase, false) && ok;
+    ok = expectBool(prefix, "pressureIsActive", drv.plotState().pressure, false) && ok;
+    ok = expectBool(prefix, "ImpedanzisActive", drv.plotState().impedance, false) && ok;
+    ok = expectBool(prefix, "summaryIsActive", drv.plotState().vectorSummary, false) && ok;
+    ok = expectBool(prefix, "ScalarSummaryisActive", drv.plotState().scalarSummary, false) && ok;
+    ok = expectBool(prefix, "ImpedanzSummaryisActive", drv.plotState().impedanceSummary, false) && ok;
+    ok = expectBool(prefix, "InvertPhase", drv.isPhaseInverted(), false) && ok;
     ok = expectBool(prefix, "Full circuit", drv.getFullCircuit(), false) && ok;
 
-    for (int unitIndex = 0; unitIndex < 49; ++unitIndex) {
-        if (!fuzzyEqual(drv.getUnit(unitIndex), 0.0)) {
-            QTextStream(stderr) << prefix << " Unit[" << unitIndex << "] mismatch: "
-                                << drv.getUnit(unitIndex) << '\n';
-            ok = false;
+    int networkValueIndex = 1;
+    for (int sectionIndex = 0; sectionIndex < 8; ++sectionIndex) {
+        for (NetworkBranchType branch : {NetworkBranchType::Series, NetworkBranchType::Shunt}) {
+            for (NetworkComponent component : {NetworkComponent::Resistance,
+                                               NetworkComponent::Capacitance,
+                                               NetworkComponent::Inductance}) {
+                const double value = drv.getNetworkValue(sectionIndex, branch, component);
+                if (!fuzzyEqual(value, 0.0)) {
+                    QTextStream(stderr) << prefix << " network value " << networkValueIndex
+                                        << " mismatch: " << value << '\n';
+                    ok = false;
+                }
+                ++networkValueIndex;
+            }
         }
     }
 
@@ -97,7 +103,7 @@ int main(int argc, char **argv)
     QCoreApplication app(argc, argv);
 
     driver singleDriver;
-    if (!checkHistoricalDefaults(singleDriver, QStringLiteral("driver::initContents"))) {
+    if (!checkHistoricalDefaults(singleDriver, QStringLiteral("driver::resetToDefaults"))) {
         return 1;
     }
 

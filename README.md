@@ -623,7 +623,7 @@ Project-format compatibility rules:
 Terminology note:
 
 - The UI term `Energetic SPL sum` corresponds to the historical internal scalar SPL summary calculation.
-- Internal names such as `ScalarSummary`, `ScalarSummaryisActive`, and `PressureScalarSummary()` may remain for compatibility and to reduce unnecessary churn.
+- The per-driver visibility/summary selections are grouped in `DriverPlotState`; the historical calculation name `PressureScalarSummary()` remains for compatibility.
 
 ## License
 

@@ -5,6 +5,7 @@
  */
 
 #include "kfilterprojectio.h"
+#include "networkserializationutils.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -22,6 +23,13 @@
 
 namespace
 {
+void setPlotFlag(driver& drv, bool DriverPlotState::*member, bool value)
+{
+    DriverPlotState state = drv.plotState();
+    state.*member = value;
+    drv.setPlotState(state);
+}
+
 bool fuzzyEqual(double left, double right)
 {
     const double diff = left - right;
@@ -36,27 +44,27 @@ void populateDrivers(driver (&drivers)[KFilterProjectIo::DriverCount], bool incl
         currentDriver.setRdc(5.0 + driverIndex);
         currentDriver.setLsp(0.00075 + driverIndex * 0.0001);
         currentDriver.setF0(40.0 + driverIndex);
-        currentDriver.setQtc(0.7 + driverIndex);
+        currentDriver.setQts(0.7 + driverIndex);
         currentDriver.setQes(0.8 + driverIndex);
         currentDriver.setQms(4.0 + driverIndex);
         currentDriver.setVas(55.0 + driverIndex);
         currentDriver.setDm(18.0 + driverIndex);
-        currentDriver.Vb = 20.0 + driverIndex;
+        currentDriver.setVb(20.0 + driverIndex);
         currentDriver.setQl(6.5 + driverIndex);
-        currentDriver.Fb = 42.0 + driverIndex;
-        currentDriver.V2 = 12.0 + driverIndex;
-        currentDriver.enclosureTypeProposal = static_cast<EnclosureType>(driverIndex);
-        currentDriver.gain = 1.5 + driverIndex;
-        currentDriver.pressureIsActive = (driverIndex % 2) == 0;
-        currentDriver.impedanceIsActive = true;
-        currentDriver.summaryIsActive = false;
-        currentDriver.ScalarSummaryisActive = true;
-        currentDriver.ImpedanceSummaryisActive = false;
-        currentDriver.InvertPhase = (driverIndex % 2) != 0;
+        currentDriver.setFb(42.0 + driverIndex);
+        currentDriver.setV2(12.0 + driverIndex);
+        currentDriver.setEnclosureTypeProposal(static_cast<EnclosureType>(driverIndex));
+        currentDriver.setGainLinear(1.5 + driverIndex);
+        setPlotFlag(currentDriver, &DriverPlotState::pressure, (driverIndex % 2) == 0);
+        setPlotFlag(currentDriver, &DriverPlotState::impedance, true);
+        setPlotFlag(currentDriver, &DriverPlotState::vectorSummary, false);
+        setPlotFlag(currentDriver, &DriverPlotState::scalarSummary, true);
+        setPlotFlag(currentDriver, &DriverPlotState::impedanceSummary, false);
+        currentDriver.setPhaseInverted((driverIndex % 2) != 0);
         currentDriver.setFullCircuit(includeFullCircuit && (driverIndex % 2) == 0);
 
         for (int unitIndex = 1; unitIndex <= KFilterProjectIo::NetworkUnitCount; ++unitIndex) {
-            currentDriver.setUnit(unitIndex, driverIndex * 100.0 + unitIndex / 10.0);
+            NetworkSerializationUtils::setValue(currentDriver, unitIndex - 1, driverIndex * 100.0 + unitIndex / 10.0);
         }
     }
 }
@@ -74,30 +82,30 @@ bool compareDrivers(driver (&expected)[KFilterProjectIo::DriverCount],
             !fuzzyEqual(expectedDriver.getRdc(), actualDriver.getRdc()) ||
             !fuzzyEqual(expectedDriver.getLsp(), actualDriver.getLsp()) ||
             !fuzzyEqual(expectedDriver.getF0(), actualDriver.getF0()) ||
-            !fuzzyEqual(expectedDriver.getQtc(), actualDriver.getQtc()) ||
+            !fuzzyEqual(expectedDriver.getQts(), actualDriver.getQts()) ||
             !fuzzyEqual(expectedDriver.getQes(), actualDriver.getQes()) ||
             !fuzzyEqual(expectedDriver.getQms(), actualDriver.getQms()) ||
             !fuzzyEqual(expectedDriver.getVas(), actualDriver.getVas()) ||
             !fuzzyEqual(expectedDriver.getDm(), actualDriver.getDm()) ||
-            !fuzzyEqual(expectedDriver.Vb, actualDriver.Vb) ||
+            !fuzzyEqual(expectedDriver.getVb(), actualDriver.getVb()) ||
             !fuzzyEqual(expectedDriver.getQl(), actualDriver.getQl()) ||
-            !fuzzyEqual(expectedDriver.Fb, actualDriver.Fb) ||
-            !fuzzyEqual(expectedDriver.V2, actualDriver.V2) ||
-            expectedDriver.enclosureTypeProposal != actualDriver.enclosureTypeProposal ||
-            !fuzzyEqual(expectedDriver.gain, actualDriver.gain) ||
-            expectedDriver.pressureIsActive != actualDriver.pressureIsActive ||
-            expectedDriver.impedanceIsActive != actualDriver.impedanceIsActive ||
-            expectedDriver.summaryIsActive != actualDriver.summaryIsActive ||
-            expectedDriver.ScalarSummaryisActive != actualDriver.ScalarSummaryisActive ||
-            expectedDriver.ImpedanceSummaryisActive != actualDriver.ImpedanceSummaryisActive ||
-            expectedDriver.InvertPhase != actualDriver.InvertPhase ||
+            !fuzzyEqual(expectedDriver.getFb(), actualDriver.getFb()) ||
+            !fuzzyEqual(expectedDriver.getV2(), actualDriver.getV2()) ||
+            expectedDriver.getEnclosureTypeProposal() != actualDriver.getEnclosureTypeProposal() ||
+            !fuzzyEqual(expectedDriver.getGainLinear(), actualDriver.getGainLinear()) ||
+            expectedDriver.plotState().pressure != actualDriver.plotState().pressure ||
+            expectedDriver.plotState().impedance != actualDriver.plotState().impedance ||
+            expectedDriver.plotState().vectorSummary != actualDriver.plotState().vectorSummary ||
+            expectedDriver.plotState().scalarSummary != actualDriver.plotState().scalarSummary ||
+            expectedDriver.plotState().impedanceSummary != actualDriver.plotState().impedanceSummary ||
+            expectedDriver.isPhaseInverted() != actualDriver.isPhaseInverted() ||
             (compareFullCircuit && expectedDriver.getFullCircuit() != actualDriver.getFullCircuit())) {
             error = QStringLiteral("Parameter round-trip mismatch for driver %1").arg(driverIndex + 1);
             return false;
         }
 
         for (int unitIndex = 1; unitIndex <= KFilterProjectIo::NetworkUnitCount; ++unitIndex) {
-            if (!fuzzyEqual(expectedDriver.getUnit(unitIndex), actualDriver.getUnit(unitIndex))) {
+            if (!fuzzyEqual(NetworkSerializationUtils::value(expectedDriver, unitIndex - 1), NetworkSerializationUtils::value(actualDriver, unitIndex - 1))) {
                 error = QStringLiteral("Network unit mismatch for driver %1, unit %2")
                             .arg(driverIndex + 1)
                             .arg(unitIndex);
@@ -502,7 +510,7 @@ QString createLegacyProject(driver (&drivers)[KFilterProjectIo::DriverCount], bo
     for (int driverIndex = 0; driverIndex < KFilterProjectIo::DriverCount; ++driverIndex) {
         stream << "\n# Driver " << (driverIndex + 1);
         for (int unitIndex = 1; unitIndex <= KFilterProjectIo::NetworkUnitCount; ++unitIndex) {
-            stream << '\n' << drivers[driverIndex].getUnit(unitIndex);
+            stream << '\n' << NetworkSerializationUtils::value(drivers[driverIndex], unitIndex - 1);
         }
     }
 
@@ -514,22 +522,22 @@ QString createLegacyProject(driver (&drivers)[KFilterProjectIo::DriverCount], bo
                << "\nRdc=" << currentDriver.getRdc()
                << "\nLsp=" << currentDriver.getLsp()
                << "\nF0=" << currentDriver.getF0()
-               << "\nQts=" << currentDriver.getQtc()
+               << "\nQts=" << currentDriver.getQts()
                << "\nQe=" << currentDriver.getQes()
                << "\nQms=" << currentDriver.getQms()
                << "\nVas=" << currentDriver.getVas()
                << "\nDm=" << currentDriver.getDm()
-               << "\nVb=" << currentDriver.Vb
-               << "\nFb=" << currentDriver.Fb
-               << "\nV2=" << currentDriver.V2
-               << "\nGTypProposal=" << static_cast<int>(currentDriver.enclosureTypeProposal)
-               << "\nGain=" << currentDriver.gain
-               << "\nPressure=" << (currentDriver.pressureIsActive ? 1 : 0)
-               << "\nImpedanz=" << (currentDriver.impedanceIsActive ? 1 : 0)
-               << "\nSummary=" << (currentDriver.summaryIsActive ? 1 : 0)
-               << "\nScalarSummary=" << (currentDriver.ScalarSummaryisActive ? 1 : 0)
-               << "\nImpedanzSummary=" << (currentDriver.ImpedanceSummaryisActive ? 1 : 0)
-               << "\nInvertPhase=" << (currentDriver.InvertPhase ? 1 : 0)
+               << "\nVb=" << currentDriver.getVb()
+               << "\nFb=" << currentDriver.getFb()
+               << "\nV2=" << currentDriver.getV2()
+               << "\nGTypProposal=" << static_cast<int>(currentDriver.getEnclosureTypeProposal())
+               << "\nGain=" << currentDriver.getGainLinear()
+               << "\nPressure=" << (currentDriver.plotState().pressure ? 1 : 0)
+               << "\nImpedanz=" << (currentDriver.plotState().impedance ? 1 : 0)
+               << "\nSummary=" << (currentDriver.plotState().vectorSummary ? 1 : 0)
+               << "\nScalarSummary=" << (currentDriver.plotState().scalarSummary ? 1 : 0)
+               << "\nImpedanzSummary=" << (currentDriver.plotState().impedanceSummary ? 1 : 0)
+               << "\nInvertPhase=" << (currentDriver.isPhaseInverted() ? 1 : 0)
                << "\nTitle=" << currentDriver.getTitle();
     }
 

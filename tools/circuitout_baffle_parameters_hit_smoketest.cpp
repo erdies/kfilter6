@@ -171,10 +171,10 @@ int main(int argc, char **argv)
     for (int boxType = 0; boxType <= 3; ++boxType) {
         driver enclosureDriver;
         enclosureDriver.setTitle(QStringLiteral("Enclosure %1").arg(boxType));
-        enclosureDriver.Vb = boxType == 0 ? 0.0 : 20.0;
-        enclosureDriver.enclosureTypeProposal = static_cast<EnclosureType>(boxType);
+        enclosureDriver.setVb(boxType == 0 ? 0.0 : 20.0);
+        enclosureDriver.setEnclosureTypeProposal(static_cast<EnclosureType>(boxType));
         if (boxType == 3) {
-            enclosureDriver.V2 = 8.0;
+            enclosureDriver.setV2(8.0);
         }
 
         preview.setDriver(enclosureDriver, 1);

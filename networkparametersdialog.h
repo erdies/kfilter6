@@ -77,7 +77,6 @@ private:
     int findRightmostFreeSectionBlock(QTableWidget *table, int requiredSections) const;
     void clearSectionBlock(QTableWidget *table, int startSection, int sectionCount) const;
 
-    static int unitIndex(int row, int column);
     static double displayFromInternal(int row, double value);
     static double internalFromDisplay(int row, double value);
 

@@ -564,29 +564,30 @@ void DriverParametersDialog::loadPageFromDriver(int index,
     page.rdc->setValue(drv.getRdc());
     page.lspMilliHenry->setValue(drv.getLsp() * 1000.0);
     page.f0->setValue(drv.getF0());
-    page.qts->setValue(drv.getQtc());
+    page.qts->setValue(drv.getQts());
     page.qes->setValue(drv.getQes());
     page.qms->setValue(drv.getQms());
     page.vas->setValue(drv.getVas());
     page.dm->setValue(drv.getDm());
-    page.vb->setValue(drv.Vb);
+    page.vb->setValue(drv.getVb());
     page.ql->setValue(drv.getQl());
-    page.fb->setValue(drv.Fb);
+    page.fb->setValue(drv.getFb());
     page.tubeDiameter->setValue(useTubeDiameterOverride
                                     ? tubeDiameterCm
                                     : settings.value(tubeDiameterSettingsKey(index), 0.0).toDouble());
-    page.v2->setValue(drv.V2);
-    page.gainDb->setValue(linearGainToDb(drv.gain));
+    page.v2->setValue(drv.getV2());
+    page.gainDb->setValue(linearGainToDb(drv.getGainLinear()));
 
-    const int alignmentIndex = page.alignmentProposal->findData(static_cast<int>(drv.enclosureTypeProposal));
+    const int alignmentIndex = page.alignmentProposal->findData(static_cast<int>(drv.getEnclosureTypeProposal()));
     page.alignmentProposal->setCurrentIndex(alignmentIndex >= 0 ? alignmentIndex : 0);
 
-    page.pressureActive->setChecked(drv.pressureIsActive);
-    page.impedanceActive->setChecked(drv.impedanceIsActive);
-    page.summaryActive->setChecked(drv.summaryIsActive);
-    page.scalarSummaryActive->setChecked(drv.ScalarSummaryisActive);
-    page.impedanceSummaryActive->setChecked(drv.ImpedanceSummaryisActive);
-    page.invertPhase->setChecked(drv.InvertPhase);
+    const DriverPlotState& plotState = drv.plotState();
+    page.pressureActive->setChecked(plotState.pressure);
+    page.impedanceActive->setChecked(plotState.impedance);
+    page.summaryActive->setChecked(plotState.vectorSummary);
+    page.scalarSummaryActive->setChecked(plotState.scalarSummary);
+    page.impedanceSummaryActive->setChecked(plotState.impedanceSummary);
+    page.invertPhase->setChecked(drv.isPhaseInverted());
     page.fullCircuit->setChecked(drv.getFullCircuit());
     updateTubeLengthForPage(page);
 
@@ -682,17 +683,17 @@ bool DriverParametersDialog::applyToDrivers(ApplyMode mode, QString *errorMessag
         drv.setRdc(parsed.rdc);
         drv.setLsp(parsed.lspMilliHenry / 1000.0);
         drv.setF0(parsed.f0);
-        drv.setQtc(parsed.qts);
+        drv.setQts(parsed.qts);
         drv.setQes(parsed.qes);
         drv.setQms(parsed.qms);
         drv.setVas(parsed.vas);
         drv.setDm(parsed.dm);
-        drv.Vb = parsed.vb;
+        drv.setVb(parsed.vb);
         drv.setQl(parsed.ql);
-        drv.Fb = parsed.fb;
-        drv.V2 = parsed.v2;
-        drv.enclosureTypeProposal = static_cast<EnclosureType>(parsed.alignmentProposal);
-        drv.gain = dbToLinearGain(parsed.gainDb);
+        drv.setFb(parsed.fb);
+        drv.setV2(parsed.v2);
+        drv.setEnclosureTypeProposal(static_cast<EnclosureType>(parsed.alignmentProposal));
+        drv.setGainLinear(dbToLinearGain(parsed.gainDb));
 
         if (mode == ApplyMode::Commit) {
             if (parsed.tubeDiameterCm > 0.0) {
@@ -702,16 +703,14 @@ bool DriverParametersDialog::applyToDrivers(ApplyMode mode, QString *errorMessag
             }
         }
 
-        drv.pressureIsActive = parsed.pressureActive;
-        drv.impedanceIsActive = parsed.impedanceActive;
-        drv.summaryIsActive = parsed.summaryActive;
-        drv.ScalarSummaryisActive = parsed.scalarSummaryActive;
-        drv.ImpedanceSummaryisActive = parsed.impedanceSummaryActive;
-        drv.InvertPhase = parsed.invertPhase;
+        drv.setPlotState(DriverPlotState{parsed.pressureActive,
+                                         parsed.impedanceActive,
+                                         parsed.summaryActive,
+                                         parsed.scalarSummaryActive,
+                                         parsed.impedanceSummaryActive});
+        drv.setPhaseInverted(parsed.invertPhase);
         drv.setFullCircuit(parsed.fullCircuit);
 
-        drv.calculateParameters();
-        drv.setModified();
     }
 
     return true;
@@ -739,7 +738,6 @@ void DriverParametersDialog::restoreCommittedState()
     for (int index = 0; index < KFilterProjectIo::DriverCount; ++index) {
         const std::size_t arrayIndex = static_cast<std::size_t>(index);
         m_drivers[index] = m_committedDrivers[arrayIndex];
-        m_drivers[index].setModified();
         m_document.splCorrectionCurve(index) = m_committedMeasurementCurves[arrayIndex];
         m_document.activeFilterChain(index) = m_committedActiveFilterChains[arrayIndex];
         m_document.baffleSettings(index) = m_committedBaffleSettings[arrayIndex];

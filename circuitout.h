@@ -255,7 +255,7 @@ private:
     int m_driverSnapshotCount = 0;
     bool m_showAllDrivers = false;
 
-    std::array<double, NetworkUnitCount + 1> m_network{}; // 1-based, Unit[0] kept unused like driver::Unit.
+    std::array<double, NetworkUnitCount + 1> m_network{}; // 1-based preview storage used only by the schematic layout.
     QString m_driverTitle;
     int m_driverNumber = 1;
     int m_boxTypeProposal = 0;

@@ -31,30 +31,26 @@
 driver::driver()
 {
 
-	initContents();
+	resetToDefaults();
 }
 
 driver::~driver()
 {
 }
 
-void driver::initContents()
+void driver::resetToDefaults()
 {
 	Rdc=5.1;
 	Lsp=0.00017;
 	F0=307;
-	Qtc=1.14;
+	Qts=1.14;
 	Qms=1.9;
-	Qe=2.87;
+	Qes=2.87;
 	Vas=10;
 	Dm=7.3;
 	gain = 1.0;
-	pressureIsActive=false;
-	impedanceIsActive=false;
-	summaryIsActive=false;
-	ScalarSummaryisActive=false;
-	ImpedanceSummaryisActive=false;
-	InvertPhase=false;
+	plotState_ = {};
+	phaseInverted=false;
 	show_reflex_only=false;
 	Vb=0;
 	V2=0;
@@ -65,14 +61,9 @@ void driver::initContents()
 	pistonLowPassQ=0;
 	pistonLowPassFrequency=0;
 	enclosureTypeProposal = EnclosureType::OpenBaffle;
-	parameterFlag=true;
 	pistonLowPassActive=false;
 	fullCircuitFlag=false;
-	for (int i=0;i<49;i++)
-	{
-		Unit[i]=0;
-	}
-	calibrate = 12.58925412;
+	network = {};
 	m_qstringTitle = "This is a default driver";
 	calculateParameters();
 	setModified();
@@ -88,7 +79,6 @@ void driver::calculateParameters(void)
 {
 	double pi = 3.141592654;
 
-	parameterFlag = true;
 
 	if (F0!=0)
 	{
@@ -100,9 +90,9 @@ void driver::calculateParameters(void)
 		// the driver's radiation resistance. The simplified model uses the
 		// separate 0 dB-normalized pistonLowPassInductance/pistonLowPassCapacitance approximation instead.
 		radiationCapacitance=1/(2*pi*34000/Dm);
-		motionalResistance=Qms*Rdc/Qe;
-		motionalCapacitance=Qe/(2*pi*Rdc*F0);
-		motionalInductance=Rdc/(2*pi*Qe*F0);
+		motionalResistance=Qms*Rdc/Qes;
+		motionalCapacitance=Qes/(2*pi*Rdc*F0);
+		motionalInductance=Rdc/(2*pi*Qes*F0);
 		//************************************************************************************************
 		//double ii;
 		//for (int i=99; i>-1; i--)
@@ -117,47 +107,44 @@ void driver::calculateParameters(void)
 
 		if ((Vb==0)||(enclosureTypeProposal==EnclosureType::OpenBaffle))
 		{
-			acousticHighPassCapacitance=Qtc/(2*pi*F0);
-			acousticHighPassInductance=1/(Qtc*2*pi*F0);
-			L2=motionalInductance;
+			acousticHighPassCapacitance=Qts/(2*pi*F0);
+			acousticHighPassInductance=1/(Qts*2*pi*F0);
 			enclosureType=EnclosureType::OpenBaffle;
 		}
 		else
 		{
-			acousticHighPassCapacitance=Qtc/(2*pi*F0);
-			acousticHighPassInductance=1/(2*pi*F0*Qtc*(Vas/Vb+1));
+			acousticHighPassCapacitance=Qts/(2*pi*F0);
+			acousticHighPassInductance=1/(2*pi*F0*Qts*(Vas/Vb+1));
 			enclosureType=EnclosureType::Sealed;
 			//}
 
 			if ((Fb!=0)&&(static_cast<int>(enclosureTypeProposal)>=static_cast<int>(EnclosureType::Vented)))
 			{
 				enclosureType=EnclosureType::Vented;
-				L2=Vb*motionalInductance/Vas;
-				C2=1/( L2*pow((2*pi*Fb),2.0) );
-				R2=(2*pi*Fb*L2/Ql); //R2:=sqrt(C2/L2)/Ql; ?
+				enclosureBranchInductance=Vb*motionalInductance/Vas;
+				enclosureBranchCapacitance=1/( enclosureBranchInductance*pow((2*pi*Fb),2.0) );
+				enclosureBranchResistance=(2*pi*Fb*enclosureBranchInductance/Ql); // Legacy source questioned an alternative formula here: sqrt(C/L)/Ql; ?
 				ventedDenominatorA0=pow((Fb/F0),2.0);
-				ventedDenominatorA1=ventedDenominatorA0/Qtc + Fb/(Ql*F0);
-				ventedDenominatorA2=1 + ventedDenominatorA0 + Fb/(Ql*F0*Qtc) + Vas/Vb;
-				ventedDenominatorA3=1/Qtc + Fb/(Ql*F0);
+				ventedDenominatorA1=ventedDenominatorA0/Qts + Fb/(Ql*F0);
+				ventedDenominatorA2=1 + ventedDenominatorA0 + Fb/(Ql*F0*Qts) + Vas/Vb;
+				ventedDenominatorA3=1/Qts + Fb/(Ql*F0);
 				if ((V2!=0)&&(static_cast<int>(enclosureTypeProposal)>=static_cast<int>(EnclosureType::Bandpass)))
 				{
 					enclosureType=EnclosureType::Bandpass;
-					L2=Vb*motionalInductance/Vas;
+					// Preserve the historical recalculation before applying the V2
+					// modification to the motional branch.
+					enclosureBranchInductance=Vb*motionalInductance/Vas;
 					motionalInductance=1/(1/motionalInductance+Vas/(V2*motionalInductance));
 				}
 			}
 			else         // -> Fb ist jetzt gleich Null s.o.
 			{
 				enclosureType=EnclosureType::Sealed;
-				L2=1/(1/motionalInductance+Vas/(Vb*motionalInductance));
+				sealedEffectiveMotionalInductance=1/(1/motionalInductance+Vas/(Vb*motionalInductance));
 			}
 		}			//Vb==0
 	}
 	//if f0 != 0
-	else
-	{
-		parameterFlag = false;
-	}
 
 	// Historical 0 dB-normalized approximation of the natural upper roll-off
 	// of an ideal piston radiator. pistonLowPassQ/pistonLowPassFrequency currently have no
@@ -174,7 +161,9 @@ void driver::calculateParameters(void)
 		pistonLowPassActive = false;
 	}
 
-	Norm=sqrt(8/Rdc)*calibrate * sqrt(2.0);  //{/sqrt(1 + 1/Qms )}
+	// Preserve the historical full-circuit normalization exactly. The calibration
+	// gain is numerically about +22 dB; its original absolute reference is unknown.
+	fullCircuitNormalizationFactor=sqrt(8/Rdc)*LegacyFullCircuitCalibrationGain * sqrt(2.0);  //{/sqrt(1 + 1/Qms )}
 
 }
 
@@ -184,26 +173,26 @@ void driver::calculatePressureResponse(void)
 	{
 		calculateParameters();
 		double omega = 125.6637061;
-		for (std::size_t sampleIndex=0; sampleIndex<ResultPressure.size(); ++sampleIndex)
+		for (std::size_t sampleIndex=0; sampleIndex<resultPressure.size(); ++sampleIndex)
 		{
-			int sectionOffset = findLastNetworkSectionOffset()+1;
+			const int lastSectionIndex = findLastNetworkSectionIndex();
 			std::complex<double> response{1.0, 0.0};
 			std::complex<double> networkImpedance = calculateEquivalentCircuit(omega);
-			while (sectionOffset > 1)
+			for (int sectionIndex = lastSectionIndex; sectionIndex >= 0; --sectionIndex)
 			{
-				sectionOffset = sectionOffset-6;
-				calculateParallelBranch(networkImpedance, omega, sectionOffset);
+				const NetworkSection& section = network[static_cast<std::size_t>(sectionIndex)];
+				calculateParallelBranch(networkImpedance, omega, section.parallel);
 				const std::complex<double> terminationImpedance = networkImpedance;
-				calculateSeriesBranch(networkImpedance, omega, sectionOffset);
+				calculateSeriesBranch(networkImpedance, omega, section.series);
 				response *= terminationImpedance / networkImpedance;
 			}
-			if (parameterFlag)
+			if (F0 != 0)
 			{
 				calculateAcousticResponse(response, omega);
 			}
 			//berechneaktivefilter;
 			//ausgleichberechnen;
-			ResultPressure[sampleIndex] = (InvertPhase ? -response : response) * gain;
+			resultPressure[sampleIndex] = (phaseInverted ? -response : response) * gain;
 			omega = omega*KFilterFrequencyStep;
 		}
 		dirty_pressure = false;
@@ -216,17 +205,17 @@ void driver::calculateImpedanceResponse(void)
 	{
 		calculateParameters();
 		double omega = 125.6637061;
-		for (std::size_t sampleIndex=0; sampleIndex<ResultImpedance.size(); ++sampleIndex)
+		for (std::size_t sampleIndex=0; sampleIndex<resultImpedance.size(); ++sampleIndex)
 		{
-			int sectionOffset = findLastNetworkSectionOffset()+1;
+			const int lastSectionIndex = findLastNetworkSectionIndex();
 			std::complex<double> networkImpedance = calculateEquivalentCircuit(omega);
-			while (sectionOffset > 1)
+			for (int sectionIndex = lastSectionIndex; sectionIndex >= 0; --sectionIndex)
 			{
-				sectionOffset = sectionOffset-6;
-				calculateParallelBranch(networkImpedance, omega, sectionOffset);
-				calculateSeriesBranch(networkImpedance, omega, sectionOffset);
+				const NetworkSection& section = network[static_cast<std::size_t>(sectionIndex)];
+				calculateParallelBranch(networkImpedance, omega, section.parallel);
+				calculateSeriesBranch(networkImpedance, omega, section.series);
 			}
-			ResultImpedance[sampleIndex] = networkImpedance;
+			resultImpedance[sampleIndex] = networkImpedance;
 			omega=omega*KFilterFrequencyStep;
 		}
 		dirty_impedance = false;
@@ -235,7 +224,7 @@ void driver::calculateImpedanceResponse(void)
 
 std::complex<double> driver::calculateEquivalentCircuit(double omega)
 {
-	if (!parameterFlag)
+	if (F0 == 0)
 	{
 		return {Rdc, omega * Lsp};
 	}
@@ -245,12 +234,12 @@ std::complex<double> driver::calculateEquivalentCircuit(double omega)
 	switch (enclosureType)
 	{
 	case EnclosureType::Sealed :
-		admittance = {1/motionalResistance, omega*motionalCapacitance-1/(omega*L2)};
+		admittance = {1/motionalResistance, omega*motionalCapacitance-1/(omega*sealedEffectiveMotionalInductance)};
 		break;
 	case EnclosureType::Vented : case EnclosureType::Bandpass :
 		{
 			admittance = {1/motionalResistance, omega*motionalCapacitance-1/(omega*motionalInductance)};
-			const std::complex<double> branchImpedance{R2, omega*L2-1/(omega*C2)};
+			const std::complex<double> branchImpedance{enclosureBranchResistance, omega*enclosureBranchInductance-1/(omega*enclosureBranchCapacitance)};
 			admittance += 1.0 / branchImpedance;
 			break;
 		}
@@ -298,13 +287,13 @@ void driver::calculateAcousticResponse(std::complex<double>& response, double om
 
 				  //********************************************************************************test
 
-				  terminationImpedance = 1.0 / std::complex<double>{1/motionalResistance, omega*motionalCapacitance-1/(omega*L2)};
+				  terminationImpedance = 1.0 / std::complex<double>{1/motionalResistance, omega*motionalCapacitance-1/(omega*motionalInductance)};
 				  networkImpedance = terminationImpedance + std::complex<double>{Rdc, omega*Lsp};
 				  response *= terminationImpedance / networkImpedance;
 				  terminationImpedance = {1.0, 0.0};
 				  networkImpedance = {1.0, -1/(omega*radiationCapacitance)};
 				  response *= terminationImpedance / networkImpedance; //Strahlungswiederstand
-				  response *= Norm;
+				  response *= fullCircuitNormalizationFactor;
 			  }
 		else
 		{
@@ -320,13 +309,13 @@ void driver::calculateAcousticResponse(std::complex<double>& response, double om
 	case EnclosureType::Sealed :  if (fullCircuitFlag)
 			  {
 
-				  terminationImpedance = 1.0 / std::complex<double>{1/motionalResistance, omega*motionalCapacitance-1/(omega*L2)};
+				  terminationImpedance = 1.0 / std::complex<double>{1/motionalResistance, omega*motionalCapacitance-1/(omega*sealedEffectiveMotionalInductance)};
 				  networkImpedance = terminationImpedance + std::complex<double>{Rdc, omega*Lsp};
 				  response *= terminationImpedance / networkImpedance;
 				  terminationImpedance = {1.0, 0.0};
 				  networkImpedance = {1.0, -1/(omega*radiationCapacitance)};
 				  response *= terminationImpedance / networkImpedance; //Strahlungswiederstand
-				  response *= Norm;
+				  response *= fullCircuitNormalizationFactor;
 			  }
 		else
 		{
@@ -342,8 +331,8 @@ void driver::calculateAcousticResponse(std::complex<double>& response, double om
 	case EnclosureType::Vented :
 		if (fullCircuitFlag)
 		{
-			terminationImpedance = {0.0, omega*L2};
-			networkImpedance = {R2, omega*L2-1/(omega*C2)};
+			terminationImpedance = {0.0, omega*enclosureBranchInductance};
+			networkImpedance = {enclosureBranchResistance, omega*enclosureBranchInductance-1/(omega*enclosureBranchCapacitance)};
 			response *= terminationImpedance / networkImpedance;
 			networkImpedance = 1.0 / networkImpedance;
 			terminationImpedance = networkImpedance + std::complex<double>{1/motionalResistance, omega*motionalCapacitance-1/(omega*motionalInductance)};
@@ -353,7 +342,7 @@ void driver::calculateAcousticResponse(std::complex<double>& response, double om
 			terminationImpedance = {1.0, 0.0};
 			networkImpedance = {1.0, -1/(omega*radiationCapacitance)};
 			response *= terminationImpedance / networkImpedance; //Strahlungswiederstand
-			response *= Norm;
+			response *= fullCircuitNormalizationFactor;
 		}
 		else
 		{
@@ -367,8 +356,8 @@ void driver::calculateAcousticResponse(std::complex<double>& response, double om
 			}
 			else
 			{
-				terminationImpedance = {0.0, -1/(omega*C2)};
-				networkImpedance = {R2, -1/(omega*C2)+omega*L2};
+				terminationImpedance = {0.0, -1/(omega*enclosureBranchCapacitance)};
+				networkImpedance = {enclosureBranchResistance, -1/(omega*enclosureBranchCapacitance)+omega*enclosureBranchInductance};
 				response *= terminationImpedance / networkImpedance;
 				networkImpedance = 1.0 / networkImpedance;
 				terminationImpedance = networkImpedance + std::complex<double>{1/motionalResistance, omega*motionalCapacitance-1/(omega*motionalInductance)};
@@ -378,14 +367,14 @@ void driver::calculateAcousticResponse(std::complex<double>& response, double om
 				terminationImpedance = {1.0, 0.0};
 				networkImpedance = {1.0, -1/(omega*radiationCapacitance)};
 				response *= terminationImpedance / networkImpedance; //Strahlungswiederstand
-				response *= Norm;
+				response *= fullCircuitNormalizationFactor;
 			}
 		}
 		break;
 	case EnclosureType::Bandpass :
 		{
-			terminationImpedance = {0.0, -1/(omega*C2)};
-			networkImpedance = {R2, -1/(omega*C2)+omega*L2};
+			terminationImpedance = {0.0, -1/(omega*enclosureBranchCapacitance)};
+			networkImpedance = {enclosureBranchResistance, -1/(omega*enclosureBranchCapacitance)+omega*enclosureBranchInductance};
 			response *= terminationImpedance / networkImpedance;
 			networkImpedance = 1.0 / networkImpedance;
 			terminationImpedance = networkImpedance + std::complex<double>{1/motionalResistance, omega*motionalCapacitance-1/(omega*motionalInductance)};
@@ -395,40 +384,39 @@ void driver::calculateAcousticResponse(std::complex<double>& response, double om
 			terminationImpedance = {1.0, 0.0};
 			networkImpedance = {1.0, -1/(omega*radiationCapacitance)};
 			response *= terminationImpedance / networkImpedance; //Strahlungswiederstand
-			response *= Norm;
+			response *= fullCircuitNormalizationFactor;
 		}
 	}       //switch
 }
 
-int driver::findLastNetworkSectionOffset(void)
+int driver::findLastNetworkSectionIndex(void) const
 {
-	for (int j=48;j>=0;j--)
+	for (int sectionIndex = static_cast<int>(network.size()) - 1; sectionIndex >= 0; --sectionIndex)
 	{
-		if (Unit[j]!=0.0)
+		const NetworkSection& section = network[static_cast<std::size_t>(sectionIndex)];
+		if (section.series.resistance != 0.0 ||
+			section.series.capacitance != 0.0 ||
+			section.series.inductance != 0.0 ||
+			section.parallel.resistance != 0.0 ||
+			section.parallel.capacitance != 0.0 ||
+			section.parallel.inductance != 0.0)
 		{
-			if (fmod(j,6)<0.00001)
-			{
-				return j;
-			}
-			else
-			{
-				return  int(j/6)*6 +6;
-			}
+			return sectionIndex;
 		}
 	}
-	return 0;
+	return -1;
 }
 
-void driver::calculateParallelBranch(std::complex<double>& networkImpedance, double omega, int sectionOffset)
+void driver::calculateParallelBranch(std::complex<double>& networkImpedance, double omega, const NetworkBranch& branch)
 {
 	std::complex<double> branchImpedance;
 
-	const double resistance = Unit[sectionOffset+3];
-	if (Unit[sectionOffset+4]==0)
+	const double resistance = branch.resistance;
+	if (branch.capacitance==0)
 	{
-		if (Unit[sectionOffset+5]==0)
+		if (branch.inductance==0)
 		{
-			if (Unit[sectionOffset+3]==0)
+			if (branch.resistance==0)
 			{
 				return;
 			}
@@ -439,65 +427,77 @@ void driver::calculateParallelBranch(std::complex<double>& networkImpedance, dou
 		}
 		else
 		{
-			branchImpedance = {resistance, omega*Unit[sectionOffset+5]};
+			branchImpedance = {resistance, omega*branch.inductance};
 		}
 	}
 	else
 	{
-		if (Unit[sectionOffset+5]==0)
+		if (branch.inductance==0)
 		{
-			branchImpedance = {resistance, -1/(omega*Unit[sectionOffset+4])};
+			branchImpedance = {resistance, -1/(omega*branch.capacitance)};
 		}
 		else
 		{
-			branchImpedance = {resistance, omega*Unit[sectionOffset+5] - 1/(omega*Unit[sectionOffset+4])};
+			branchImpedance = {resistance, omega*branch.inductance - 1/(omega*branch.capacitance)};
 		}
 	}
 	networkImpedance = 1.0 / (1.0 / networkImpedance + 1.0 / branchImpedance);
 }
 
-void driver::calculateSeriesBranch(std::complex<double>& networkImpedance, double omega, int sectionOffset)
+void driver::calculateSeriesBranch(std::complex<double>& networkImpedance, double omega, const NetworkBranch& branch)
 {
-	if (Unit[sectionOffset+1]==0)
+	if (branch.capacitance==0)
 	{
-		if (Unit[sectionOffset+2]==0)
+		if (branch.inductance==0)
 		{
-			networkImpedance += std::complex<double>{Unit[sectionOffset], 0.0};
+			networkImpedance += std::complex<double>{branch.resistance, 0.0};
 		}
 		else
 		{
-			networkImpedance += std::complex<double>{Unit[sectionOffset], omega*Unit[sectionOffset+2]};
+			networkImpedance += std::complex<double>{branch.resistance, omega*branch.inductance};
 		}
 	}
 	else
 	{
 		double susceptance;
-		if (Unit[sectionOffset+2]==0)
+		if (branch.inductance==0)
 		{
-			susceptance = omega*Unit[sectionOffset+1];
+			susceptance = omega*branch.capacitance;
 		}
 		else
 		{
-			susceptance = omega*Unit[sectionOffset+1] - 1/(omega*Unit[sectionOffset+2]);
+			susceptance = omega*branch.capacitance - 1/(omega*branch.inductance);
 		}
-		if (Unit[sectionOffset]==0)
+		if (branch.resistance==0)
 		{
 			networkImpedance += std::complex<double>{0.0, -1/susceptance};
 		}
 		else
 		{
-			const std::complex<double> branchAdmittance{1/Unit[sectionOffset], susceptance};
+			const std::complex<double> branchAdmittance{1/branch.resistance, susceptance};
 			networkImpedance += 1.0 / branchAdmittance;
 		}
 	}
 }
 
-void driver::invertImpedance(void)
+const driver::ResponseArray& driver::pressureResponse() const
 {
-	for (std::complex<double>& impedance : ResultImpedance)
-	{
-		impedance = 1.0 / impedance;
-	}
+	return resultPressure;
+}
+
+const driver::ResponseArray& driver::impedanceResponse() const
+{
+	return resultImpedance;
+}
+
+const DriverPlotState& driver::plotState() const
+{
+	return plotState_;
+}
+
+void driver::setPlotState(const DriverPlotState& state)
+{
+	plotState_ = state;
 }
 
 QString driver::getTitle() const
@@ -524,14 +524,14 @@ void driver::setF0(double f0){
 F0 = f0;
 setModified();
 }
-/** Sets Qtc value */
-void driver::setQtc(double qtc){
-Qtc = qtc;
+/** Sets total driver Q (Qts). */
+void driver::setQts(double qts){
+Qts = qts;
 setModified();
 }
 /** Sets Qes value */
 void driver::setQes(double qes){
-Qe = qes;
+Qes = qes;
 setModified();
 }
 /** Sets the full circuit flag */
@@ -558,9 +558,39 @@ void driver::setDm(double dm){
 Dm = dm;
 setModified();
 }
+/** Sets Vb value */
+void driver::setVb(double vb){
+Vb = vb;
+setModified();
+}
+/** Sets Fb value */
+void driver::setFb(double fb){
+Fb = fb;
+setModified();
+}
 /** Sets Ql value */
 void driver::setQl(double ql){
 Ql = ql;
+setModified();
+}
+/** Sets V2 value */
+void driver::setV2(double v2){
+V2 = v2;
+setModified();
+}
+/** Sets linear gain value */
+void driver::setGainLinear(double linearGain){
+gain = linearGain;
+setModified();
+}
+/** Sets pressure-response phase inversion (polarity reversal). */
+void driver::setPhaseInverted(bool inverted){
+phaseInverted = inverted;
+setModified();
+}
+/** Sets requested enclosure alignment. */
+void driver::setEnclosureTypeProposal(EnclosureType type){
+enclosureTypeProposal = type;
 setModified();
 }
 /** No descriptions */
@@ -576,12 +606,12 @@ double driver::getF0() const{
 return F0;
 }
 /** No descriptions */
-double driver::getQtc() const{
-return Qtc;
+double driver::getQts() const{
+return Qts;
 }
 /** No descriptions */
 double driver::getQes() const{
-return Qe;
+return Qes;
 }
 /** No descriptions */
 double driver::getQms() const{
@@ -595,30 +625,118 @@ return Vas;
 double driver::getDm() const{
 return Dm;
 }
+/** Gets Vb value */
+double driver::getVb() const{
+return Vb;
+}
+/** Gets Fb value */
+double driver::getFb() const{
+return Fb;
+}
 /** Gets Ql value */
 double driver::getQl() const{
 return Ql;
 }
+/** Gets V2 value */
+double driver::getV2() const{
+return V2;
+}
+/** Gets linear gain value */
+double driver::getGainLinear() const{
+return gain;
+}
+/** Returns pressure-response phase inversion state. */
+bool driver::isPhaseInverted() const{
+return phaseInverted;
+}
+/** Returns requested enclosure alignment. */
+EnclosureType driver::getEnclosureTypeProposal() const{
+return enclosureTypeProposal;
+}
 
-/** Sets network units values */
-void driver::setUnit(int unit, double val){
-if ((unit>-1)&&(unit<49))
+driver::NetworkBranch* driver::networkBranch(int sectionIndex, NetworkBranchType branch)
+{
+	if (sectionIndex < 0 || sectionIndex >= static_cast<int>(NetworkSectionCount))
 	{
-	Unit[unit] = val;
-  this->setModified();
+		return nullptr;
 	}
+
+	NetworkSection& section = network[static_cast<std::size_t>(sectionIndex)];
+	switch (branch)
+	{
+	case NetworkBranchType::Series:
+		return &section.series;
+	case NetworkBranchType::Shunt:
+		return &section.parallel;
+	}
+	return nullptr;
 }
 
-/** No descriptions */
-double driver::getUnit(int unit) const{
-	if ((unit>-1)&&(unit<49))
-	return Unit[unit]; else
-	return -1;
+const driver::NetworkBranch* driver::networkBranch(int sectionIndex, NetworkBranchType branch) const
+{
+	if (sectionIndex < 0 || sectionIndex >= static_cast<int>(NetworkSectionCount))
+	{
+		return nullptr;
+	}
+
+	const NetworkSection& section = network[static_cast<std::size_t>(sectionIndex)];
+	switch (branch)
+	{
+	case NetworkBranchType::Series:
+		return &section.series;
+	case NetworkBranchType::Shunt:
+		return &section.parallel;
+	}
+	return nullptr;
 }
 
-void driver::cleanupNetwork(void){
-	for ( int intI = 0; intI < 49; intI++ )
-		Unit[intI] = 0;
+void driver::setNetworkValue(int sectionIndex,
+                             NetworkBranchType branch,
+                             NetworkComponent component,
+                             double value)
+{
+	NetworkBranch* selectedBranch = networkBranch(sectionIndex, branch);
+	if (selectedBranch == nullptr)
+	{
+		return;
+	}
+
+	switch (component)
+	{
+	case NetworkComponent::Resistance:
+		selectedBranch->resistance = value;
+		break;
+	case NetworkComponent::Capacitance:
+		selectedBranch->capacitance = value;
+		break;
+	case NetworkComponent::Inductance:
+		selectedBranch->inductance = value;
+		break;
+	default:
+		return;
+	}
 	setModified();
+}
+
+double driver::getNetworkValue(int sectionIndex,
+                               NetworkBranchType branch,
+                               NetworkComponent component) const
+{
+	const NetworkBranch* selectedBranch = networkBranch(sectionIndex, branch);
+	if (selectedBranch == nullptr)
+	{
+		return -1.0;
+	}
+
+	switch (component)
+	{
+	case NetworkComponent::Resistance:
+		return selectedBranch->resistance;
+	case NetworkComponent::Capacitance:
+		return selectedBranch->capacitance;
+	case NetworkComponent::Inductance:
+		return selectedBranch->inductance;
+	}
+	return -1.0;
 }
 

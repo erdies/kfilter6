@@ -102,6 +102,24 @@ enum NetworkRow
     RowShuntL = 5
 };
 
+NetworkBranchType branchForRow(int row)
+{
+    return row < 3 ? NetworkBranchType::Series : NetworkBranchType::Shunt;
+}
+
+NetworkComponent componentForRow(int row)
+{
+    switch (row % 3) {
+    case 0:
+        return NetworkComponent::Resistance;
+    case 1:
+        return NetworkComponent::Capacitance;
+    case 2:
+        return NetworkComponent::Inductance;
+    }
+    return NetworkComponent::Resistance;
+}
+
 constexpr double Pi = 3.14159265358979323846;
 
 std::array<double, 4> butterworthSinglyTerminatedLowPassCoefficients(int order)
@@ -288,7 +306,7 @@ void NetworkParametersDialog::loadFromDrivers()
 
         for (int row = 0; row < NetworkRowsPerSection; ++row) {
             for (int column = 0; column < NetworkSectionCount; ++column) {
-                const double internalValue = drv.getUnit(unitIndex(row, column));
+                const double internalValue = drv.getNetworkValue(column, branchForRow(row), componentForRow(row));
                 setCellValue(table, row, column, displayFromInternal(row, internalValue));
             }
         }
@@ -325,11 +343,12 @@ bool NetworkParametersDialog::applyToDrivers()
         driver& drv = m_drivers[driverIndex];
         for (int row = 0; row < NetworkRowsPerSection; ++row) {
             for (int column = 0; column < NetworkSectionCount; ++column) {
-                drv.setUnit(unitIndex(row, column), internalFromDisplay(row, displayValues[driverIndex][row][column]));
+                drv.setNetworkValue(column,
+                                    branchForRow(row),
+                                    componentForRow(row),
+                                    internalFromDisplay(row, displayValues[driverIndex][row][column]));
             }
         }
-        drv.calculateParameters();
-        drv.setModified();
     }
 
     return true;
@@ -655,11 +674,6 @@ void NetworkParametersDialog::setCellValue(QTableWidget *table, int row, int col
     }
     item->setText(displayNumber(value));
     item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-}
-
-int NetworkParametersDialog::unitIndex(int row, int column)
-{
-    return column * NetworkRowsPerSection + row + 1;
 }
 
 double NetworkParametersDialog::displayFromInternal(int row, double value)

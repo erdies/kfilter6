@@ -12,12 +12,13 @@
 #include <QString>
 #include <QUrl>
 
+#include "driver.h"
+
 #include <array>
 
 class QAction;
 class QActionGroup;
 class CircuitOut;
-class driver;
 class QDragEnterEvent;
 class QDragMoveEvent;
 class QDropEvent;
@@ -137,11 +138,7 @@ private:
     struct DriverPlotVisibilityMemory
     {
         bool valid = false;
-        bool pressure = false;
-        bool impedance = false;
-        bool vectorSum = false;
-        bool scalarSum = false;
-        bool impedanceSum = false;
+        DriverPlotState state;
     };
 
     KFilterDoc *m_doc = nullptr;

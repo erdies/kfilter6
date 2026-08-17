@@ -6,6 +6,7 @@
 
 #include "kfilterdriverio.h"
 #include "kfilterdoc.h"
+#include "networkserializationutils.h"
 
 #include <QCoreApplication>
 #include <QFile>
@@ -19,6 +20,13 @@
 
 namespace
 {
+void setPlotFlag(driver& drv, bool DriverPlotState::*member, bool value)
+{
+    DriverPlotState state = drv.plotState();
+    state.*member = value;
+    drv.setPlotState(state);
+}
+
 bool fuzzyEqual(double left, double right)
 {
     return std::abs(left - right) < 0.000001;
@@ -30,30 +38,30 @@ bool compareDriver(const driver& expected, const driver& actual, QString& error)
         !fuzzyEqual(expected.getRdc(), actual.getRdc()) ||
         !fuzzyEqual(expected.getLsp(), actual.getLsp()) ||
         !fuzzyEqual(expected.getF0(), actual.getF0()) ||
-        !fuzzyEqual(expected.getQtc(), actual.getQtc()) ||
+        !fuzzyEqual(expected.getQts(), actual.getQts()) ||
         !fuzzyEqual(expected.getQes(), actual.getQes()) ||
         !fuzzyEqual(expected.getQms(), actual.getQms()) ||
         !fuzzyEqual(expected.getVas(), actual.getVas()) ||
         !fuzzyEqual(expected.getDm(), actual.getDm()) ||
-        !fuzzyEqual(expected.Vb, actual.Vb) ||
+        !fuzzyEqual(expected.getVb(), actual.getVb()) ||
         !fuzzyEqual(expected.getQl(), actual.getQl()) ||
-        !fuzzyEqual(expected.Fb, actual.Fb) ||
-        !fuzzyEqual(expected.V2, actual.V2) ||
-        expected.enclosureTypeProposal != actual.enclosureTypeProposal ||
-        !fuzzyEqual(expected.gain, actual.gain) ||
-        expected.pressureIsActive != actual.pressureIsActive ||
-        expected.impedanceIsActive != actual.impedanceIsActive ||
-        expected.summaryIsActive != actual.summaryIsActive ||
-        expected.ScalarSummaryisActive != actual.ScalarSummaryisActive ||
-        expected.ImpedanceSummaryisActive != actual.ImpedanceSummaryisActive ||
-        expected.InvertPhase != actual.InvertPhase ||
+        !fuzzyEqual(expected.getFb(), actual.getFb()) ||
+        !fuzzyEqual(expected.getV2(), actual.getV2()) ||
+        expected.getEnclosureTypeProposal() != actual.getEnclosureTypeProposal() ||
+        !fuzzyEqual(expected.getGainLinear(), actual.getGainLinear()) ||
+        expected.plotState().pressure != actual.plotState().pressure ||
+        expected.plotState().impedance != actual.plotState().impedance ||
+        expected.plotState().vectorSummary != actual.plotState().vectorSummary ||
+        expected.plotState().scalarSummary != actual.plotState().scalarSummary ||
+        expected.plotState().impedanceSummary != actual.plotState().impedanceSummary ||
+        expected.isPhaseInverted() != actual.isPhaseInverted() ||
         expected.getFullCircuit() != actual.getFullCircuit()) {
         error = QStringLiteral("Driver parameter round-trip mismatch.");
         return false;
     }
 
     for (int unitIndex = 1; unitIndex <= KFilterDriverIo::NetworkUnitCount; ++unitIndex) {
-        if (!fuzzyEqual(expected.getUnit(unitIndex), actual.getUnit(unitIndex))) {
+        if (!fuzzyEqual(NetworkSerializationUtils::value(expected, unitIndex - 1), NetworkSerializationUtils::value(actual, unitIndex - 1))) {
             error = QStringLiteral("Network round-trip mismatch at unit %1.").arg(unitIndex);
             return false;
         }
@@ -172,26 +180,26 @@ void populateSlot(KFilterDriverIo::DriverSlot& slot)
     slot.driverData.setRdc(5.85);
     slot.driverData.setLsp(0.00073);
     slot.driverData.setF0(41.5);
-    slot.driverData.setQtc(0.39);
+    slot.driverData.setQts(0.39);
     slot.driverData.setQes(0.42);
     slot.driverData.setQms(5.6);
     slot.driverData.setVas(47.2);
     slot.driverData.setDm(16.8);
-    slot.driverData.Vb = 28.0;
+    slot.driverData.setVb(28.0);
     slot.driverData.setQl(7.0);
-    slot.driverData.Fb = 36.0;
-    slot.driverData.V2 = 3.5;
-    slot.driverData.enclosureTypeProposal = EnclosureType::Vented;
-    slot.driverData.gain = 1.125;
-    slot.driverData.pressureIsActive = true;
-    slot.driverData.impedanceIsActive = false;
-    slot.driverData.summaryIsActive = true;
-    slot.driverData.ScalarSummaryisActive = false;
-    slot.driverData.ImpedanceSummaryisActive = true;
-    slot.driverData.InvertPhase = true;
+    slot.driverData.setFb(36.0);
+    slot.driverData.setV2(3.5);
+    slot.driverData.setEnclosureTypeProposal(EnclosureType::Vented);
+    slot.driverData.setGainLinear(1.125);
+    setPlotFlag(slot.driverData, &DriverPlotState::pressure, true);
+    setPlotFlag(slot.driverData, &DriverPlotState::impedance, false);
+    setPlotFlag(slot.driverData, &DriverPlotState::vectorSummary, true);
+    setPlotFlag(slot.driverData, &DriverPlotState::scalarSummary, false);
+    setPlotFlag(slot.driverData, &DriverPlotState::impedanceSummary, true);
+    slot.driverData.setPhaseInverted(true);
     slot.driverData.setFullCircuit(true);
     for (int unitIndex = 1; unitIndex <= KFilterDriverIo::NetworkUnitCount; ++unitIndex) {
-        slot.driverData.setUnit(unitIndex, 0.25 * unitIndex);
+        NetworkSerializationUtils::setValue(slot.driverData, unitIndex - 1, 0.25 * unitIndex);
     }
 
     slot.measurementCurve.appendPoint(80.0, -2.25);

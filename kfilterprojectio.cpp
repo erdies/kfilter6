@@ -6,6 +6,8 @@
 
 #include "kfilterprojectio.h"
 
+#include "networkserializationutils.h"
+
 #include <QByteArray>
 #include <QFile>
 #include <QJsonArray>
@@ -111,7 +113,7 @@ bool parseNetworkValues(const QStringList& lines,
                 return false;
             }
 
-            drivers[driverIndex].setUnit(unitIndex, value);
+            NetworkSerializationUtils::setValue(drivers[driverIndex], unitIndex - 1, value);
         }
     }
 
@@ -149,6 +151,8 @@ bool parseDriverParameters(const QStringList& lines,
         int intValue = 0;
         int enclosureTypeProposalValue = 0;
         bool boolValue = false;
+        bool invertPhaseValue = false;
+        DriverPlotState plotState;
 
 #define READ_DOUBLE_FIELD(fieldName, setterCall) \
         if (!readRequiredDataLine(lines, index, line, QStringLiteral(fieldName), driverNumber, errorMessage) || \
@@ -186,23 +190,25 @@ bool parseDriverParameters(const QStringList& lines,
         READ_DOUBLE_FIELD("Rdc", currentDriver.setRdc(doubleValue));
         READ_DOUBLE_FIELD("Lsp", currentDriver.setLsp(doubleValue));
         READ_DOUBLE_FIELD("F0", currentDriver.setF0(doubleValue));
-        READ_DOUBLE_FIELD("Qts", currentDriver.setQtc(doubleValue));
+        READ_DOUBLE_FIELD("Qts", currentDriver.setQts(doubleValue));
         READ_DOUBLE_FIELD("Qe", currentDriver.setQes(doubleValue));
         READ_DOUBLE_FIELD("Qms", currentDriver.setQms(doubleValue));
         READ_DOUBLE_FIELD("Vas", currentDriver.setVas(doubleValue));
         READ_DOUBLE_FIELD("Dm", currentDriver.setDm(doubleValue));
-        READ_DOUBLE_FIELD("Vb", currentDriver.Vb = doubleValue);
-        READ_DOUBLE_FIELD("Fb", currentDriver.Fb = doubleValue);
-        READ_DOUBLE_FIELD("V2", currentDriver.V2 = doubleValue);
+        READ_DOUBLE_FIELD("Vb", currentDriver.setVb(doubleValue));
+        READ_DOUBLE_FIELD("Fb", currentDriver.setFb(doubleValue));
+        READ_DOUBLE_FIELD("V2", currentDriver.setV2(doubleValue));
         READ_INT_FIELD("GTypProposal", enclosureTypeProposalValue);
-        currentDriver.enclosureTypeProposal = static_cast<EnclosureType>(enclosureTypeProposalValue);
-        READ_DOUBLE_FIELD("Gain", currentDriver.gain = doubleValue);
-        READ_BOOL_FIELD("Pressure", currentDriver.pressureIsActive);
-        READ_BOOL_FIELD("Impedanz", currentDriver.impedanceIsActive);
-        READ_BOOL_FIELD("Summary", currentDriver.summaryIsActive);
-        READ_BOOL_FIELD("ScalarSummary", currentDriver.ScalarSummaryisActive);
-        READ_BOOL_FIELD("ImpedanzSummary", currentDriver.ImpedanceSummaryisActive);
-        READ_BOOL_FIELD("InvertPhase", currentDriver.InvertPhase);
+        currentDriver.setEnclosureTypeProposal(static_cast<EnclosureType>(enclosureTypeProposalValue));
+        READ_DOUBLE_FIELD("Gain", currentDriver.setGainLinear(doubleValue));
+        READ_BOOL_FIELD("Pressure", plotState.pressure);
+        READ_BOOL_FIELD("Impedanz", plotState.impedance);
+        READ_BOOL_FIELD("Summary", plotState.vectorSummary);
+        READ_BOOL_FIELD("ScalarSummary", plotState.scalarSummary);
+        READ_BOOL_FIELD("ImpedanzSummary", plotState.impedanceSummary);
+        currentDriver.setPlotState(plotState);
+        READ_BOOL_FIELD("InvertPhase", invertPhaseValue);
+        currentDriver.setPhaseInverted(invertPhaseValue);
 
         if (!readRequiredDataLine(lines, index, line, QStringLiteral("Title"), driverNumber, errorMessage)) {
             return false;
@@ -1105,23 +1111,23 @@ bool jsonToDriverParameters(const QJsonObject& parameters,
     currentDriver.setRdc(rdc);
     currentDriver.setLsp(lsp);
     currentDriver.setF0(fs);
-    currentDriver.setQtc(qts);
+    currentDriver.setQts(qts);
     currentDriver.setQes(qes);
     currentDriver.setQms(qms);
     currentDriver.setVas(vas);
     currentDriver.setDm(diameter);
-    currentDriver.Vb = vb;
+    currentDriver.setVb(vb);
     currentDriver.setQl(ql);
-    currentDriver.Fb = fb;
-    currentDriver.V2 = v2;
-    currentDriver.enclosureTypeProposal = static_cast<EnclosureType>(enclosureTypeProposal);
-    currentDriver.gain = gain;
-    currentDriver.pressureIsActive = pressureActive;
-    currentDriver.impedanceIsActive = impedanceActive;
-    currentDriver.summaryIsActive = summaryActive;
-    currentDriver.ScalarSummaryisActive = scalarSummaryActive;
-    currentDriver.ImpedanceSummaryisActive = impedanceSummaryActive;
-    currentDriver.InvertPhase = invertPhase;
+    currentDriver.setFb(fb);
+    currentDriver.setV2(v2);
+    currentDriver.setEnclosureTypeProposal(static_cast<EnclosureType>(enclosureTypeProposal));
+    currentDriver.setGainLinear(gain);
+    currentDriver.setPlotState(DriverPlotState{pressureActive,
+                                               impedanceActive,
+                                               summaryActive,
+                                               scalarSummaryActive,
+                                               impedanceSummaryActive});
+    currentDriver.setPhaseInverted(invertPhase);
     currentDriver.setFullCircuit(fullCircuit);
     return true;
 }
@@ -1173,7 +1179,7 @@ bool jsonToDriverNetwork(const QJsonObject& network,
                          .arg(index));
             return false;
         }
-        currentDriver.setUnit(index + 1, value.toDouble());
+        NetworkSerializationUtils::setValue(currentDriver, index, value.toDouble());
     }
 
     return true;
@@ -1581,23 +1587,24 @@ QJsonObject driverParametersToJson(const driver& currentDriver)
     parameters.insert(QStringLiteral("rdc_ohm"), currentDriver.getRdc());
     parameters.insert(QStringLiteral("lsp_h"), currentDriver.getLsp());
     parameters.insert(QStringLiteral("fs_hz"), currentDriver.getF0());
-    parameters.insert(QStringLiteral("qts"), currentDriver.getQtc());
+    parameters.insert(QStringLiteral("qts"), currentDriver.getQts());
     parameters.insert(QStringLiteral("qes"), currentDriver.getQes());
     parameters.insert(QStringLiteral("qms"), currentDriver.getQms());
     parameters.insert(QStringLiteral("vas_l"), currentDriver.getVas());
     parameters.insert(QStringLiteral("diameter_cm"), currentDriver.getDm());
-    parameters.insert(QStringLiteral("vb_l"), currentDriver.Vb);
+    parameters.insert(QStringLiteral("vb_l"), currentDriver.getVb());
     parameters.insert(QStringLiteral("ql"), currentDriver.getQl());
-    parameters.insert(QStringLiteral("fb_hz"), currentDriver.Fb);
-    parameters.insert(QStringLiteral("v2_l"), currentDriver.V2);
-    parameters.insert(QStringLiteral("enclosureTypeProposal"), static_cast<int>(currentDriver.enclosureTypeProposal));
-    parameters.insert(QStringLiteral("gainLinear"), currentDriver.gain);
-    parameters.insert(QStringLiteral("pressureActive"), currentDriver.pressureIsActive);
-    parameters.insert(QStringLiteral("impedanceActive"), currentDriver.impedanceIsActive);
-    parameters.insert(QStringLiteral("summaryActive"), currentDriver.summaryIsActive);
-    parameters.insert(QStringLiteral("scalarSummaryActive"), currentDriver.ScalarSummaryisActive);
-    parameters.insert(QStringLiteral("impedanceSummaryActive"), currentDriver.ImpedanceSummaryisActive);
-    parameters.insert(QStringLiteral("invertPhase"), currentDriver.InvertPhase);
+    parameters.insert(QStringLiteral("fb_hz"), currentDriver.getFb());
+    parameters.insert(QStringLiteral("v2_l"), currentDriver.getV2());
+    parameters.insert(QStringLiteral("enclosureTypeProposal"), static_cast<int>(currentDriver.getEnclosureTypeProposal()));
+    parameters.insert(QStringLiteral("gainLinear"), currentDriver.getGainLinear());
+    const DriverPlotState& plotState = currentDriver.plotState();
+    parameters.insert(QStringLiteral("pressureActive"), plotState.pressure);
+    parameters.insert(QStringLiteral("impedanceActive"), plotState.impedance);
+    parameters.insert(QStringLiteral("summaryActive"), plotState.vectorSummary);
+    parameters.insert(QStringLiteral("scalarSummaryActive"), plotState.scalarSummary);
+    parameters.insert(QStringLiteral("impedanceSummaryActive"), plotState.impedanceSummary);
+    parameters.insert(QStringLiteral("invertPhase"), currentDriver.isPhaseInverted());
     parameters.insert(QStringLiteral("fullCircuit"), currentDriver.getFullCircuit());
     return parameters;
 }
@@ -1605,8 +1612,8 @@ QJsonObject driverParametersToJson(const driver& currentDriver)
 QJsonObject driverNetworkToJson(const driver& currentDriver)
 {
     QJsonArray values;
-    for (int unitIndex = 1; unitIndex <= KFilterProjectIo::NetworkUnitCount; ++unitIndex) {
-        values.append(currentDriver.getUnit(unitIndex));
+    for (int index = 0; index < KFilterProjectIo::NetworkUnitCount; ++index) {
+        values.append(NetworkSerializationUtils::value(currentDriver, index));
     }
 
     QJsonObject network;
@@ -2044,16 +2051,16 @@ bool validateFiniteDriverData(const driver& currentDriver,
         currentDriver.getRdc(),
         currentDriver.getLsp(),
         currentDriver.getF0(),
-        currentDriver.getQtc(),
+        currentDriver.getQts(),
         currentDriver.getQes(),
         currentDriver.getQms(),
         currentDriver.getVas(),
         currentDriver.getDm(),
-        currentDriver.Vb,
+        currentDriver.getVb(),
         currentDriver.getQl(),
-        currentDriver.Fb,
-        currentDriver.V2,
-        currentDriver.gain
+        currentDriver.getFb(),
+        currentDriver.getV2(),
+        currentDriver.getGainLinear()
     };
 
     for (double value : scalarValues) {
@@ -2072,12 +2079,12 @@ bool validateFiniteDriverData(const driver& currentDriver,
         return false;
     }
 
-    for (int unitIndex = 1; unitIndex <= KFilterProjectIo::NetworkUnitCount; ++unitIndex) {
-        if (!std::isfinite(currentDriver.getUnit(unitIndex))) {
+    for (int index = 0; index < KFilterProjectIo::NetworkUnitCount; ++index) {
+        if (!std::isfinite(NetworkSerializationUtils::value(currentDriver, index))) {
             setError(errorMessage,
                      QStringLiteral("Driver %1 contains a non-finite network value at unit %2.")
                          .arg(driverIndex + 1)
-                         .arg(unitIndex));
+                         .arg(index + 1));
             return false;
         }
     }
@@ -2103,13 +2110,6 @@ qsizetype firstSignificantByte(const QByteArray& data)
     return -1;
 }
 
-void finalizeDrivers(driver (&drivers)[KFilterProjectIo::DriverCount])
-{
-    for (driver& currentDriver : drivers) {
-        currentDriver.calculateParameters();
-        currentDriver.setModified();
-    }
-}
 }
 
 bool KFilterProjectIo::writeDriverSupplementToJson(
@@ -2244,7 +2244,6 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
         return false;
     }
 
-    finalizeDrivers(parsedDrivers);
     for (int driverIndex = 0; driverIndex < DriverCount; ++driverIndex) {
         const std::size_t index = static_cast<std::size_t>(driverIndex);
         drivers[driverIndex] = parsedDrivers[driverIndex];

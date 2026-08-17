@@ -6,6 +6,8 @@
 
 #include "kfilterdriverio.h"
 
+#include "networkserializationutils.h"
+
 #include "kfilterdoc.h"
 
 #include <QFile>
@@ -168,7 +170,7 @@ bool loadNetworkValues(const QJsonObject& networkObject,
                          QStringLiteral("Invalid network value at unit %1.").arg(index + 1));
                 return false;
             }
-            drv.setUnit(index + 1, jsonValue.toDouble());
+            NetworkSerializationUtils::setValue(drv, index, jsonValue.toDouble());
         }
         return true;
     }
@@ -188,7 +190,7 @@ bool loadNetworkValues(const QJsonObject& networkObject,
                          QStringLiteral("Invalid network value at unit %1.").arg(index));
                 return false;
             }
-            drv.setUnit(index, jsonValue.toDouble());
+            NetworkSerializationUtils::setValue(drv, index - 1, jsonValue.toDouble());
         }
         return true;
     }
@@ -204,23 +206,24 @@ QJsonObject driverToJson(const driver& drv)
     driverObject.insert(QStringLiteral("rdc_ohm"), drv.getRdc());
     driverObject.insert(QStringLiteral("lsp_h"), drv.getLsp());
     driverObject.insert(QStringLiteral("fs_hz"), drv.getF0());
-    driverObject.insert(QStringLiteral("qts"), drv.getQtc());
+    driverObject.insert(QStringLiteral("qts"), drv.getQts());
     driverObject.insert(QStringLiteral("qes"), drv.getQes());
     driverObject.insert(QStringLiteral("qms"), drv.getQms());
     driverObject.insert(QStringLiteral("vas_l"), drv.getVas());
     driverObject.insert(QStringLiteral("diameter_cm"), drv.getDm());
-    driverObject.insert(QStringLiteral("vb_l"), drv.Vb);
+    driverObject.insert(QStringLiteral("vb_l"), drv.getVb());
     driverObject.insert(QStringLiteral("ql"), drv.getQl());
-    driverObject.insert(QStringLiteral("fb_hz"), drv.Fb);
-    driverObject.insert(QStringLiteral("v2_l"), drv.V2);
-    driverObject.insert(QStringLiteral("enclosureTypeProposal"), static_cast<int>(drv.enclosureTypeProposal));
-    driverObject.insert(QStringLiteral("gainLinear"), drv.gain);
-    writeBool(driverObject, QStringLiteral("pressureActive"), drv.pressureIsActive);
-    writeBool(driverObject, QStringLiteral("impedanceActive"), drv.impedanceIsActive);
-    writeBool(driverObject, QStringLiteral("summaryActive"), drv.summaryIsActive);
-    writeBool(driverObject, QStringLiteral("scalarSummaryActive"), drv.ScalarSummaryisActive);
-    writeBool(driverObject, QStringLiteral("impedanceSummaryActive"), drv.ImpedanceSummaryisActive);
-    writeBool(driverObject, QStringLiteral("invertPhase"), drv.InvertPhase);
+    driverObject.insert(QStringLiteral("fb_hz"), drv.getFb());
+    driverObject.insert(QStringLiteral("v2_l"), drv.getV2());
+    driverObject.insert(QStringLiteral("enclosureTypeProposal"), static_cast<int>(drv.getEnclosureTypeProposal()));
+    driverObject.insert(QStringLiteral("gainLinear"), drv.getGainLinear());
+    const DriverPlotState& plotState = drv.plotState();
+    writeBool(driverObject, QStringLiteral("pressureActive"), plotState.pressure);
+    writeBool(driverObject, QStringLiteral("impedanceActive"), plotState.impedance);
+    writeBool(driverObject, QStringLiteral("summaryActive"), plotState.vectorSummary);
+    writeBool(driverObject, QStringLiteral("scalarSummaryActive"), plotState.scalarSummary);
+    writeBool(driverObject, QStringLiteral("impedanceSummaryActive"), plotState.impedanceSummary);
+    writeBool(driverObject, QStringLiteral("invertPhase"), drv.isPhaseInverted());
     writeBool(driverObject, QStringLiteral("fullCircuit"), drv.getFullCircuit());
     return driverObject;
 }
@@ -296,26 +299,24 @@ bool jsonToDriver(const QJsonObject& driverObject,
     drv.setRdc(rdc);
     drv.setLsp(lsp);
     drv.setF0(fs);
-    drv.setQtc(qts);
+    drv.setQts(qts);
     drv.setQes(qes);
     drv.setQms(qms);
     drv.setVas(vas);
     drv.setDm(diameter);
-    drv.Vb = vb;
+    drv.setVb(vb);
     drv.setQl(ql);
-    drv.Fb = fb;
-    drv.V2 = v2;
-    drv.enclosureTypeProposal = static_cast<EnclosureType>(enclosureTypeProposal);
-    drv.gain = gain;
-    drv.pressureIsActive = pressureActive;
-    drv.impedanceIsActive = impedanceActive;
-    drv.summaryIsActive = summaryActive;
-    drv.ScalarSummaryisActive = scalarSummaryActive;
-    drv.ImpedanceSummaryisActive = impedanceSummaryActive;
-    drv.InvertPhase = invertPhase;
+    drv.setFb(fb);
+    drv.setV2(v2);
+    drv.setEnclosureTypeProposal(static_cast<EnclosureType>(enclosureTypeProposal));
+    drv.setGainLinear(gain);
+    drv.setPlotState(DriverPlotState{pressureActive,
+                                     impedanceActive,
+                                     summaryActive,
+                                     scalarSummaryActive,
+                                     impedanceSummaryActive});
+    drv.setPhaseInverted(invertPhase);
     drv.setFullCircuit(fullCircuit);
-    drv.calculateParameters();
-    drv.setModified();
 
     return true;
 }
@@ -347,8 +348,6 @@ bool KFilterDriverIo::applyDriverSlotToDocument(KFilterDoc& document,
     const bool existingMergeState = document.measurementMergeEnabled();
 
     document.m_driverDriver[driverIndex] = slot.driverData;
-    document.m_driverDriver[driverIndex].calculateParameters();
-    document.m_driverDriver[driverIndex].setModified();
     document.splCorrectionCurve(driverIndex) = slot.measurementCurve;
     document.activeFilterChain(driverIndex) = slot.activeFilterChain;
     document.baffleSettings(driverIndex) = slot.baffleSettings;
@@ -461,8 +460,6 @@ bool KFilterDriverIo::loadDriverSlotFromFile(const QString& filePath,
         }
     }
 
-    parsedSlot.driverData.calculateParameters();
-    parsedSlot.driverData.setModified();
     slot = parsedSlot;
     return true;
 }
@@ -478,8 +475,8 @@ bool KFilterDriverIo::saveDriverSlotToFile(const QString& filePath,
     root.insert(QStringLiteral("driver"), driverToJson(slot.driverData));
 
     QJsonArray networkValues;
-    for (int unitIndex = 1; unitIndex <= NetworkUnitCount; ++unitIndex) {
-        networkValues.append(slot.driverData.getUnit(unitIndex));
+    for (int index = 0; index < NetworkUnitCount; ++index) {
+        networkValues.append(NetworkSerializationUtils::value(slot.driverData, index));
     }
 
     QJsonObject networkObject;
