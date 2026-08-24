@@ -74,8 +74,15 @@ void configureClosed(driver& drv)
 {
     drv.setVb(20.0);
     drv.setFb(0.0);
+    drv.setQl(10.0);
     drv.setV2(0.0);
     drv.setEnclosureTypeProposal(EnclosureType::Sealed);
+}
+
+void configureClosedFullCircuit(driver& drv)
+{
+    configureClosed(drv);
+    drv.setFullCircuit(true);
 }
 
 void configureVented(driver& drv)
@@ -156,7 +163,11 @@ bool checkAllSetterInvalidations()
                                 [](driver& drv) { drv.setVb(35.0); }) &&
         checkSetterInvalidation("setFb", configureVented,
                                 [](driver& drv) { drv.setFb(55.0); }) &&
-        checkSetterInvalidation("setQl", configureVented,
+        checkSetterInvalidation("setQl (Sealed simplified)", configureClosed,
+                                [](driver& drv) { drv.setQl(4.5); }) &&
+        checkSetterInvalidation("setQl (Sealed full circuit)", configureClosedFullCircuit,
+                                [](driver& drv) { drv.setQl(4.5); }) &&
+        checkSetterInvalidation("setQl (Vented)", configureVented,
                                 [](driver& drv) { drv.setQl(4.5); }) &&
         checkSetterInvalidation("setV2", configureBandpass,
                                 [](driver& drv) { drv.setV2(12.0); }) &&
@@ -168,6 +179,98 @@ bool checkAllSetterInvalidations()
                                 [](driver& drv) { drv.setEnclosureTypeProposal(EnclosureType::Sealed); }) &&
         checkSetterInvalidation("setFullCircuit", configureDefault,
                                 [](driver& drv) { drv.setFullCircuit(true); });
+}
+
+bool checkSealedQlLossModel()
+{
+    constexpr double pi = 3.141592654;
+    constexpr double rdc = 6.0;
+    constexpr double lsp = 0.00025;
+    constexpr double f0 = 50.0;
+    constexpr double qes = 0.5;
+    constexpr double qms = 5.0;
+    constexpr double qts = qes*qms/(qes+qms);
+    constexpr double vas = 40.0;
+    constexpr double vb = 20.0;
+    constexpr double ql = 4.0;
+
+    driver sealedDriver;
+    sealedDriver.setRdc(rdc);
+    sealedDriver.setLsp(lsp);
+    sealedDriver.setF0(f0);
+    sealedDriver.setQes(qes);
+    sealedDriver.setQms(qms);
+    sealedDriver.setQts(qts);
+    sealedDriver.setVas(vas);
+    sealedDriver.setVb(vb);
+    sealedDriver.setFb(0.0);
+    sealedDriver.setV2(0.0);
+    sealedDriver.setQl(ql);
+    sealedDriver.setEnclosureTypeProposal(EnclosureType::Sealed);
+    calculateResults(sealedDriver);
+
+    const double omega0 = 2*pi*f0;
+    const double complianceRatio = 1+vas/vb;
+    const double acousticCapacitance = qts/omega0;
+    const double acousticInductance = 1/(omega0*qts*complianceRatio);
+    const double idealSealedQuality = qts*std::sqrt(complianceRatio);
+    const double normalizedLossConductance = 1+idealSealedQuality/ql;
+
+    const double motionalResistance = qms*rdc/qes;
+    const double motionalCapacitance = qes/(omega0*rdc);
+    const double motionalInductance = rdc/(omega0*qes);
+    const double sealedEffectiveMotionalInductance = motionalInductance/complianceRatio;
+    const double leakageConductance =
+        std::sqrt(motionalCapacitance/sealedEffectiveMotionalInductance)/ql;
+
+    double omega = 125.6637061;
+    for (std::size_t sampleIndex = 0; sampleIndex < ResultSampleCount; ++sampleIndex) {
+        const std::complex<double> parallelHighPassImpedance =
+            1.0/std::complex<double>{normalizedLossConductance,
+                                     -1/(omega*acousticInductance)};
+        const std::complex<double> highPassImpedance =
+            parallelHighPassImpedance+
+            std::complex<double>{0.0, -1/(omega*acousticCapacitance)};
+        const std::complex<double> expectedPressure =
+            parallelHighPassImpedance/highPassImpedance;
+
+        const std::complex<double> motionalAdmittance{
+            1/motionalResistance+leakageConductance,
+            omega*motionalCapacitance-
+                1/(omega*sealedEffectiveMotionalInductance)};
+        const std::complex<double> expectedImpedance =
+            std::complex<double>{rdc, omega*lsp}+1.0/motionalAdmittance;
+
+        if (!nearlyEqual(sealedDriver.pressureResponse()[sampleIndex], expectedPressure)) {
+            QTextStream(stderr) << "Sealed Ql simplified SPL mismatch at sample "
+                                << static_cast<unsigned long long>(sampleIndex) << '\n';
+            return false;
+        }
+        if (!nearlyEqual(sealedDriver.impedanceResponse()[sampleIndex], expectedImpedance)) {
+            QTextStream(stderr) << "Sealed Ql equivalent-circuit mismatch at sample "
+                                << static_cast<unsigned long long>(sampleIndex) << '\n';
+            return false;
+        }
+        omega *= KFilterFrequencyStep;
+    }
+
+    driver openLowQl;
+    openLowQl.setQl(2.0);
+    calculateResults(openLowQl);
+
+    driver openHighQl;
+    openHighQl.setQl(500.0);
+    calculateResults(openHighQl);
+
+    if (!resultArraysEqual(copyResult(openLowQl.pressureResponse()),
+                           openHighQl.pressureResponse()) ||
+        !resultArraysEqual(copyResult(openLowQl.impedanceResponse()),
+                           openHighQl.impedanceResponse())) {
+        QTextStream(stderr) << "Ql unexpectedly affects Open Baffle calculations\n";
+        return false;
+    }
+
+    return true;
 }
 
 bool checkNetworkValueInvalidation()
@@ -782,6 +885,7 @@ int main()
     calculateResults(d);
 
     if (!checkAllSetterInvalidations() ||
+        !checkSealedQlLossModel() ||
         !checkNetworkValueInvalidation() ||
         !checkSemanticNetworkMapping() ||
         !checkNetworkSerializationMapping() ||

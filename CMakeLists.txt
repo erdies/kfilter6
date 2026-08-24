@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(kfilter VERSION 0.1.0 LANGUAGES CXX)
 
-set(KFILTER_PATCH_LEVEL "287")
+set(KFILTER_PATCH_LEVEL "291")
 set(KFILTER_LICENSE_STRING "GPL-3.0-or-later")
 
 set(CMAKE_CXX_STANDARD 17)
@@ -27,6 +27,7 @@ option(KFILTER_BUILD_MEASUREMENT_CURVE_SMOKETEST "Build a measurement curve mode
 option(KFILTER_BUILD_MEASUREMENT_IMPORT_SMOKETEST "Build a measurement parser and calibration test" ON)
 option(KFILTER_BUILD_MEASUREMENT_EXPORT_SMOKETEST "Build an FRD correction-curve export test" ON)
 option(KFILTER_BUILD_QT6_APP "Build the minimal Qt6 Widgets application shell" ON)
+option(KFILTER_BUILD_DRIVER_PARAMETERS_DIALOG_SMOKETEST "Build the Driver Parameters enclosure-control state smoke test" ON)
 option(KFILTER_BUILD_ACTIVE_FILTER_MODEL_SMOKETEST "Build the active-filter data-model smoke test" ON)
 option(KFILTER_BUILD_ACTIVE_FILTER_DIALOG_SMOKETEST "Build the active-filter model/dialog round-trip smoke test" ON)
 option(KFILTER_BUILD_ACTIVE_FILTER_RESPONSE_SMOKETEST "Build the active-filter complex transfer-function smoke test" ON)
@@ -145,6 +146,27 @@ if(KFILTER_BUILD_QT6_APP)
             KFILTER_PATCH_LEVEL_STRING="${KFILTER_PATCH_LEVEL}"
             KFILTER_LICENSE_STRING="${KFILTER_LICENSE_STRING}"
     )
+
+    if(KFILTER_BUILD_DRIVER_PARAMETERS_DIALOG_SMOKETEST)
+        add_executable(kfilter_driver_parameters_dialog_smoketest
+            tools/driverparameters_dialog_smoketest.cpp
+            driverparametersdialog.cpp
+            driverparametersdialog.h
+            networkvalueutils.cpp
+            networkvalueutils.h
+        )
+        target_link_libraries(kfilter_driver_parameters_dialog_smoketest
+            PRIVATE
+                kfilter_core
+                Qt6::Widgets
+        )
+
+        enable_testing()
+        add_test(NAME kfilter_driver_parameters_dialog_smoketest
+                 COMMAND kfilter_driver_parameters_dialog_smoketest)
+        set_tests_properties(kfilter_driver_parameters_dialog_smoketest
+            PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    endif()
 
     if(KFILTER_BUILD_ACTIVE_FILTER_DIALOG_SMOKETEST)
         add_executable(kfilter_active_filter_dialog_smoketest

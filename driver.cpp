@@ -78,6 +78,8 @@ void driver::setModified(void)
 void driver::calculateParameters(void)
 {
 	double pi = 3.141592654;
+	sealedHighPassLossConductance = 1.0;
+	sealedLeakageConductance = 0.0;
 
 
 	if (F0!=0)
@@ -113,8 +115,9 @@ void driver::calculateParameters(void)
 		}
 		else
 		{
+			const double sealedComplianceRatio = Vas/Vb+1;
 			acousticHighPassCapacitance=Qts/(2*pi*F0);
-			acousticHighPassInductance=1/(2*pi*F0*Qts*(Vas/Vb+1));
+			acousticHighPassInductance=1/(2*pi*F0*Qts*sealedComplianceRatio);
 			enclosureType=EnclosureType::Sealed;
 			//}
 
@@ -141,6 +144,9 @@ void driver::calculateParameters(void)
 			{
 				enclosureType=EnclosureType::Sealed;
 				sealedEffectiveMotionalInductance=1/(1/motionalInductance+Vas/(Vb*motionalInductance));
+				const double idealSealedQuality = Qts*sqrt(sealedComplianceRatio);
+				sealedHighPassLossConductance=1+idealSealedQuality/Ql;
+				sealedLeakageConductance=sqrt(motionalCapacitance/sealedEffectiveMotionalInductance)/Ql;
 			}
 		}			//Vb==0
 	}
@@ -234,7 +240,7 @@ std::complex<double> driver::calculateEquivalentCircuit(double omega)
 	switch (enclosureType)
 	{
 	case EnclosureType::Sealed :
-		admittance = {1/motionalResistance, omega*motionalCapacitance-1/(omega*sealedEffectiveMotionalInductance)};
+		admittance = {1/motionalResistance+sealedLeakageConductance, omega*motionalCapacitance-1/(omega*sealedEffectiveMotionalInductance)};
 		break;
 	case EnclosureType::Vented : case EnclosureType::Bandpass :
 		{
@@ -309,7 +315,7 @@ void driver::calculateAcousticResponse(std::complex<double>& response, double om
 	case EnclosureType::Sealed :  if (fullCircuitFlag)
 			  {
 
-				  terminationImpedance = 1.0 / std::complex<double>{1/motionalResistance, omega*motionalCapacitance-1/(omega*sealedEffectiveMotionalInductance)};
+				  terminationImpedance = 1.0 / std::complex<double>{1/motionalResistance+sealedLeakageConductance, omega*motionalCapacitance-1/(omega*sealedEffectiveMotionalInductance)};
 				  networkImpedance = terminationImpedance + std::complex<double>{Rdc, omega*Lsp};
 				  response *= terminationImpedance / networkImpedance;
 				  terminationImpedance = {1.0, 0.0};
@@ -319,7 +325,7 @@ void driver::calculateAcousticResponse(std::complex<double>& response, double om
 			  }
 		else
 		{
-			networkImpedance = 1.0 / std::complex<double>{1.0, -1/(omega*acousticHighPassInductance)};
+			networkImpedance = 1.0 / std::complex<double>{sealedHighPassLossConductance, -1/(omega*acousticHighPassInductance)};
 			terminationImpedance = networkImpedance;
 			networkImpedance += std::complex<double>{0.0, -1/(omega*acousticHighPassCapacitance)};
 			const std::complex<double> transfer = terminationImpedance / networkImpedance;
@@ -739,4 +745,3 @@ double driver::getNetworkValue(int sectionIndex,
 	}
 	return -1.0;
 }
-

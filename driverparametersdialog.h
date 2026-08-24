@@ -21,6 +21,7 @@ class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLineEdit;
+class QPushButton;
 class QTabWidget;
 class QWidget;
 
@@ -70,8 +71,9 @@ private:
         QDoubleSpinBox *vb = nullptr;
         QDoubleSpinBox *ql = nullptr;
         QDoubleSpinBox *fb = nullptr;
+        QPushButton *hogeButton = nullptr;
         QDoubleSpinBox *tubeDiameter = nullptr;
-        QLineEdit *tubeLength = nullptr;
+        QDoubleSpinBox *tubeLength = nullptr;
         QDoubleSpinBox *v2 = nullptr;
         QComboBox *alignmentProposal = nullptr;
         QDoubleSpinBox *gainDb = nullptr;
@@ -98,7 +100,7 @@ private:
     void restoreCommittedState();
     void schedulePreview();
     void emitPreview();
-    void connectPreviewSignals(const DriverPage& page);
+    void connectPreviewSignals(DriverPage& page, int index);
     bool readSpinBoxValue(const QDoubleSpinBox *spinBox,
                           const QString& label,
                           int driverIndex,
@@ -107,7 +109,9 @@ private:
     void importDriver(int index);
     void exportDriver(int index);
     void updateQtsForPage(DriverPage& page);
+    void updateEnclosureFieldStates(DriverPage& page);
     void updateTubeLengthForPage(DriverPage& page);
+    void updateTubeDiameterForPage(DriverPage& page);
     void calculateHogeForPage(DriverPage& page);
 
     KFilterDoc& m_document;

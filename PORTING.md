@@ -1745,3 +1745,37 @@ or physical normalization provenance still needs further analysis.
   including recovery when `F0` is set non-zero again.
 - No public Driver API, file format, defaults, passive network, enclosure model,
   Active Filter, Baffle, Measurement, or piston-low-pass behaviour changed.
+
+## Patch 291: Apply Ql enclosure losses to sealed alignments
+
+- Extended the existing positive `Ql` enclosure-loss parameter to Sealed
+  calculations. Vented and Bandpass behaviour is unchanged.
+- The simplified Sealed second-order high-pass now uses a normalized loss
+  conductance derived from the reciprocal quality-factor relation:
+
+  ```text
+  alpha = Vas/Vb
+  Qideal = Qts * sqrt(1 + alpha)
+  1/Qeffective = 1/Qideal + 1/Ql
+  Gnormalized = Qideal/Qeffective = 1 + Qideal/Ql
+  ```
+
+  The existing L/C product and therefore the undamped box resonance frequency
+  remain unchanged; finite `Ql` only lowers the system quality factor.
+- The full/equivalent-circuit Sealed branch receives the corresponding parallel
+  leakage conductance:
+
+  ```text
+  Gleakage = sqrt(motionalCapacitance/sealedEffectiveMotionalInductance) / Ql
+  ```
+
+  It is added to `1/motionalResistance` in both the impedance model and the
+  Full Circuit acoustic path. This keeps simplified SPL, Full Circuit SPL, and
+  calculated impedance consistent with the same reciprocal-loss model.
+- Open Baffle remains independent of `Ql`. Existing project and driver formats
+  already persist `Ql`, so no schema change is required. Existing Sealed
+  projects intentionally gain the newly modeled damping when recalculated.
+- The Driver smoke test now verifies the simplified transfer function and
+  equivalent-circuit impedance analytically over all 150 samples, covers cache
+  invalidation for Sealed in both calculation modes, and confirms that changing
+  `Ql` does not affect Open Baffle.

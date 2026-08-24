@@ -205,6 +205,10 @@ private:
 		// Combined motional/enclosure inductive term used only by the sealed
 		// full/equivalent-circuit path. Open Baffle uses motionalInductance directly.
 		sealedEffectiveMotionalInductance,
+		// Sealed-enclosure loss terms derived from Ql. The first is the
+		// dimensionless conductance of the normalized simplified high-pass;
+		// the second is the reflected full-circuit conductance in siemens.
+		sealedHighPassLossConductance,sealedLeakageConductance,
 		// Tuned enclosure series-RLC branch used by Vented and Bandpass
 		// equivalent-circuit paths.
 		enclosureBranchCapacitance,enclosureBranchInductance,enclosureBranchResistance,

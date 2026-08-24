@@ -28,6 +28,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QString>
 #include <QTabWidget>
 #include <QTimer>
@@ -205,6 +206,32 @@ double calculateBassReflexTubeLengthCm(double diameterCm, double fbHz, double vb
     return effectiveLengthCm - 0.825 * std::sqrt(tubeAreaCm2);
 }
 
+double calculateBassReflexTubeDiameterCm(double lengthCm, double fbHz, double vbLiter)
+{
+    if (lengthCm <= 0.0 || fbHz <= 0.0 || vbLiter <= 0.0 ||
+        !std::isfinite(lengthCm) || !std::isfinite(fbHz) || !std::isfinite(vbLiter)) {
+        return 0.0;
+    }
+
+    constexpr double pi = 3.14159265358979323846;
+    constexpr double endCorrectionFactor = 0.825;
+    const double areaCoefficient = 29830.0 / (fbHz * fbHz * vbLiter);
+    const double discriminant = endCorrectionFactor * endCorrectionFactor +
+                                4.0 * areaCoefficient * lengthCm;
+    if (areaCoefficient <= 0.0 || !std::isfinite(areaCoefficient) ||
+        discriminant < 0.0 || !std::isfinite(discriminant)) {
+        return 0.0;
+    }
+
+    // With x = sqrt(tube area), the forward formula becomes
+    // areaCoefficient*x^2 - 0.825*x - length = 0. The positive root is the
+    // only physical solution for a positive tube length.
+    const double areaRoot = (endCorrectionFactor + std::sqrt(discriminant)) /
+                            (2.0 * areaCoefficient);
+    const double diameterCm = 2.0 * areaRoot / std::sqrt(pi);
+    return diameterCm > 0.0 && std::isfinite(diameterCm) ? diameterCm : 0.0;
+}
+
 QString tubeDiameterSettingsKey(int driverIndex)
 {
     return QStringLiteral("DriverParameters/tubeDiameter%1").arg(driverIndex + 1);
@@ -270,6 +297,7 @@ DriverParametersDialog::DriverParametersDialog(KFilterDoc& document,
 
     auto *mainLayout = new QVBoxLayout(this);
     m_tabs = new QTabWidget(this);
+    m_tabs->setObjectName(QStringLiteral("driverParametersTabs"));
 
     for (int index = 0; index < KFilterProjectIo::DriverCount; ++index) {
         m_tabs->addTab(createDriverPage(index), tr("Driver %1").arg(index + 1));
@@ -318,17 +346,26 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     page.ql = createSpinBox(0.001, 1000.0, 5, 0.1);
     page.fb = createSpinBox(0.0, 100000.0, 3, 1.0, tr(" Hz"));
     page.tubeDiameter = createSpinBox(0.0, 1000.0, 3, 0.1, tr(" cm"));
-    page.tubeLength = new QLineEdit(page.page);
-    page.tubeLength->setReadOnly(true);
-    page.tubeLength->setText(tr("n. a."));
+    page.tubeLength = createSpinBox(0.0, 100000.0, 1, 0.1, tr(" cm"));
+    page.tubeLength->setSpecialValueText(tr("n. a."));
     page.v2 = createSpinBox(0.0, 100000.0, 3, 1.0, tr(" l"));
     page.gainDb = createSpinBox(-60.0, 60.0, 2, 0.5, tr(" dB"));
+
+    const QString controlSuffix = QString::number(index + 1);
+    page.vb->setObjectName(QStringLiteral("driverVbSpin") + controlSuffix);
+    page.ql->setObjectName(QStringLiteral("driverQlSpin") + controlSuffix);
+    page.fb->setObjectName(QStringLiteral("driverFbSpin") + controlSuffix);
+    page.tubeDiameter->setObjectName(QStringLiteral("driverTubeDiameterSpin") + controlSuffix);
+    page.tubeLength->setObjectName(QStringLiteral("driverTubeLengthSpin") + controlSuffix);
+    page.v2->setObjectName(QStringLiteral("driverV2Spin") + controlSuffix);
+    page.gainDb->setObjectName(QStringLiteral("driverGainSpin") + controlSuffix);
 
     const int enclosureEditorWidth = page.gainDb->sizeHint().width();
     page.vb->setFixedWidth(enclosureEditorWidth);
     page.ql->setFixedWidth(enclosureEditorWidth);
     page.fb->setFixedWidth(enclosureEditorWidth);
     page.tubeDiameter->setFixedWidth(enclosureEditorWidth);
+    page.tubeLength->setFixedWidth(enclosureEditorWidth);
     page.v2->setFixedWidth(enclosureEditorWidth);
 
     page.alignmentProposal = new QComboBox(page.page);
@@ -336,6 +373,7 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     page.alignmentProposal->addItem(tr("Sealed enclosure"), 1);
     page.alignmentProposal->addItem(tr("Vented enclosure"), 2);
     page.alignmentProposal->addItem(tr("Bandpass enclosure"), 3);
+    page.alignmentProposal->setObjectName(QStringLiteral("driverEnclosureTypeCombo") + controlSuffix);
 
     page.pressureActive = new QCheckBox(tr("Show SPL curve"), page.page);
     page.impedanceActive = new QCheckBox(tr("Show impedance curve"), page.page);
@@ -352,9 +390,9 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     page.impedanceSummaryActive->setToolTip(tr("Include this driver's impedance curve in the total parallel impedance seen by the amplifier."));
     page.invertPhase->setToolTip(tr("Invert this driver's polarity by 180 degrees for the SPL calculation."));
     page.fullCircuit->setToolTip(tr("Use the full crossover network for this driver instead of the simplified calculation."));
-    page.ql->setToolTip(tr("Enclosure loss damping factor used by vented and bandpass calculations. Must be greater than zero."));
-    page.tubeDiameter->setToolTip(tr("Inner diameter of one round bass reflex tube. The calculated length uses Vb and Fb."));
-    page.tubeLength->setToolTip(tr("Calculated physical bass reflex tube length from Vb, Fb, and tube diameter."));
+    page.ql->setToolTip(tr("Enclosure loss damping factor. It affects sealed, vented, and bandpass calculations. Must be greater than zero."));
+    page.tubeDiameter->setToolTip(tr("Inner diameter of one round bass reflex tube. Editing it recalculates the tube length from Vb and Fb."));
+    page.tubeLength->setToolTip(tr("Physical bass reflex tube length. Editing it recalculates the tube diameter from Vb and Fb."));
 
     auto *leftForm = new QFormLayout;
     addRow(leftForm, tr("Driver name"), page.title);
@@ -409,13 +447,14 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     auto *qlLabelSpacer = new QWidget(fbLayoutWidget);
     qlLabelSpacer->setFixedWidth(qlLabel->sizeHint().width());
     fbLayout->addWidget(qlLabelSpacer);
-    auto *hogeButton = new QPushButton(tr("Hoge"), fbLayoutWidget);
-    hogeButton->setFixedWidth(enclosureEditorWidth);
-    hogeButton->setToolTip(tr("Calculate Vb and Fb from Fs, Qts, and Vas using the legacy Hoge formula."));
-    fbLayout->addWidget(hogeButton);
+    page.hogeButton = new QPushButton(tr("Hoge"), fbLayoutWidget);
+    page.hogeButton->setObjectName(QStringLiteral("driverHogeButton") + controlSuffix);
+    page.hogeButton->setFixedWidth(enclosureEditorWidth);
+    page.hogeButton->setToolTip(tr("Calculate Vb and Fb from Fs, Qts, and Vas using the legacy Hoge formula."));
+    fbLayout->addWidget(page.hogeButton);
     fbLayout->addStretch(1);
     addRow(boxForm, tr("Fb"), fbLayoutWidget);
-    connect(hogeButton, &QPushButton::clicked, this, [this, index]() {
+    connect(page.hogeButton, &QPushButton::clicked, this, [this, index]() {
         calculateHogeForPage(m_pages.at(index));
     });
 
@@ -461,13 +500,19 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
             this, [this, index](double) { updateTubeLengthForPage(m_pages.at(index)); });
     connect(page.tubeDiameter, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
             this, [this, index](double) { updateTubeLengthForPage(m_pages.at(index)); });
+    connect(page.tubeLength, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
+            this, [this, index](double) {
+                updateTubeDiameterForPage(m_pages.at(index));
+                schedulePreview();
+            });
 
-    connectPreviewSignals(page);
+    connectPreviewSignals(page, index);
+    updateEnclosureFieldStates(page);
 
     return page.page;
 }
 
-void DriverParametersDialog::connectPreviewSignals(const DriverPage& page)
+void DriverParametersDialog::connectPreviewSignals(DriverPage& page, int index)
 {
     auto connectSpinBox = [this](QDoubleSpinBox *spinBox) {
         connect(spinBox, &QDoubleSpinBox::textChanged,
@@ -499,7 +544,10 @@ void DriverParametersDialog::connectPreviewSignals(const DriverPage& page)
     connect(page.alignmentProposal,
             static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
             this,
-            [this](int) { schedulePreview(); });
+            [this, index](int) {
+                updateEnclosureFieldStates(m_pages.at(index));
+                schedulePreview();
+            });
 
     connect(page.pressureActive, &QCheckBox::toggled,
             this, &DriverParametersDialog::schedulePreview);
@@ -580,6 +628,7 @@ void DriverParametersDialog::loadPageFromDriver(int index,
 
     const int alignmentIndex = page.alignmentProposal->findData(static_cast<int>(drv.getEnclosureTypeProposal()));
     page.alignmentProposal->setCurrentIndex(alignmentIndex >= 0 ? alignmentIndex : 0);
+    updateEnclosureFieldStates(page);
 
     const DriverPlotState& plotState = drv.plotState();
     page.pressureActive->setChecked(plotState.pressure);
@@ -918,16 +967,50 @@ void DriverParametersDialog::updateQtsForPage(DriverPage& page)
     }
 }
 
+void DriverParametersDialog::updateEnclosureFieldStates(DriverPage& page)
+{
+    const EnclosureType enclosureType = static_cast<EnclosureType>(
+        page.alignmentProposal->currentData().toInt());
+    const bool hasPrimaryEnclosure = enclosureType != EnclosureType::OpenBaffle;
+    const bool hasTunedPort = enclosureType == EnclosureType::Vented ||
+                              enclosureType == EnclosureType::Bandpass;
+    const bool hasSecondVolume = enclosureType == EnclosureType::Bandpass;
+
+    page.vb->setEnabled(hasPrimaryEnclosure);
+
+    // Ql remains editable for every enclosure whose losses are modeled.
+    page.ql->setEnabled(hasPrimaryEnclosure);
+
+    page.fb->setEnabled(hasTunedPort);
+    page.hogeButton->setEnabled(hasTunedPort);
+    page.tubeDiameter->setEnabled(hasTunedPort);
+    page.tubeLength->setEnabled(hasTunedPort);
+    page.v2->setEnabled(hasSecondVolume);
+    page.gainDb->setEnabled(true);
+}
+
 void DriverParametersDialog::updateTubeLengthForPage(DriverPage& page)
 {
     const double lengthCm = calculateBassReflexTubeLengthCm(page.tubeDiameter->value(),
                                                             page.fb->value(),
                                                             page.vb->value());
-    if (lengthCm > 0.0 && std::isfinite(lengthCm)) {
-        page.tubeLength->setText(tr("%1 cm").arg(lengthCm, 0, 'f', 1));
-    } else {
-        page.tubeLength->setText(tr("n. a."));
+    const QSignalBlocker blocker(page.tubeLength);
+    page.tubeLength->setValue(lengthCm > 0.0 && std::isfinite(lengthCm) ? lengthCm : 0.0);
+}
+
+void DriverParametersDialog::updateTubeDiameterForPage(DriverPage& page)
+{
+    const double diameterCm = calculateBassReflexTubeDiameterCm(page.tubeLength->value(),
+                                                                page.fb->value(),
+                                                                page.vb->value());
+    if (diameterCm > 0.0 && std::isfinite(diameterCm)) {
+        const QSignalBlocker blocker(page.tubeDiameter);
+        page.tubeDiameter->setValue(diameterCm);
     }
+
+    // Re-evaluate the displayed length from the actual (possibly rounded or
+    // range-limited) diameter. This keeps both controls numerically consistent.
+    updateTubeLengthForPage(page);
 }
 
 void DriverParametersDialog::calculateHogeForPage(DriverPage& page)
@@ -965,4 +1048,3 @@ void DriverParametersDialog::calculateHogeForPage(DriverPage& page)
     page.fb->setValue(fbHz);
     updateTubeLengthForPage(page);
 }
-
