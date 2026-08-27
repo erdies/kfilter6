@@ -462,9 +462,11 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     auto *tubeLayout = new QHBoxLayout(tubeLayoutWidget);
     tubeLayout->setContentsMargins(0, 0, 0, 0);
     tubeLayout->addWidget(page.tubeDiameter);
-    tubeLayout->addWidget(new QLabel(tr("Tube length"), tubeLayoutWidget));
+    auto *tubeColumnSpacer = new QWidget(tubeLayoutWidget);
+    tubeColumnSpacer->setFixedWidth(qlLabel->sizeHint().width());
+    tubeLayout->addWidget(tubeColumnSpacer);
     tubeLayout->addWidget(page.tubeLength);
-    addRow(boxForm, tr("Tube diameter"), tubeLayoutWidget);
+    addRow(boxForm, tr("Tube Dm / L"), tubeLayoutWidget);
 
     addRow(boxForm, tr("V2"), page.v2);
     addRow(boxForm, tr("Gain"), page.gainDb);

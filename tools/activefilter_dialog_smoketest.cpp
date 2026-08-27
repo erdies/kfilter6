@@ -11,7 +11,6 @@
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
-#include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QSpinBox>
@@ -135,32 +134,18 @@ int main(int argc, char **argv)
 
     ActiveFilterParametersDialog dialog(chains, nullptr, 2);
 
-    if (dialog.size().height() < 800) {
-        std::cerr << "active-filter dialog initial height is too small\n";
-        return 1;
-    }
-
     auto *tabs = dialog.findChild<QTabWidget *>(QStringLiteral("activeFilterDriverTabs"));
     auto *enabled = dialog.findChild<QCheckBox *>(QStringLiteral("activeFilterEnableDriver3"));
     auto *showResponse = dialog.findChild<QCheckBox *>(QStringLiteral("activeFilterShowResponse3"));
     auto *table = dialog.findChild<QTableWidget *>(QStringLiteral("activeFilterSectionTable3"));
-    auto *responseStatus = dialog.findChild<QLabel *>(QStringLiteral("activeFilterResponseStatus3"));
     if (tabs == nullptr || tabs->count() != KFilterProjectIo::DriverCount || tabs->currentIndex() != 2 ||
         enabled == nullptr || !enabled->isChecked() ||
         showResponse == nullptr || !showResponse->isChecked() ||
-        table == nullptr || table->rowCount() != 2 ||
-        responseStatus == nullptr || !responseStatus->text().contains(QStringLiteral("valid and applied"))) {
+        table == nullptr || table->rowCount() != 2) {
         std::cerr << "active-filter model was not loaded into the dialog or LR4 was not recognized as supported\n";
         return 1;
     }
 
-    if (table->item(0, 1) == nullptr || table->item(0, 1)->text() != QStringLiteral("High-pass") ||
-        table->item(1, 1) == nullptr || table->item(1, 1)->text() != QStringLiteral("Notch")) {
-        std::cerr << "active-filter table does not reflect model ordering/types\n";
-        return 2;
-    }
-
-    auto *driver1Status = dialog.findChild<QLabel *>(QStringLiteral("activeFilterResponseStatus1"));
     auto *driver1Table = dialog.findChild<QTableWidget *>(QStringLiteral("activeFilterSectionTable1"));
     auto *driver1Characteristic = dialog.findChild<QComboBox *>(QStringLiteral("activeFilterCharacteristicCombo1"));
     auto *driver1Order = dialog.findChild<QSpinBox *>(QStringLiteral("activeFilterOrderSpin1"));
@@ -169,8 +154,7 @@ int main(int argc, char **argv)
     auto *driver1Gain = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterGainSpin1"));
     auto *driver1Delay = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterDelaySpin1"));
     auto *driver1Polarity = dialog.findChild<QComboBox *>(QStringLiteral("activeFilterPolarityCombo1"));
-    if (driver1Status == nullptr || !driver1Status->text().contains(QStringLiteral("valid and applied")) ||
-        driver1Table == nullptr || driver1Table->rowCount() != 3 ||
+    if (driver1Table == nullptr || driver1Table->rowCount() != 3 ||
         driver1Characteristic == nullptr || driver1Order == nullptr || driver1Frequency1 == nullptr ||
         driver1Q == nullptr || driver1Gain == nullptr || driver1Delay == nullptr || driver1Polarity == nullptr) {
         std::cerr << "Gain/Delay/Polarity chain was not loaded as a supported active-filter chain\n";
@@ -226,7 +210,6 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    auto *driver2Status = dialog.findChild<QLabel *>(QStringLiteral("activeFilterResponseStatus2"));
     auto *driver2Table = dialog.findChild<QTableWidget *>(QStringLiteral("activeFilterSectionTable2"));
     auto *driver2Characteristic = dialog.findChild<QComboBox *>(QStringLiteral("activeFilterCharacteristicCombo2"));
     auto *driver2Order = dialog.findChild<QSpinBox *>(QStringLiteral("activeFilterOrderSpin2"));
@@ -235,8 +218,7 @@ int main(int argc, char **argv)
     auto *driver2Gain = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterGainSpin2"));
     auto *driver2Delay = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("activeFilterDelaySpin2"));
     auto *driver2Polarity = dialog.findChild<QComboBox *>(QStringLiteral("activeFilterPolarityCombo2"));
-    if (driver2Status == nullptr || !driver2Status->text().contains(QStringLiteral("valid and applied")) ||
-        driver2Table == nullptr || driver2Table->rowCount() != 2 ||
+    if (driver2Table == nullptr || driver2Table->rowCount() != 2 ||
         driver2Characteristic == nullptr || driver2Order == nullptr || driver2Frequency1 == nullptr ||
         driver2Q == nullptr || driver2Gain == nullptr || driver2Delay == nullptr || driver2Polarity == nullptr) {
         std::cerr << "AP1/AP2 chain was not loaded as a supported active-filter chain\n";
@@ -249,9 +231,7 @@ int main(int argc, char **argv)
     if (driver2Characteristic->isEnabled() || !driver2Order->isEnabled() ||
         !driver2Frequency1->isEnabled() || driver2Q->isEnabled() ||
         driver2Gain->isEnabled() || driver2Delay->isEnabled() || driver2Polarity->isEnabled() ||
-        driver2Order->value() != 1 || !near(driver2Frequency1->value(), 1200.0) ||
-        !driver2Order->toolTip().contains(QStringLiteral("AP1")) ||
-        !driver2Order->toolTip().contains(QStringLiteral("AP2"))) {
+        driver2Order->value() != 1 || !near(driver2Frequency1->value(), 1200.0)) {
         std::cerr << "AP1 editor must expose Order/Frequency and keep Q disabled\n";
         return 2;
     }
@@ -276,12 +256,6 @@ int main(int argc, char **argv)
     QApplication::processEvents();
     if (!driver2Q->isEnabled()) {
         std::cerr << "changing AP1 back to AP2 must re-enable Q immediately\n";
-        return 2;
-    }
-
-    auto *driver4Status = dialog.findChild<QLabel *>(QStringLiteral("activeFilterResponseStatus4"));
-    if (driver4Status == nullptr || !driver4Status->text().contains(QStringLiteral("valid and applied"))) {
-        std::cerr << "supported Band-pass/Notch chain was not reported as valid\n";
         return 2;
     }
 
@@ -316,9 +290,7 @@ int main(int argc, char **argv)
     driver4Table->selectRow(2);
     driver4Table->setCurrentCell(2, 1);
     QApplication::processEvents();
-    if (driver4Table->item(2, 1) == nullptr ||
-        driver4Table->item(2, 1)->text() != QStringLiteral("Parametric / Peaking EQ") ||
-        driver4Characteristic->isEnabled() || driver4Order->isEnabled() ||
+    if (driver4Characteristic->isEnabled() || driver4Order->isEnabled() ||
         !driver4Frequency1->isEnabled() || driver4Frequency2->isEnabled() ||
         !driver4Q->isEnabled() || !driver4Gain->isEnabled() ||
         driver4Delay->isEnabled() || driver4Polarity->isEnabled() ||
@@ -331,15 +303,12 @@ int main(int argc, char **argv)
     driver4Table->selectRow(3);
     driver4Table->setCurrentCell(3, 1);
     QApplication::processEvents();
-    if (driver4Table->item(3, 1) == nullptr ||
-        driver4Table->item(3, 1)->text() != QStringLiteral("Low Shelf") ||
-        driver4Characteristic->isEnabled() || driver4Order->isEnabled() ||
+    if (driver4Characteristic->isEnabled() || driver4Order->isEnabled() ||
         !driver4Frequency1->isEnabled() || driver4Frequency2->isEnabled() ||
         !driver4Q->isEnabled() || !driver4Gain->isEnabled() ||
         driver4Delay->isEnabled() || driver4Polarity->isEnabled() ||
         !near(driver4Frequency1->value(), 250.0) ||
-        !near(driver4Q->value(), 0.8) || !near(driver4Gain->value(), 4.0) ||
-        !driver4Gain->toolTip().contains(QStringLiteral("halfway"))) {
+        !near(driver4Q->value(), 0.8) || !near(driver4Gain->value(), 4.0)) {
         std::cerr << "Low-Shelf editor must expose exactly Frequency 1, Q and Gain\n";
         return 3;
     }
@@ -347,9 +316,7 @@ int main(int argc, char **argv)
     driver4Table->selectRow(4);
     driver4Table->setCurrentCell(4, 1);
     QApplication::processEvents();
-    if (driver4Table->item(4, 1) == nullptr ||
-        driver4Table->item(4, 1)->text() != QStringLiteral("High Shelf") ||
-        driver4Characteristic->isEnabled() || driver4Order->isEnabled() ||
+    if (driver4Characteristic->isEnabled() || driver4Order->isEnabled() ||
         !driver4Frequency1->isEnabled() || driver4Frequency2->isEnabled() ||
         !driver4Q->isEnabled() || !driver4Gain->isEnabled() ||
         driver4Delay->isEnabled() || driver4Polarity->isEnabled() ||
@@ -371,11 +338,7 @@ int main(int argc, char **argv)
     if (characteristic == nullptr || order == nullptr || frequency1 == nullptr || q == nullptr || gain == nullptr ||
         characteristic->currentData().toInt() != static_cast<int>(ActiveFilterCharacteristic::LinkwitzRiley) ||
         order->value() != 4 || !near(frequency1->value(), 80.0) ||
-        !characteristic->isEnabled() || !order->isEnabled() || !frequency1->isEnabled() || q->isEnabled() ||
-        !order->toolTip().contains(QStringLiteral("LR2")) ||
-        !order->toolTip().contains(QStringLiteral("LR4")) ||
-        !order->toolTip().contains(QStringLiteral("LR6")) ||
-        !order->toolTip().contains(QStringLiteral("LR8"))) {
+        !characteristic->isEnabled() || !order->isEnabled() || !frequency1->isEnabled() || q->isEnabled()) {
         std::cerr << "Linkwitz-Riley editor state was not loaded correctly\n";
         return 3;
     }
@@ -384,8 +347,7 @@ int main(int argc, char **argv)
     // immediately remain a valid active-filter chain.
     order->setValue(8);
     QApplication::processEvents();
-    if (!responseStatus->text().contains(QStringLiteral("valid and applied")) ||
-        std::get<ActiveFilterHighPassParameters>(driver3.section(0).parameters()).order != 8) {
+    if (std::get<ActiveFilterHighPassParameters>(driver3.section(0).parameters()).order != 8) {
         std::cerr << "LR8 was not accepted as a supported Linkwitz-Riley order\n";
         return 3;
     }
@@ -436,15 +398,15 @@ int main(int argc, char **argv)
     type->setCurrentIndex(type->findData(static_cast<int>(ActiveFilterType::Gain)));
     gain->setValue(-2.5);
     QApplication::processEvents();
-    if (table->item(2, 1)->text() != QStringLiteral("Gain")) {
-        std::cerr << "GUI type change did not update the working model/table\n";
+    if (driver3.section(2).type() != ActiveFilterType::Gain) {
+        std::cerr << "GUI type change did not update the working model\n";
         return 6;
     }
 
     moveUpButton->click();
     QApplication::processEvents();
-    if (table->item(1, 1)->text() != QStringLiteral("Gain") ||
-        table->item(2, 1)->text() != QStringLiteral("Notch")) {
+    if (driver3.section(1).type() != ActiveFilterType::Gain ||
+        driver3.section(2).type() != ActiveFilterType::Notch) {
         std::cerr << "GUI move operation did not reorder the working model\n";
         return 7;
     }

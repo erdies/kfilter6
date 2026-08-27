@@ -334,6 +334,46 @@ int main()
         return 1;
     }
 
+    // Product contract retained from the former LF-candidate diagnostic test:
+    // Free-field Rectangular magnitude uses the accepted width-anchored n=2
+    // law, while the raw rectangular phase remains unchanged. Historical
+    // sqrt(W*H), n=1 and n=1.5 candidates are intentionally not regression
+    // contracts anymore.
+    const BaffleResponse zrtRawPoint =
+        calculateBaffleUnblendedRectangularResponseForDiagnostic(zrt, 0.0);
+    BaffleSettings zrtSimpleSettings = zrt;
+    zrtSimpleSettings.model = BaffleModel::SimpleBaffleStep;
+    const BaffleResponse zrtSimple = calculateBaffleResponse(zrtSimpleSettings, 0.0);
+    const double zrtMidpointHz = simpleBaffleStepMidpointFrequencyHz(zrt.widthMm);
+    if (!require(zrtRawPoint.status == BaffleResponseStatus::Valid &&
+                     zrtSimple.status == BaffleResponseStatus::Valid &&
+                     zrtMidpointHz > 0.0,
+                 "productive LF-hybrid reference setup must be valid")) {
+        return 1;
+    }
+    for (std::size_t sampleIndex = 0; sampleIndex < KFilterFrequencyCount; ++sampleIndex) {
+        const double rawMagnitude = std::abs(zrtRawPoint.values[sampleIndex]);
+        const double simpleMagnitude = std::abs(zrtSimple.values[sampleIndex]);
+        if (!require(rawMagnitude > 0.0 && simpleMagnitude > 0.0,
+                     "productive LF-hybrid reference magnitude must be positive")) {
+            return 1;
+        }
+        const double ratio = frequencies[sampleIndex] / zrtMidpointHz;
+        const double squaredRatio = ratio * ratio;
+        const double weight = squaredRatio / (1.0 + squaredRatio);
+        const double expectedDb =
+            20.0 * std::log10(simpleMagnitude) +
+            weight * (20.0 * std::log10(rawMagnitude) -
+                      20.0 * std::log10(simpleMagnitude));
+        const double expectedMagnitude = std::pow(10.0, expectedDb / 20.0);
+        const std::complex<double> expected =
+            zrtRawPoint.values[sampleIndex] * (expectedMagnitude / rawMagnitude);
+        if (!require(nearComplex(zrtPoint.values[sampleIndex], expected, 5.0e-10),
+                     "Free-field Rectangular response changed the productive width-anchored n=2 law")) {
+            return 1;
+        }
+    }
+
     // M=73 production sampling is compared with an independent M=145 coherent
     // average assembled only from the public Patch-193 point-source path.
     const BaffleResponse zrtFinite145 =

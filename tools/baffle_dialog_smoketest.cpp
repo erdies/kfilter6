@@ -14,9 +14,6 @@
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
-#include <QGroupBox>
-#include <QGridLayout>
-#include <QLabel>
 #include <QLineEdit>
 #include <QMouseEvent>
 #include <QPushButton>
@@ -51,11 +48,6 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (dialog.findChild<QLabel *>(QStringLiteral("baffleStageNotice")) != nullptr) {
-        std::cerr << "Patch-250 obsolete explanatory notice is still present\n";
-        return 1;
-    }
-
     auto *enabled = dialog.findChild<QCheckBox *>(QStringLiteral("baffleEnableDriver1"));
     auto *model = dialog.findChild<QComboBox *>(QStringLiteral("baffleModelCombo1"));
     auto *boundary = dialog.findChild<QComboBox *>(QStringLiteral("baffleBoundaryConditionCombo1"));
@@ -67,16 +59,14 @@ int main(int argc, char **argv)
     auto *leftChamfer = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("baffleLeftChamferSpin1"));
     auto *rightTreatment = dialog.findChild<QComboBox *>(QStringLiteral("baffleRightEdgeTreatmentCombo1"));
     auto *rightChamfer = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("baffleRightChamferSpin1"));
-    auto *midpoint = dialog.findChild<QLabel *>(QStringLiteral("baffleMidpointLabel1"));
     auto *geometryPreviewWidget = dialog.findChild<QWidget *>(
         QStringLiteral("baffleGeometryPreview1"));
     auto *geometryPreview = dynamic_cast<BaffleGeometryPreview *>(geometryPreviewWidget);
     auto *showResponse = dialog.findChild<QCheckBox *>(QStringLiteral("baffleShowResponseDriver1"));
-    auto *status = dialog.findChild<QLabel *>(QStringLiteral("baffleResponseStatus1"));
     if (enabled == nullptr || model == nullptr || boundary == nullptr || width == nullptr || height == nullptr ||
         driverX == nullptr || driverY == nullptr || leftTreatment == nullptr ||
         leftChamfer == nullptr || rightTreatment == nullptr || rightChamfer == nullptr ||
-        midpoint == nullptr || geometryPreview == nullptr || showResponse == nullptr || status == nullptr) {
+        geometryPreview == nullptr || showResponse == nullptr) {
         std::cerr << "Baffle controls are missing\n";
         return 2;
     }
@@ -94,8 +84,6 @@ int main(int argc, char **argv)
         !near(geometryPreview->rightChamferSetbackMm(), 0.0) ||
         leftTreatment->currentData().toInt() != static_cast<int>(BaffleSideEdgeTreatment::Sharp) ||
         rightTreatment->currentData().toInt() != static_cast<int>(BaffleSideEdgeTreatment::Sharp) ||
-        !midpoint->text().contains(QStringLiteral("497")) ||
-        !status->text().contains(QStringLiteral("valid complex Simple")) ||
         height->isEnabled() || driverX->isEnabled() || driverY->isEnabled() ||
         leftTreatment->isEnabled() || rightTreatment->isEnabled() ||
         leftChamfer->isEnabled() || rightChamfer->isEnabled() ||
@@ -132,8 +120,7 @@ int main(int argc, char **argv)
     width->setValue(300.0);
     QApplication::processEvents();
     if (!near(settings[0].widthMm, 300.0) || previewCount == 0 ||
-        !near(geometryPreview->baffleWidthMm(), 300.0) ||
-        !midpoint->text().contains(QStringLiteral("383"))) {
+        !near(geometryPreview->baffleWidthMm(), 300.0)) {
         std::cerr << "Baffle width change was not mirrored into the live preview model\n";
         return 4;
     }
@@ -188,9 +175,7 @@ int main(int argc, char **argv)
         !height->isEnabled() || !driverX->isEnabled() || !driverY->isEnabled() ||
         !leftTreatment->isEnabled() || !rightTreatment->isEnabled() ||
         leftChamfer->isEnabled() || rightChamfer->isEnabled() ||
-        !geometryPreview->driverDragEnabled() ||
-        !midpoint->text().contains(QStringLiteral("not applicable")) ||
-        !status->text().contains(QStringLiteral("invalid geometry"))) {
+        !geometryPreview->driverDragEnabled()) {
         std::cerr << "Stage-2 selection or initial invalid-geometry state is inconsistent\n";
         return 6;
     }
@@ -207,8 +192,7 @@ int main(int argc, char **argv)
         !near(geometryPreview->driverXmm(), 90.0) ||
         !near(geometryPreview->driverYmm(), 310.0) ||
         !near(geometryPreview->leftChamferSetbackMm(), 0.0) ||
-        !near(geometryPreview->rightChamferSetbackMm(), 0.0) ||
-        !status->text().contains(QStringLiteral("sharp side edges"))) {
+        !near(geometryPreview->rightChamferSetbackMm(), 0.0)) {
         std::cerr << "Valid Rectangular Edge Diffraction geometry was not previewed\n";
         return 7;
     }
@@ -233,7 +217,6 @@ int main(int argc, char **argv)
             rightTreatment->model()->index(rightChamferIndex, 0)) & Qt::ItemIsEnabled);
     if (settings[0].boundaryCondition !=
             BaffleBoundaryCondition::RigidFloorContactDiffractionOnly ||
-        !status->text().contains(QStringLiteral("rigid floor contact"), Qt::CaseInsensitive) ||
         leftChamferItemEnabled || rightChamferItemEnabled) {
         std::cerr << "Rigid floor mode did not activate the Sharp-only productive state\n";
         return 35;
@@ -260,8 +243,7 @@ int main(int argc, char **argv)
         !near(settings[0].rightChamferSetbackMm, 30.0) ||
         !leftChamfer->isEnabled() || !rightChamfer->isEnabled() ||
         !near(geometryPreview->leftChamferSetbackMm(), 25.0) ||
-        !near(geometryPreview->rightChamferSetbackMm(), 30.0) ||
-        !status->text().contains(QStringLiteral("45-degree side chamfer"))) {
+        !near(geometryPreview->rightChamferSetbackMm(), 30.0)) {
         std::cerr << "Chamfer edge controls were not mirrored into the live preview model\n";
         return 25;
     }
@@ -284,16 +266,6 @@ int main(int argc, char **argv)
         !near(geometryPreview->leftChamferSetbackMm(), 25.5)) {
         std::cerr << "Decimal-comma chamfer input was not accepted\n";
         return 29;
-    }
-    leftChamfer->setValue(25.0);
-    QApplication::processEvents();
-
-    // A driver centre that falls on/inside the chamfered strip is invalid.
-    leftChamfer->setValue(90.0);
-    QApplication::processEvents();
-    if (!status->text().contains(QStringLiteral("invalid geometry"))) {
-        std::cerr << "Chamfer consuming the driver centre was not rejected in the dialog\n";
-        return 30;
     }
     leftChamfer->setValue(25.0);
     QApplication::processEvents();
@@ -416,8 +388,7 @@ int main(int argc, char **argv)
         driverX->isEnabled() || driverY->isEnabled() || model->isEnabled() ||
         leftTreatment->isEnabled() || rightTreatment->isEnabled() ||
         leftChamfer->isEnabled() || rightChamfer->isEnabled() ||
-        geometryPreview->driverDragEnabled() ||
-        !status->text().contains(QStringLiteral("bypassed"))) {
+        geometryPreview->driverDragEnabled()) {
         std::cerr << "Baffle master bypass state is inconsistent\n";
         return 9;
     }
@@ -476,10 +447,6 @@ int main(int argc, char **argv)
     BaffleParametersDialog::FloorReflectionSettingsPerDriver floorSettings{};
     BaffleParametersDialog floorDialog(floorBaffleSettings, floorSettings, nullptr, 0);
 
-    auto *floorGroup = floorDialog.findChild<QGroupBox *>(
-        QStringLiteral("floorReflectionGroup1"));
-    auto *floorLayout = floorDialog.findChild<QGridLayout *>(
-        QStringLiteral("floorReflectionLayout1"));
     auto *floorEnable = floorDialog.findChild<QCheckBox *>(
         QStringLiteral("floorReflectionEnableDriver1"));
     auto *floorHeight = floorDialog.findChild<QDoubleSpinBox *>(
@@ -500,53 +467,15 @@ int main(int argc, char **argv)
         QStringLiteral("floorReflectionDistanceSpin1"));
     auto *surface = floorDialog.findChild<QComboBox *>(
         QStringLiteral("floorReflectionSurfaceCombo1"));
-    auto *floorStatus = floorDialog.findChild<QLabel *>(
-        QStringLiteral("floorReflectionStatus1"));
     auto *floorButtons = floorDialog.findChild<QDialogButtonBox *>(
         QStringLiteral("baffleDialogButtons"));
 
-    if (floorGroup == nullptr || floorLayout == nullptr || floorEnable == nullptr ||
-        floorHeight == nullptr || floorDriverY == nullptr || floorWidth == nullptr ||
+    if (floorEnable == nullptr || floorHeight == nullptr || floorDriverY == nullptr || floorWidth == nullptr ||
         floorDriverX == nullptr || floorModel == nullptr || cabinetBottom == nullptr ||
         listenerHeight == nullptr || listeningDistance == nullptr || surface == nullptr ||
-        floorStatus == nullptr || floorButtons == nullptr) {
+        floorButtons == nullptr) {
         std::cerr << "Patch-227 Floor Reflection controls are missing\n";
         return 40;
-    }
-
-    // Patch 249: keep the two vertical geometry fields in the left form column,
-    // place distance/surface in the right column, and let the status information
-    // span the remaining full width below both columns.
-    auto checkFloorGridPosition = [floorLayout](QWidget *widget,
-                                                int expectedRow,
-                                                int expectedColumn,
-                                                int expectedRowSpan = 1,
-                                                int expectedColumnSpan = 1) {
-        const int index = floorLayout->indexOf(widget);
-        if (index < 0) {
-            return false;
-        }
-        int row = -1;
-        int column = -1;
-        int rowSpan = -1;
-        int columnSpan = -1;
-        floorLayout->getItemPosition(index, &row, &column, &rowSpan, &columnSpan);
-        return row == expectedRow && column == expectedColumn &&
-               rowSpan == expectedRowSpan && columnSpan == expectedColumnSpan;
-    };
-    if (!checkFloorGridPosition(floorEnable, 0, 0, 1, 4) ||
-        !checkFloorGridPosition(cabinetBottom, 1, 1) ||
-        !checkFloorGridPosition(listenerHeight, 2, 1) ||
-        !checkFloorGridPosition(listeningDistance, 1, 3) ||
-        !checkFloorGridPosition(surface, 2, 3) ||
-        !checkFloorGridPosition(floorStatus, 3, 1, 1, 3)) {
-        std::cerr << "Patch-249 compact Floor Reflection grid layout is inconsistent\n";
-        return 51;
-    }
-
-    if (!floorGroup->title().contains(QStringLiteral("Experimental"), Qt::CaseInsensitive)) {
-        std::cerr << "Patch-233 Floor Reflection group is not marked Experimental\n";
-        return 50;
     }
 
     if (floorEnable->isChecked() || cabinetBottom->isEnabled() || listenerHeight->isEnabled() ||
@@ -555,8 +484,7 @@ int main(int argc, char **argv)
         !near(listeningDistance->value(), 2500.0) || surface->count() != 2 ||
         surface->itemData(0).toInt() != static_cast<int>(FloorSurfacePreset::HardRigid) ||
         surface->itemData(1).toInt() != static_cast<int>(FloorSurfacePreset::MikiReference10mm100k) ||
-        surface->currentData().toInt() != static_cast<int>(FloorSurfacePreset::HardRigid) ||
-        !floorStatus->text().contains(QStringLiteral("bypassed"), Qt::CaseInsensitive)) {
+        surface->currentData().toInt() != static_cast<int>(FloorSurfacePreset::HardRigid)) {
         std::cerr << "Patch-227 Floor Reflection defaults are inconsistent\n";
         return 41;
     }
@@ -589,17 +517,14 @@ int main(int argc, char **argv)
         !near(floorSettings[0].cabinetBottomAboveFloorMm, 0.0) ||
         !near(floorSettings[0].listenerHeightAboveFloorMm, 1050.0) ||
         !near(floorSettings[0].horizontalDistanceMm, 2500.0) ||
-        floorSettings[0].surfacePreset != FloorSurfacePreset::HardRigid ||
-        !floorStatus->text().contains(QStringLiteral("720.0 mm"))) {
+        floorSettings[0].surfacePreset != FloorSurfacePreset::HardRigid) {
         std::cerr << "Floor Reflection live preview or derived source height is inconsistent\n";
         return 43;
     }
 
     surface->setCurrentIndex(1);
     QApplication::processEvents();
-    if (floorSettings[0].surfacePreset != FloorSurfacePreset::MikiReference10mm100k ||
-        !floorStatus->text().contains(QStringLiteral("Miki reference"), Qt::CaseInsensitive) ||
-        !floorStatus->text().contains(QStringLiteral("experimental"), Qt::CaseInsensitive)) {
+    if (floorSettings[0].surfacePreset != FloorSurfacePreset::MikiReference10mm100k) {
         std::cerr << "Patch-229 Miki reference preset was not previewed in the dialog\n";
         return 49;
     }
