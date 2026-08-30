@@ -576,6 +576,9 @@ Typical source files:
 
 ```text
 CMakeLists.txt
+CONTRACTS.md
+OPEN_POINTS.md
+PORTING.md
 mainqt6.cpp
 kfilterqt6app.cpp / .h
 kfilterdoc.cpp / .h
@@ -599,6 +602,8 @@ kfilterqt6app.cpp
 ## Development notes
 
 KFilter6 is being ported and improved incrementally. The preferred change style is small, reviewable patches that keep the application buildable after each step.
+
+Three documents are maintained alongside the code. `CONTRACTS.md` states what currently holds: persistence formats, the frequency grid, the driver and enclosure model, parameter validation, the processing chain, the test strategy, and the patch procedure. `OPEN_POINTS.md` lists what is known to be unresolved, including deliberate deviations that are documented rather than fixed. `PORTING.md` is the chronological record of how each patch came about. When `PORTING.md` and `CONTRACTS.md` disagree, `CONTRACTS.md` wins and the disagreement is a defect to be corrected.
 
 Patch 166 hardens the internal driver state handling. Calculation-relevant setter methods and network cleanup now invalidate cached SPL and impedance results automatically. Parameter calculation also resets its validity and phase flags on every run, so a previous invalid resonance frequency or bass-reflex enclosure cannot contaminate a later valid driver state.
 

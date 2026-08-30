@@ -1823,3 +1823,36 @@ or physical normalization provenance still needs further analysis.
   directly, verifies that a rejected value really does drive the core
   non-finite, and exercises all three file paths end to end. Registered CTests
   rise from 21 to 22.
+
+## Patch 299: Contracts and open points move into the repository
+
+- `CONTRACTS.md` is new and is now the single authoritative statement of what
+  currently holds: persistence formats, the `EnclosureType` mapping, the
+  network serialization boundary, the frequency grid, the driver and enclosure
+  model, the Patch-298 validation rules, the processing chain, the test
+  strategy, and the patch procedure. It replaces the contract sections that
+  previously lived in the external handover packages.
+- `OPEN_POINTS.md` is new and carries forward the open points from the Patch
+  297 handover, extended by the findings of the Patch 298 review: the
+  magnitude-only Vented path in simplified mode, the frequency grid ending at
+  roughly 19.1 kHz, the duplicated grid definition between
+  `kfilterfrequencygrid.cpp` and `driver.cpp`, the loop-invariant
+  `findLastNetworkSectionIndex()` call, the unchecked `Qts`/`Qms`/`Qes`
+  relation, and the structural debt in `driver` and the three large
+  translation units.
+- Both documents are versioned with the code. A contract change and the code
+  change that causes it now travel in the same commit, which was not possible
+  while the contracts lived in separate handover archives.
+- `.gitattributes` is new and pins all text files to LF in the repository.
+  CRLF line endings had already caused one patch to be unapplicable during the
+  Patch 298 handover; this removes that class of failure.
+- `README.md` lists the three project documents in the repository layout and
+  explains their division of labour. Where `PORTING.md` and `CONTRACTS.md`
+  disagree, `CONTRACTS.md` wins and the disagreement is a defect.
+- The patch procedure changes with this patch. The Git repository is the
+  authoritative basis; tarballs, manifests, `SHA256SUMS` and the former verify
+  scripts are retired, because Git guarantees integrity and reconstruction
+  through its object hashes. Patches are exchanged as `git format-patch` and
+  applied with `git am -3`. A repackaging no longer consumes a patch number.
+- No source change. `KFILTER_PATCH_LEVEL` goes 298 -> 299; the binary and all
+  22 registered CTests are unaffected.

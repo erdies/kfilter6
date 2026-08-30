@@ -1,0 +1,18 @@
+# KFilter6
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Alle Textdateien werden im Repository mit LF gespeichert. Das verhindert,
+# dass CRLF-Zeilenenden in die Historie geraten und Patches unanwendbar machen.
+* text=auto eol=lf
+
+# Explizit binaer, damit Git keine Zeilenenden umschreibt.
+*.png binary
+*.jpg binary
+*.ico binary
+*.gz  binary
+*.qm  binary
+
+# Sinnvolle Hunk-Kopfzeilen in Diffs.
+*.cpp diff=cpp
+*.h   diff=cpp
+*.md  diff=markdown
