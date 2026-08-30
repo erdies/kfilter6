@@ -1856,3 +1856,43 @@ or physical normalization provenance still needs further analysis.
   applied with `git am -3`. A repackaging no longer consumes a patch number.
 - No source change. `KFILTER_PATCH_LEVEL` goes 298 -> 299; the binary and all
   22 registered CTests are unaffected.
+
+## Patch 300: Vented rolloff carries phase in simplified mode
+
+- In simplified mode the Vented branch of `calculateAcousticResponse()`
+  contributed magnitude only:
+
+  ```text
+  factor = bx / sqrt( (bx - a2*bu + a0)^2 + (a1*bw - a3*bu*bw)^2 )
+  response *= factor;
+  ```
+
+  That is `|H|` of the fourth-order high-pass `H(s) = s^4 / D(s)` at
+  `s = j*bw`, with the real and imaginary parts of the denominator already
+  spelled out under the square root. The phase was therefore never discarded,
+  it was never formed. Open Baffle, Sealed and Bandpass all used complex
+  transfer functions in the same mode, so Vented was the odd one out and the
+  vector summation across a crossover involving a vented driver was wrong.
+- The denominator is now built as a complex number and the response multiplied
+  by `bx / D`. The magnitude is mathematically identical, so the SPL curve of
+  an individual driver does not change. What changes is the vector summation,
+  which is the point of the patch.
+- No switch and no persistence. The phase-free calculation was a performance
+  measure of the DOS-era `filter.exe` on hardware without a floating point
+  unit, not a modelling variant; a control whose off position is known to be
+  physically wrong would be worse than none. Should a comparison ever be
+  needed, tag `patch-299` provides the previous behaviour.
+- The unused local `factor` is removed. No format change, no dialog change.
+- New `kfilter_vented_rolloff_phase_smoketest` covers five vented alignments
+  across the whole grid and asserts two things: the magnitude still matches the
+  historical scalar formula to within 1e-12 relative, and the complex response
+  matches an independently implemented reference transfer function. It then
+  checks that the phase is present at all, decreases monotonically, ends near
+  zero degrees at the top of the grid, and rotates by more than 200 degrees.
+  Registered CTests rise from 22 to 23.
+- The test compares at the frequencies `driver.cpp` evaluates internally rather
+  than at `kfilterFrequencyGridHz()`. The two grids differ by about 3.5e-9
+  relative because `driver.cpp` starts at `omega = 125.6637061` and converts
+  back with the truncated constant `0.159154943`. That is harmless but it is
+  the duplicated grid definition already recorded in `OPEN_POINTS.md`, and it
+  surfaced while writing this test.

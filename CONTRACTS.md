@@ -9,7 +9,7 @@ entstanden ist. `CONTRACTS.md` beschreibt, **was aktuell gilt**. Bei einem
 Widerspruch gewinnt dieses Dokument, und der Widerspruch ist ein Fehler, der
 behoben werden muss.
 
-Stand: Patch 299.
+Stand: Patch 300.
 
 ## 1. Persistenzformate
 
@@ -78,18 +78,29 @@ gleich, aber die Konstante ist dupliziert.
   `LegacyFullCircuitCalibrationGain` bleiben als dormante beziehungsweise
   historische Pfade erhalten und werden nicht ohne eigenen Patch entfernt.
 
-### Bekannte Modellabweichung: Vented im vereinfachten Modus
+### Vented-Rolloff im vereinfachten Modus
 
-Im vereinfachten Modus trägt der Vented-Pfad nur den Betrag bei
-(`response *= factor` mit reellem `factor`). Open Baffle und Sealed verwenden
-im selben Modus komplexe Übertragungsfunktionen. Die Phasendrehung des
-Hochpasses vierter Ordnung fehlt damit bei Bassreflex, und die Vektorsumme über
-die Übernahmefrequenz ist in diesem Fall physikalisch nicht korrekt. Im Full-
-Circuit-Modus ist die Phase vorhanden.
+Seit Patch 300 tragen alle vier Gehäusetypen im vereinfachten Modus die Phase.
+Der Vented-Zweig bildet den Nenner des Hochpasses vierter Ordnung als komplexe
+Zahl:
 
-Dies ist erhaltenes Legacy-Verhalten aus der Pascal-Vorlage. Eine Änderung wäre
-eine Verhaltensänderung und braucht einen eigenen Patch mit numerischer
-Regression.
+```text
+H(s) = s^4 / (s^4 + a3*s^3 + a2*s^2 + a1*s + a0)   bei s = j*bw
+
+Re(D) = bx - a2*bu + a0
+Im(D) = a1*bw - a3*bu*bw
+H     = bx / D
+```
+
+Bis Patch 299 wurde daraus nur `|H| = bx / sqrt(Re^2 + Im^2)` gebildet. Die
+Phase wurde also nie verworfen, sondern nie gebildet. Der Betragsverlauf ist
+durch die Umstellung unverändert; geändert hat sich ausschließlich die
+Vektorsumme über die Übernahmefrequenz, die vorher physikalisch nicht korrekt
+war.
+
+Es gibt bewusst keinen Schalter für dieses Verhalten. Die frühere Rechnung ohne
+Phase war eine Performance-Maßnahme der DOS-Vorlage, keine
+Modellierungsvariante.
 
 ## 4. Validierung der Driver-Parameter
 
@@ -135,7 +146,7 @@ Floor Reflection bleibt als experimentell gekennzeichnet.
 
 ## 6. Teststrategie
 
-Registrierte CTests: 22.
+Registrierte CTests: 23.
 
 Ein Patch gilt als validiert, wenn er baut und `ctest` vollständig durchläuft.
 Beschriftungen und pixelgenaue Ausrichtung werden nicht automatisiert getestet,
@@ -149,7 +160,7 @@ Referenzumgebung des zuletzt belegten Laufs:
 
 ```text
 Ubuntu 24.04, GCC 13.3.0, CMake 3.28.3, Qt 6.4.2, Release
-0 Fehler, 0 Warnungen, 22/22 Tests bestanden
+0 Fehler, 0 Warnungen, 23/23 Tests bestanden
 ```
 
 ## 7. Patch- und Übergabeverfahren

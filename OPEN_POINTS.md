@@ -1,15 +1,17 @@
 # KFilter6 – Offene Punkte
 
-Stand: Patch 299. Dieses Dokument wird mitgeführt und bei jedem Patch
+Stand: Patch 300. Dieses Dokument wird mitgeführt und bei jedem Patch
 aktualisiert, der einen Punkt erledigt oder einen neuen aufwirft.
 
 ## Vorgeschlagene Reihenfolge
 
-1. **Numerische Regressionsbasis** (Patch 300). Eingecheckte Referenzwerte für
+1. **Numerische Regressionsbasis** (Patch 301). Eingecheckte Referenzwerte für
    die 150 Stützstellen definierter Parametersätze, geprüft von einem Test.
    Solange die fehlt, ist die Auflage „nur mit numerischer Regression" für das
    Driver-Refactoring eine Absicht ohne Werkzeug. Muss vor jeder
-   Strukturänderung am Rechenkern stehen.
+   Strukturänderung am Rechenkern stehen. Der Patch-300-Test ist der erste
+   Baustein: er vergleicht gegen eine unabhängig implementierte Referenz statt
+   gegen festgeschriebene Zahlen.
 2. **UI-Zustand aus dem Rechenkern lösen.** `DriverPlotState` ist reiner
    Darstellungszustand und liegt in `driver`. Billiger und risikoärmer als das
    Auseinandernehmen der Rechenkette, und ein sinnvoller erster Schritt des
@@ -19,17 +21,14 @@ aktualisiert, der einen Punkt erledigt oder einen neuen aufwirft.
 
 ## Numerik und Modell
 
-- **Vented im vereinfachten Modus trägt nur den Betrag bei.** Die
-  Phasendrehung des Hochpasses vierter Ordnung fehlt, die Vektorsumme über die
-  Übernahmefrequenz ist dadurch bei Bassreflex nicht korrekt. Siehe
-  `CONTRACTS.md` Abschnitt 3. Zu klären: ist das Legacy-Verhalten gewollt oder
-  soll der vereinfachte Pfad komplex werden?
 - **Frequenzraster endet bei 19,1 kHz statt 20 kHz.** 149 Schritte ab 20 Hz mit
   Faktor 10^(1/50). Für 20 kHz wären 151 Punkte nötig. Off-by-one aus der
   Pascal-Vorlage oder Absicht?
 - **Rasterdefinition ist doppelt vorhanden.** `driver.cpp` startet unabhängig
-  von `kfilterfrequencygrid.cpp` bei `omega = 125.6637061`. Beide driften
-  gleich, aber die Konstante gehört an eine Stelle.
+  von `kfilterfrequencygrid.cpp` bei `omega = 125.6637061` und rechnet mit der
+  gekürzten Konstante `0.159154943` zurück. Beide Raster weichen dadurch um
+  rund 3.5e-9 relativ voneinander ab, aufgefallen beim Schreiben des Patch-300-
+  Tests. Unkritisch, aber die Definition gehört an eine Stelle.
 - **`double pi = 3.141592654` lokal in `driver.cpp`** statt `M_PI`. Relativer
   Fehler rund 1,3e-10, unkritisch, aber unnötig.
 - **`findLastNetworkSectionIndex()` steht in beiden Frequenzschleifen** und
@@ -74,3 +73,6 @@ aktualisiert, der einen Punkt erledigt oder einen neuen aufwirft.
   nicht-endliche Stützstellen über das gesamte Raster, ohne Fehlermeldung.
 - **Patch 299** – Verträge und offene Punkte liegen jetzt im Repository und
   werden mit dem Code versioniert statt in externen Handover-Paketen.
+- **Patch 300** – Der Vented-Rolloff trug im vereinfachten Modus nur den Betrag
+  bei. Alle vier Gehäusetypen tragen jetzt die Phase; die Sonderrolle von
+  Vented entfällt.

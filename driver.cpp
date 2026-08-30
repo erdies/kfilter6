@@ -260,7 +260,6 @@ void driver::calculateAcousticResponse(std::complex<double>& response, double om
 {
 	std::complex<double> networkImpedance;
 	std::complex<double> terminationImpedance;
-	double factor;
 	double bw;
 	double bu;
 	double bx;//,hilfe;
@@ -354,11 +353,20 @@ void driver::calculateAcousticResponse(std::complex<double>& response, double om
 		{
 			if (!show_reflex_only)
 			{
+				// Fourth-order high-pass H(s) = s^4 / (s^4 + a3*s^3 + a2*s^2 + a1*s + a0)
+				// evaluated at s = j*bw. The historical implementation formed only
+				// |H| by taking the square root of the sum of the squared real and
+				// imaginary parts of the denominator, which discarded the phase and
+				// left the vector summation of a vented driver incorrect. Forming
+				// the denominator as a complex number instead keeps the magnitude
+				// bit-for-bit equivalent and restores the phase rotation.
 				bw=omega*0.159154943/F0;    //omega/(2*pi)
 				bu=pow(bw,2.0);
 				bx=pow(bu,2.0);
-				factor=bx/sqrt(pow(bx-ventedDenominatorA2*bu+ventedDenominatorA0,2.0)+pow(ventedDenominatorA1*bw-ventedDenominatorA3*bu*bw,2.0));
-				response *= factor;
+				const std::complex<double> ventedDenominator{
+					bx-ventedDenominatorA2*bu+ventedDenominatorA0,
+					ventedDenominatorA1*bw-ventedDenominatorA3*bu*bw};
+				response *= bx / ventedDenominator;
 			}
 			else
 			{
