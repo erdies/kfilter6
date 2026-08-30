@@ -466,7 +466,7 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     tubeColumnSpacer->setFixedWidth(qlLabel->sizeHint().width());
     tubeLayout->addWidget(tubeColumnSpacer);
     tubeLayout->addWidget(page.tubeLength);
-    addRow(boxForm, tr("Tube Dm / L"), tubeLayoutWidget);
+    addRow(boxForm, tr("Tube D / L"), tubeLayoutWidget);
 
     addRow(boxForm, tr("V2"), page.v2);
     addRow(boxForm, tr("Gain"), page.gainDb);

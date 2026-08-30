@@ -13,6 +13,7 @@
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
+#include <QFontMetrics>
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHeaderView>
@@ -292,6 +293,17 @@ QWidget *NetworkParametersDialog::createDriverPage(int index)
     auto *layout = new QVBoxLayout(page.page);
     layout->addWidget(presetGroup);
     layout->addWidget(page.table);
+
+    QString driverTitle = m_drivers[index].getTitle().trimmed();
+    if (driverTitle.isEmpty()) {
+        driverTitle = tr("Driver %1").arg(index + 1);
+    }
+    auto *driverTitleLabel = new QLabel(tr("Driver: %1").arg(driverTitle), page.page);
+    driverTitleLabel->setTextFormat(Qt::PlainText);
+    driverTitleLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    driverTitleLabel->setAlignment(Qt::AlignHCenter | Qt::AlignVCenter);
+    layout->addSpacing(driverTitleLabel->fontMetrics().height());
+    layout->addWidget(driverTitleLabel);
 
     updatePresetControlState(index);
 
