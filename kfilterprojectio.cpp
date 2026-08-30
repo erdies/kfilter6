@@ -6,6 +6,7 @@
 
 #include "kfilterprojectio.h"
 
+#include "driverparametervalidation.h"
 #include "networkserializationutils.h"
 
 #include <QByteArray>
@@ -187,18 +188,41 @@ bool parseDriverParameters(const QStringList& lines,
         } \
         target = boolValue
 
-        READ_DOUBLE_FIELD("Rdc", currentDriver.setRdc(doubleValue));
-        READ_DOUBLE_FIELD("Lsp", currentDriver.setLsp(doubleValue));
-        READ_DOUBLE_FIELD("F0", currentDriver.setF0(doubleValue));
-        READ_DOUBLE_FIELD("Qts", currentDriver.setQts(doubleValue));
-        READ_DOUBLE_FIELD("Qe", currentDriver.setQes(doubleValue));
-        READ_DOUBLE_FIELD("Qms", currentDriver.setQms(doubleValue));
-        READ_DOUBLE_FIELD("Vas", currentDriver.setVas(doubleValue));
-        READ_DOUBLE_FIELD("Dm", currentDriver.setDm(doubleValue));
-        READ_DOUBLE_FIELD("Vb", currentDriver.setVb(doubleValue));
-        READ_DOUBLE_FIELD("Fb", currentDriver.setFb(doubleValue));
-        READ_DOUBLE_FIELD("V2", currentDriver.setV2(doubleValue));
+        KFilterDriverValidation::Parameters validationParameters;
+
+        READ_DOUBLE_FIELD("Rdc", validationParameters.rdcOhm = doubleValue);
+        READ_DOUBLE_FIELD("Lsp", validationParameters.lspH = doubleValue);
+        READ_DOUBLE_FIELD("F0", validationParameters.fsHz = doubleValue);
+        READ_DOUBLE_FIELD("Qts", validationParameters.qts = doubleValue);
+        READ_DOUBLE_FIELD("Qe", validationParameters.qes = doubleValue);
+        READ_DOUBLE_FIELD("Qms", validationParameters.qms = doubleValue);
+        READ_DOUBLE_FIELD("Vas", validationParameters.vasLitres = doubleValue);
+        READ_DOUBLE_FIELD("Dm", validationParameters.diameterCm = doubleValue);
+        READ_DOUBLE_FIELD("Vb", validationParameters.vbLitres = doubleValue);
+        READ_DOUBLE_FIELD("Fb", validationParameters.fbHz = doubleValue);
+        READ_DOUBLE_FIELD("V2", validationParameters.v2Litres = doubleValue);
         READ_INT_FIELD("GTypProposal", enclosureTypeProposalValue);
+        validationParameters.enclosureTypeProposal = enclosureTypeProposalValue;
+
+        QString validationReason;
+        if (!KFilterDriverValidation::validateDriverParameters(validationParameters,
+                                                              &validationReason)) {
+            setError(errorMessage,
+                     QStringLiteral("Driver %1: %2").arg(driverNumber).arg(validationReason));
+            return false;
+        }
+
+        currentDriver.setRdc(validationParameters.rdcOhm);
+        currentDriver.setLsp(validationParameters.lspH);
+        currentDriver.setF0(validationParameters.fsHz);
+        currentDriver.setQts(validationParameters.qts);
+        currentDriver.setQes(validationParameters.qes);
+        currentDriver.setQms(validationParameters.qms);
+        currentDriver.setVas(validationParameters.vasLitres);
+        currentDriver.setDm(validationParameters.diameterCm);
+        currentDriver.setVb(validationParameters.vbLitres);
+        currentDriver.setFb(validationParameters.fbHz);
+        currentDriver.setV2(validationParameters.v2Litres);
         currentDriver.setEnclosureTypeProposal(static_cast<EnclosureType>(enclosureTypeProposalValue));
         READ_DOUBLE_FIELD("Gain", currentDriver.setGainLinear(doubleValue));
         READ_BOOL_FIELD("Pressure", plotState.pressure);
@@ -1104,6 +1128,26 @@ bool jsonToDriverParameters(const QJsonObject& parameters,
 
     if (ql <= 0.0) {
         setError(errorMessage, QStringLiteral("Field '%1.ql' must be greater than zero.").arg(context));
+        return false;
+    }
+
+    KFilterDriverValidation::Parameters validationParameters;
+    validationParameters.rdcOhm = rdc;
+    validationParameters.lspH = lsp;
+    validationParameters.fsHz = fs;
+    validationParameters.qts = qts;
+    validationParameters.qes = qes;
+    validationParameters.qms = qms;
+    validationParameters.vasLitres = vas;
+    validationParameters.diameterCm = diameter;
+    validationParameters.vbLitres = vb;
+    validationParameters.fbHz = fb;
+    validationParameters.v2Litres = v2;
+    validationParameters.enclosureTypeProposal = enclosureTypeProposal;
+
+    QString validationReason;
+    if (!KFilterDriverValidation::validateDriverParameters(validationParameters, &validationReason)) {
+        setError(errorMessage, QStringLiteral("%1: %2").arg(context, validationReason));
         return false;
     }
 

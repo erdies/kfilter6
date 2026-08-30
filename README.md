@@ -391,6 +391,7 @@ Available options include:
 -DKFILTER_BUILD_QT6_APP=ON
 -DKFILTER_BUILD_DRIVER_SMOKETEST=ON
 -DKFILTER_BUILD_PROJECTIO_SMOKETEST=ON
+-DKFILTER_BUILD_DRIVER_PARAMETER_VALIDATION_SMOKETEST=ON
 -DKFILTER_BUILD_DOCUMENT_SMOKETEST=ON
 -DKFILTER_BUILD_DEFAULTS_SMOKETEST=ON
 -DKFILTER_BUILD_MEASUREMENT_CURVE_SMOKETEST=ON
@@ -580,6 +581,7 @@ kfilterqt6app.cpp / .h
 kfilterdoc.cpp / .h
 kfilterprojectio.cpp / .h
 driver.cpp / .h
+driverparametervalidation.cpp / .h
 kfilterview.cpp / .h
 circuitout.cpp / .h
 driverparametersdialog.cpp / .h

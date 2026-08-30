@@ -1779,3 +1779,47 @@ or physical normalization provenance still needs further analysis.
   equivalent-circuit impedance analytically over all 150 samples, covers cache
   invalidation for Sealed in both calculation modes, and confirms that changing
   `Ql` does not affect Open Baffle.
+
+## Patch 298: Thiele/Small parameter validation on all deserialization paths
+
+- The acoustic core divides by `Rdc`, `Qts`, `Qes` and `Qms`, and on the tuned
+  enclosure paths by `Vas`. None of those divisions was guarded. Before this
+  patch a `.kfp` or `.kfd` file carrying a zero or negative value loaded
+  successfully and produced non-finite pressure and impedance samples across
+  all 150 frequency points, which the plot then rendered as missing curves
+  without any error message.
+- New `driverparametervalidation.{h,cpp}` in `kfilter_core` holds the single
+  authoritative rule set. All three deserialization paths call it before
+  applying values to a `driver` instance: JSON `.kfp`, legacy text `.kfp`, and
+  `.kfd`.
+- Rules, in evaluation order:
+
+  ```text
+  1. Rdc, Lsp, F0, Qts, Qes, Qms, Vas, Dm, Vb, Fb, V2 finite and >= 0
+  2. enclosureTypeProposal in 0..3
+  3. Rdc > 0
+  4. if F0 != 0:  Qts > 0, Qes > 0, Qms > 0
+  5. if F0 != 0 and Vb > 0 and Fb > 0 and proposal >= Vented:  Vas > 0
+  ```
+
+- Rules 4 and 5 are conditional on purpose. `F0 == 0` bypasses the acoustic
+  T/S path, so the quality factors are unused and a file that never carried
+  them keeps loading. Rule 5 reproduces exactly the condition under which
+  `calculateParameters()` evaluates `Vb * motionalInductance / Vas`; a Sealed
+  alignment or a Vented proposal without `Fb` never reaches that division and
+  is therefore still accepted with `Vas == 0`.
+- No file that produced finite results before Patch 298 is rejected. Every
+  newly rejected combination already yielded non-finite samples.
+- The `Ql > 0` and `gainLinear > 0` checks stay at their existing call sites
+  with their existing messages; they were already correct and were not moved.
+- `Qts` is still not cross-checked against `1/Qms + 1/Qes`. Published driver
+  data is routinely inconsistent at that level, so enforcing the relation would
+  reject legitimate files. A non-blocking consistency hint belongs in the
+  Driver Parameters dialog, not in the loader.
+- The legacy text reader now collects the driver parameter block into locals,
+  validates, and only then applies the setters. Field order on disk is
+  unchanged.
+- New `kfilter_driver_parameter_validation_smoketest` covers the rule set
+  directly, verifies that a rejected value really does drive the core
+  non-finite, and exercises all three file paths end to end. Registered CTests
+  rise from 21 to 22.

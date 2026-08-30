@@ -6,6 +6,7 @@
 
 #include "kfilterdriverio.h"
 
+#include "driverparametervalidation.h"
 #include "networkserializationutils.h"
 
 #include "kfilterdoc.h"
@@ -292,6 +293,26 @@ bool jsonToDriver(const QJsonObject& driverObject,
 
     if (gain <= 0.0) {
         setError(errorMessage, QStringLiteral("Field 'gainLinear' must be greater than zero."));
+        return false;
+    }
+
+    KFilterDriverValidation::Parameters validationParameters;
+    validationParameters.rdcOhm = rdc;
+    validationParameters.lspH = lsp;
+    validationParameters.fsHz = fs;
+    validationParameters.qts = qts;
+    validationParameters.qes = qes;
+    validationParameters.qms = qms;
+    validationParameters.vasLitres = vas;
+    validationParameters.diameterCm = diameter;
+    validationParameters.vbLitres = vb;
+    validationParameters.fbHz = fb;
+    validationParameters.v2Litres = v2;
+    validationParameters.enclosureTypeProposal = enclosureTypeProposal;
+
+    QString validationReason;
+    if (!KFilterDriverValidation::validateDriverParameters(validationParameters, &validationReason)) {
+        setError(errorMessage, validationReason);
         return false;
     }
 
