@@ -1,11 +1,11 @@
 # KFilter6 – Offene Punkte
 
-Stand: Patch 300. Dieses Dokument wird mitgeführt und bei jedem Patch
+Stand: Patch 301. Dieses Dokument wird mitgeführt und bei jedem Patch
 aktualisiert, der einen Punkt erledigt oder einen neuen aufwirft.
 
 ## Vorgeschlagene Reihenfolge
 
-1. **Numerische Regressionsbasis** (Patch 301). Eingecheckte Referenzwerte für
+1. **Numerische Regressionsbasis** (Patch 302). Eingecheckte Referenzwerte für
    die 150 Stützstellen definierter Parametersätze, geprüft von einem Test.
    Solange die fehlt, ist die Auflage „nur mit numerischer Regression" für das
    Driver-Refactoring eine Absicht ohne Werkzeug. Muss vor jeder
@@ -29,8 +29,28 @@ aktualisiert, der einen Punkt erledigt oder einen neuen aufwirft.
   gekürzten Konstante `0.159154943` zurück. Beide Raster weichen dadurch um
   rund 3.5e-9 relativ voneinander ab, aufgefallen beim Schreiben des Patch-300-
   Tests. Unkritisch, aber die Definition gehört an eine Stelle.
+  `CONTRACTS.md` §2 behauptet dagegen, beide Raster „driften gleich“. Das gilt
+  nur für die Rekursion, nicht für den gerundeten Startwert; der Vertrag ist an
+  dieser Stelle zu korrigieren.
 - **`double pi = 3.141592654` lokal in `driver.cpp`** statt `M_PI`. Relativer
   Fehler rund 1,3e-10, unkritisch, aber unnötig.
+- **Rundungen vor der Regressionsbasis klären.** `omega = 125.6637061`,
+  `pi = 3.141592654` und `bw = omega*0.159154943/F0` im Vented-Zweig gehen in
+  jede Stützstelle ein. Bevor Patch 302 Referenzwerte eincheckt, entscheiden,
+  ob diese Rundungen eingefroren oder vorher bereinigt werden.
+- **Bandpass ignoriert `fullCircuitFlag`.** In `calculateAcousticResponse()`
+  rechnet der Bandpass-Zweig immer das volle Ersatzschaltbild einschließlich
+  `fullCircuitNormalizationFactor` (rund +22 dB). Die vereinfachten Zweige der
+  anderen drei Typen sind auf 0 dB normiert. Im vereinfachten Modus liegt ein
+  Bandpass-Driver damit vermutlich auf einem anderen Pegel, was die Summierung
+  verfälscht. Nachrechnen, bevor die Regressionsbasis das festschreibt. Die
+  Aussage in `CONTRACTS.md` §3, alle vier Typen trügen im vereinfachten Modus
+  die Phase, ist für Bandpass nur formal richtig: es gibt dort keinen
+  vereinfachten Modus.
+- **`calculateParameters()` mutiert `Dm`.** Bei `Dm == 0` wird der Wert still
+  auf 10 gesetzt. Die Validierung lässt `Dm == 0` zu, der Ersatzwert wird über
+  `getDm()` danach in `.kfp` und `.kfd` zurückgeschrieben. Eine Berechnung
+  ändert damit persistierte Daten. Der Ersatzwert gehört lokal in die Rechnung.
 - **`findLastNetworkSectionIndex()` steht in beiden Frequenzschleifen** und
   wird 150-mal pro Berechnung ausgewertet, obwohl das Ergebnis invariant ist.
 - **`Qts`, `Qms` und `Qes` sind unabhängig setzbar**, ohne Prüfung gegen
@@ -47,6 +67,17 @@ aktualisiert, der einen Punkt erledigt oder einen neuen aufwirft.
 - **Dialog-Smoketests kompilieren die Dialogquellen ein zweites Mal** direkt in
   ihr Testtarget, statt gegen eine gemeinsame UI-Bibliothek zu linken. Bei drei
   Dialogtests erträglich, skaliert aber schlecht.
+- **Abgeleitete Member bleiben beim Typwechsel stehen.** `calculateParameters()`
+  setzt nur die Werte des aktiven Gehäusezweigs. Vented-, Bandpass- und Sealed-
+  Werte früherer Konfigurationen bleiben liegen. Aktuell harmlos, weil nur der
+  passende `switch`-Zweig sie liest, beim Dependency-Audit aber irreführend.
+  Außerdem verändert der Bandpass-Zweig `motionalInductance`; das ist nur
+  korrekt, weil sie bei jedem Aufruf neu berechnet wird. Diese Reihenfolge muss
+  ein Refactoring erhalten.
+- **CTest-Struktur.** `enable_testing()` steht bei jedem Test einzeln statt
+  einmal auf oberster Ebene. Die sechs Dialog- und Circuitout-Tests hängen an
+  `KFILTER_BUILD_QT6_APP`; ohne App laufen weniger als die in `CONTRACTS.md` §6
+  genannten 23 Tests.
 
 ## Weitere Themen
 
@@ -57,6 +88,10 @@ aktualisiert, der einen Punkt erledigt oder einen neuen aufwirft.
 - Platzierung des Driver-Titels im Network-/Filter-Dialog optional erneut
   bewerten. Aktuell bleibt die bewusst akzeptierte Variante unterhalb der
   Tabelle erhalten.
+- `project(kfilter VERSION 0.1.0)` in `CMakeLists.txt` passt nicht zum
+  Patch-Level 300.
+- Ein belegter Testlauf existiert nur für die Ubuntu-Referenzumgebung aus
+  `CONTRACTS.md` §6, nicht für die Gentoo-Entwicklungsumgebung.
 
 ## Weiterhin bindend
 
@@ -76,3 +111,8 @@ aktualisiert, der einen Punkt erledigt oder einen neuen aufwirft.
 - **Patch 300** – Der Vented-Rolloff trug im vereinfachten Modus nur den Betrag
   bei. Alle vier Gehäusetypen tragen jetzt die Phase; die Sonderrolle von
   Vented entfällt.
+- **Patch 301** – Durchsicht von `driver.cpp`, `CMakeLists.txt` und den
+  Projektdokumenten. Neue offene Punkte aufgenommen: Bandpass ignoriert
+  `fullCircuitFlag`, `calculateParameters()` mutiert `Dm`, Rundungen vor der
+  Regressionsbasis, liegengebliebene abgeleitete Member, CTest-Struktur,
+  Projektversion und Testumgebung. Die Regressionsbasis rückt auf Patch 302.
