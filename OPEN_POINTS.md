@@ -1,11 +1,11 @@
 # KFilter6 – Offene Punkte
 
-Stand: Patch 302. Dieses Dokument wird mitgeführt und bei jedem Patch
+Stand: Patch 303. Dieses Dokument wird mitgeführt und bei jedem Patch
 aktualisiert, der einen Punkt erledigt oder einen neuen aufwirft.
 
 ## Vorgeschlagene Reihenfolge
 
-1. **Numerische Regressionsbasis** (Patch 303). Eingecheckte Referenzwerte für
+1. **Numerische Regressionsbasis** (Patch 304). Eingecheckte Referenzwerte für
    die 150 Stützstellen definierter Parametersätze, geprüft von einem Test.
    Solange die fehlt, ist die Auflage „nur mit numerischer Regression" für das
    Driver-Refactoring eine Absicht ohne Werkzeug. Muss vor jeder
@@ -29,14 +29,11 @@ aktualisiert, der einen Punkt erledigt oder einen neuen aufwirft.
   gekürzten Konstante `0.159154943` zurück. Beide Raster weichen dadurch um
   rund 3.5e-9 relativ voneinander ab, aufgefallen beim Schreiben des Patch-300-
   Tests. Unkritisch, aber die Definition gehört an eine Stelle.
-  `CONTRACTS.md` §2 behauptet dagegen, beide Raster „driften gleich“. Das gilt
-  nur für die Rekursion, nicht für den gerundeten Startwert; der Vertrag ist an
-  dieser Stelle zu korrigieren.
 - **`double pi = 3.141592654` lokal in `driver.cpp`** statt `M_PI`. Relativer
   Fehler rund 1,3e-10, unkritisch, aber unnötig.
 - **Rundungen vor der Regressionsbasis klären.** `omega = 125.6637061`,
   `pi = 3.141592654` und `bw = omega*0.159154943/F0` im Vented-Zweig gehen in
-  jede Stützstelle ein. Bevor Patch 303 Referenzwerte eincheckt, entscheiden,
+  jede Stützstelle ein. Bevor Patch 304 Referenzwerte eincheckt, entscheiden,
   ob diese Rundungen eingefroren oder vorher bereinigt werden.
 - **Bandpass ignoriert `fullCircuitFlag`.** In `calculateAcousticResponse()`
   rechnet der Bandpass-Zweig immer das volle Ersatzschaltbild einschließlich
@@ -120,3 +117,9 @@ aktualisiert, der einen Punkt erledigt oder einen neuen aufwirft.
   Qms“ ist nur bei Inkonsistenz aktiv. Toleranz 2 % relativ oder 0,005 absolut.
   Loader und Validierung bleiben unverändert. Die Regressionsbasis rückt auf
   Patch 303.
+- **Patch 303** – Reiner Dokumentations-Patch. Tags `patch-<n>` werden nicht
+  mehr gesetzt; ein Patchstand ist am Commit-Titel `Patch <n>:` erkennbar.
+  Patch 302 (`872bbe1`) bleibt als einzige Ausnahme ohne Tag und Präfix.
+  `CONTRACTS.md` auf Patch 302 nachgezogen: Qts-Konsistenzhinweis in §4,
+  Rasterabweichung in §2 korrigiert, Referenzlauf in §6 als Patch-300-Lauf
+  gekennzeichnet. Die Regressionsbasis rückt auf Patch 304.

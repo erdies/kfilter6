@@ -9,7 +9,7 @@ entstanden ist. `CONTRACTS.md` beschreibt, **was aktuell gilt**. Bei einem
 Widerspruch gewinnt dieses Dokument, und der Widerspruch ist ein Fehler, der
 behoben werden muss.
 
-Stand: Patch 300.
+Stand: Patch 303.
 
 ## 1. Persistenzformate
 
@@ -63,8 +63,9 @@ oder Absicht ist, ist ungeklärt. Siehe `OPEN_POINTS.md`.
 
 Bekannte Doppelung: `kfilterfrequencygrid.cpp` baut das Raster iterativ auf,
 `driver.cpp` startet unabhängig davon bei `omega = 125.6637061` und
-multipliziert selbst. Beide verwenden dieselbe Rekursion und driften daher
-gleich, aber die Konstante ist dupliziert.
+multipliziert selbst. Die Rekursion ist dieselbe, der gerundete Startwert und
+die gekürzte Rückrechnung mit `0.159154943` aber nicht: beide Raster weichen
+um rund 3.5e-9 relativ voneinander ab. Siehe `OPEN_POINTS.md`.
 
 ## 3. Driver- und Gehäusemodell
 
@@ -124,8 +125,15 @@ Güten sind dann unbenutzt. Regel 5 bildet exakt die Bedingung nach, unter der
 `Ql > 0` und `gainLinear > 0` werden weiterhin an ihren eigenen Aufrufstellen
 geprüft.
 
-`Qts` wird **nicht** gegen `1/Qms + 1/Qes` gegengeprüft. Publizierte
-Herstellerdaten sind an dieser Stelle routinemäßig inkonsistent.
+`Qts` wird beim Laden **nicht** gegen `1/Qms + 1/Qes` gegengeprüft.
+Publizierte Herstellerdaten sind an dieser Stelle routinemäßig inkonsistent.
+
+Seit Patch 302 zeigt der Driver-Parameters-Dialog bei Inkonsistenz einen nicht
+blockierenden Hinweis neben `Qts` mit abgeleitetem Wert und vorzeichen-
+behafteter Abweichung (`checkQtsConsistency()`). Inkonsistent ist eine
+Abweichung nur, wenn sie 2 % relativ **und** 0,005 absolut überschreitet.
+„Calculate Qts from Qes and Qms" ist nur bei Inkonsistenz aktiv. Laden,
+Validierung und Übernehmen des Dialogs bleiben davon unberührt.
 
 Keine Datei, die vor Patch 298 endliche Ergebnisse lieferte, wird abgelehnt.
 
@@ -156,7 +164,7 @@ betroffen ist.
 Verhaltensverträge gehören als Assertion in einen Test, nicht als
 Quelltextsuche in ein Prüfskript.
 
-Referenzumgebung des zuletzt belegten Laufs:
+Referenzumgebung des zuletzt belegten Laufs (Patch 300):
 
 ```text
 Ubuntu 24.04, GCC 13.3.0, CMake 3.28.3, Qt 6.4.2, Release
@@ -172,11 +180,17 @@ garantiert Integrität und Rekonstruierbarkeit über die Objekt-Hashes.
 ```text
 Repository   https://github.com/erdies/kfilter6.git
 Branch       main
-Tags         patch-<n> auf jedem Patchstand
 ```
 
 - Ein Patch ist genau ein Commit und erhöht `KFILTER_PATCH_LEVEL` in
   `CMakeLists.txt`.
+- Der Commit-Titel beginnt mit `Patch <n>:`. Darüber wird ein Patchstand
+  identifiziert; Tags werden ab Patch 302 nicht mehr gesetzt. Die vorhandenen
+  Tags bis `patch-301` bleiben bestehen.
+- Ausnahme: Patch 302 ist Commit `872bbe1` mit dem Titel „add Qts
+  inconsistent warning", ohne Tag und ohne Titelpräfix. Er war bereits
+  gepusht, als die Konvention eingeführt wurde, und wird nicht umgeschrieben.
+  Die Konvention gilt ab Patch 303.
 - Ein Patch geht gegen seinen direkten Vorgänger, nicht kumulativ gegen eine
   ältere Baseline.
 - Übergabe erfolgt als `git format-patch`, Anwendung mit `git am -3`.

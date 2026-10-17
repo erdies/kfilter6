@@ -1896,3 +1896,22 @@ or physical normalization provenance still needs further analysis.
   back with the truncated constant `0.159154943`. That is harmless but it is
   the duplicated grid definition already recorded in `OPEN_POINTS.md`, and it
   surfaced while writing this test.
+
+## Patch 303: Commit-title convention replaces tags
+
+- Documentation only; no source change. The binary and all registered tests
+  are unaffected.
+- Patch levels are no longer tagged. Tags were introduced so that each
+  working session could be pointed at a GitHub URL for a specific state; with
+  direct access to the working tree that is no longer needed. A patch level is
+  now identified by its commit title, which starts with `Patch <n>:`. The
+  existing tags up to `patch-301` remain.
+- Patch 302 (`872bbe1`, "add Qts inconsistent warning") had already been
+  pushed without tag and without title prefix when the convention was
+  introduced. It is not rewritten and is recorded as the single exception in
+  `CONTRACTS.md` §7.
+- `CONTRACTS.md` brought up to Patch 302: the non-blocking Qts consistency
+  hint in §4, the corrected statement on the two frequency grids in §2 (same
+  recursion, but different rounded start values), and the reference run in §6
+  marked as the Patch 300 run.
+- `OPEN_POINTS.md`: the numerical regression baseline moves to Patch 304.
