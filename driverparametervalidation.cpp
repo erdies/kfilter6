@@ -114,4 +114,25 @@ bool validateDriverParameters(const Parameters& parameters, QString* reason)
     return true;
 }
 
+QtsConsistency checkQtsConsistency(double qts, double qes, double qms)
+{
+    QtsConsistency result;
+
+    const auto finitePositive = [](double value) {
+        return std::isfinite(value) && value > 0.0;
+    };
+    if (!finitePositive(qts) || !finitePositive(qes) || !finitePositive(qms)) {
+        return result;
+    }
+
+    result.evaluable = true;
+    result.derivedQts = (qes * qms) / (qes + qms);
+    const double difference = qts - result.derivedQts;
+    result.relativeDeviation = difference / result.derivedQts;
+    result.consistent =
+        std::abs(result.relativeDeviation) <= QtsConsistencyRelativeTolerance ||
+        std::abs(difference) <= QtsConsistencyAbsoluteTolerance;
+    return result;
+}
+
 } // namespace KFilterDriverValidation

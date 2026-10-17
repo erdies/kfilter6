@@ -20,6 +20,7 @@ class QTimer;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
+class QLabel;
 class QLineEdit;
 class QPushButton;
 class QTabWidget;
@@ -66,6 +67,8 @@ private:
         QDoubleSpinBox *qts = nullptr;
         QDoubleSpinBox *qes = nullptr;
         QDoubleSpinBox *qms = nullptr;
+        QLabel *qtsConsistencyHint = nullptr;
+        QPushButton *qtsButton = nullptr;
         QDoubleSpinBox *vas = nullptr;
         QDoubleSpinBox *dm = nullptr;
         QDoubleSpinBox *vb = nullptr;
@@ -109,6 +112,7 @@ private:
     void importDriver(int index);
     void exportDriver(int index);
     void updateQtsForPage(DriverPage& page);
+    void updateQtsConsistencyForPage(DriverPage& page);
     void updateEnclosureFieldStates(DriverPage& page);
     void updateTubeLengthForPage(DriverPage& page);
     void updateTubeDiameterForPage(DriverPage& page);

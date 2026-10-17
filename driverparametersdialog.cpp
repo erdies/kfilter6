@@ -7,12 +7,14 @@
 #include "driverparametersdialog.h"
 
 #include "driver.h"
+#include "driverparametervalidation.h"
 #include "kfilterdriverio.h"
 #include "kfilterdoc.h"
 #include "networkvalueutils.h"
 
 #include <QAbstractSpinBox>
 #include <QCheckBox>
+#include <QColor>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -25,7 +27,9 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QLocale>
 #include <QMessageBox>
+#include <QPalette>
 #include <QPushButton>
 #include <QSettings>
 #include <QSignalBlocker>
@@ -357,6 +361,9 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     page.fb->setObjectName(QStringLiteral("driverFbSpin") + controlSuffix);
     page.tubeDiameter->setObjectName(QStringLiteral("driverTubeDiameterSpin") + controlSuffix);
     page.tubeLength->setObjectName(QStringLiteral("driverTubeLengthSpin") + controlSuffix);
+    page.qts->setObjectName(QStringLiteral("driverQtsSpin") + controlSuffix);
+    page.qes->setObjectName(QStringLiteral("driverQesSpin") + controlSuffix);
+    page.qms->setObjectName(QStringLiteral("driverQmsSpin") + controlSuffix);
     page.v2->setObjectName(QStringLiteral("driverV2Spin") + controlSuffix);
     page.gainDb->setObjectName(QStringLiteral("driverGainSpin") + controlSuffix);
 
@@ -399,17 +406,30 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     addRow(leftForm, tr("Rdc"), page.rdc);
     addRow(leftForm, tr("Lsp"), page.lspMilliHenry);
     addRow(leftForm, tr("Fs"), page.f0);
-    addRow(leftForm, tr("Qts"), page.qts);
+    auto *qtsLayoutWidget = new QWidget(page.page);
+    auto *qtsLayout = new QHBoxLayout(qtsLayoutWidget);
+    qtsLayout->setContentsMargins(0, 0, 0, 0);
+    qtsLayout->addWidget(page.qts);
+    page.qtsConsistencyHint = new QLabel(qtsLayoutWidget);
+    page.qtsConsistencyHint->setObjectName(QStringLiteral("driverQtsConsistencyHint") + controlSuffix);
+    QPalette hintPalette = page.qtsConsistencyHint->palette();
+    hintPalette.setColor(QPalette::WindowText, QColor(0xd0, 0x30, 0x30));
+    page.qtsConsistencyHint->setPalette(hintPalette);
+    qtsLayout->addWidget(page.qtsConsistencyHint);
+    qtsLayout->addStretch(1);
+
+    addRow(leftForm, tr("Qts"), qtsLayoutWidget);
     addRow(leftForm, tr("Qes"), page.qes);
     addRow(leftForm, tr("Qms"), page.qms);
     addRow(leftForm, tr("Vas"), page.vas);
     addRow(leftForm, tr("Diameter"), page.dm);
 
-    auto *qtsButton = new QPushButton(tr("Calculate Qts from Qes and Qms"), page.page);
-    connect(qtsButton, &QPushButton::clicked, this, [this, index]() {
+    page.qtsButton = new QPushButton(tr("Calculate Qts from Qes and Qms"), page.page);
+    page.qtsButton->setObjectName(QStringLiteral("driverQtsButton") + controlSuffix);
+    connect(page.qtsButton, &QPushButton::clicked, this, [this, index]() {
         updateQtsForPage(m_pages.at(index));
     });
-    leftForm->addRow(QString(), qtsButton);
+    leftForm->addRow(QString(), page.qtsButton);
 
     auto *driverIoWidget = new QWidget(page.page);
     auto *driverIoLayout = new QHBoxLayout(driverIoWidget);
@@ -508,8 +528,15 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
                 schedulePreview();
             });
 
+    for (QDoubleSpinBox *qualityFactor : {page.qts, page.qes, page.qms}) {
+        connect(qualityFactor,
+                static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
+                this, [this, index](double) { updateQtsConsistencyForPage(m_pages.at(index)); });
+    }
+
     connectPreviewSignals(page, index);
     updateEnclosureFieldStates(page);
+    updateQtsConsistencyForPage(page);
 
     return page.page;
 }
@@ -967,6 +994,42 @@ void DriverParametersDialog::updateQtsForPage(DriverPage& page)
     if (denominator > 0.0) {
         page.qts->setValue((qes * qms) / denominator);
     }
+}
+
+void DriverParametersDialog::updateQtsConsistencyForPage(DriverPage& page)
+{
+    const KFilterDriverValidation::QtsConsistency check =
+        KFilterDriverValidation::checkQtsConsistency(page.qts->value(),
+                                                     page.qes->value(),
+                                                     page.qms->value());
+    const bool inconsistent = check.evaluable && !check.consistent;
+
+    page.qtsButton->setEnabled(inconsistent);
+
+    if (!inconsistent) {
+        page.qtsConsistencyHint->clear();
+        page.qtsConsistencyHint->setToolTip(QString());
+        return;
+    }
+
+    const QLocale locale;
+    const QString derivedText = locale.toString(check.derivedQts, 'f', 3);
+    const double deviationPercent = check.relativeDeviation * 100.0;
+    // A true minus sign (U+2212) matches the width of the plus sign; the
+    // locale's ASCII hyphen-minus is noticeably shorter.
+    const QString deviationText = QString(deviationPercent > 0.0 ? QChar(u'+') : QChar(0x2212))
+                                  + locale.toString(std::abs(deviationPercent), 'f', 1);
+    // The warning sign keeps the hint readable without relying on color.
+    page.qtsConsistencyHint->setText(
+        tr("%1 %2 (%3 %)")
+            .arg(QString(QChar(0x26A0)), derivedText, deviationText));
+    page.qtsConsistencyHint->setToolTip(
+        tr("Qts does not match 1/Qts = 1/Qes + 1/Qms. Qes and Qms give Qts = %1; "
+           "the entered value deviates by %2 %. The simplified SPL model uses Qts, "
+           "impedance and the full crossover simulation use Qes and Qms, so both "
+           "currently describe different drivers. Use \"Calculate Qts from Qes and Qms\" "
+           "to take over the derived value.")
+            .arg(derivedText, deviationText));
 }
 
 void DriverParametersDialog::updateEnclosureFieldStates(DriverPage& page)

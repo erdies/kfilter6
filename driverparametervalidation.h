@@ -55,6 +55,35 @@ struct Parameters
  */
 bool validateDriverParameters(const Parameters& parameters, QString* reason = nullptr);
 
+/**
+ * Non-blocking consistency check of 1/Qts = 1/Qes + 1/Qms.
+ *
+ * Published data sheets are routinely inconsistent here, so this is never a
+ * load or apply condition. The Driver Parameters dialog uses it to show a
+ * hint next to Qts. Impedance and the full-circuit model use Qes and Qms,
+ * the simplified SPL model uses Qts; the derived Qts is the value that makes
+ * both describe the same driver.
+ *
+ * A deviation counts as inconsistent only if it exceeds both tolerances. The
+ * absolute tolerance covers data sheets that round Qts to two decimals, which
+ * for small Qts alone exceeds the relative tolerance.
+ */
+constexpr double QtsConsistencyRelativeTolerance = 0.02;
+constexpr double QtsConsistencyAbsoluteTolerance = 0.005;
+
+struct QtsConsistency
+{
+    // False if Qts, Qes or Qms is not a finite positive number; no statement
+    // about consistency is made then.
+    bool evaluable = false;
+    bool consistent = true;
+    double derivedQts = 0.0;
+    // Signed deviation of the entered Qts relative to the derived Qts.
+    double relativeDeviation = 0.0;
+};
+
+QtsConsistency checkQtsConsistency(double qts, double qes, double qms);
+
 } // namespace KFilterDriverValidation
 
 #endif // DRIVERPARAMETERVALIDATION_H

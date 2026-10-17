@@ -10,6 +10,7 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QLabel>
 #include <QPushButton>
 #include <QTabWidget>
 
@@ -237,6 +238,40 @@ int main(int argc, char **argv)
         tubeLength->value() != 0.0) {
         std::cerr << "Invalid Vb/Fb state changed the tube diameter or retained a false length\n";
         return 8;
+    }
+
+    // Qts/Qes/Qms consistency hint. Default drivers are consistent within the
+    // tolerance, so the hint is empty and the correction button disabled.
+    auto *qts = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("driverQtsSpin1"));
+    auto *qes = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("driverQesSpin1"));
+    auto *qms = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("driverQmsSpin1"));
+    auto *qtsHint = dialog.findChild<QLabel *>(QStringLiteral("driverQtsConsistencyHint1"));
+    auto *qtsButton = dialog.findChild<QPushButton *>(QStringLiteral("driverQtsButton1"));
+    if (qts == nullptr || qes == nullptr || qms == nullptr ||
+        qtsHint == nullptr || qtsButton == nullptr) {
+        std::cerr << "Qts consistency controls are missing\n";
+        return 9;
+    }
+    if (!qtsHint->text().isEmpty() || qtsButton->isEnabled()) {
+        std::cerr << "Consistent default Qts shows a hint or enables the correction\n";
+        return 10;
+    }
+
+    qes->setValue(0.42);
+    qms->setValue(4.2);
+    qts->setValue(0.40);
+    QApplication::processEvents();
+    if (qtsHint->text().isEmpty() || !qtsButton->isEnabled()) {
+        std::cerr << "Inconsistent Qts did not show the hint or enable the correction\n";
+        return 11;
+    }
+
+    qtsButton->click();
+    QApplication::processEvents();
+    if (!near(qts->value(), (0.42 * 4.2) / (0.42 + 4.2), 0.00001) ||
+        !qtsHint->text().isEmpty() || qtsButton->isEnabled()) {
+        std::cerr << "Qts correction did not restore a consistent state\n";
+        return 12;
     }
 
     std::cout << "Driver Parameters enclosure-control state smoke test passed\n";

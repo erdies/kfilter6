@@ -33,6 +33,7 @@
 
 #include <cmath>
 #include <complex>
+#include <limits>
 
 namespace
 {
@@ -207,6 +208,63 @@ bool responsesAreFinite(driver& subject)
         }
     }
     return true;
+}
+
+void testQtsConsistency()
+{
+    using KFilterDriverValidation::checkQtsConsistency;
+
+    // Historical defaults: Qes = 2.87, Qms = 1.9 give Qts = 1.1432, entered 1.14.
+    const KFilterDriverValidation::QtsConsistency defaults = checkQtsConsistency(1.14, 2.87, 1.9);
+    expect(defaults.evaluable && defaults.consistent,
+           QStringLiteral("Historical default Qts should be consistent"));
+    expect(std::abs(defaults.derivedQts - (2.87 * 1.9) / (2.87 + 1.9)) < 1e-12,
+           QStringLiteral("Derived Qts must follow 1/Qts = 1/Qes + 1/Qms"));
+
+    // Exactly consistent tuple.
+    const KFilterDriverValidation::QtsConsistency exact = checkQtsConsistency(0.35, 0.42, 2.1);
+    expect(exact.evaluable && exact.consistent && std::abs(exact.relativeDeviation) < 1e-12,
+           QStringLiteral("Exactly consistent tuple should be consistent"));
+
+    // Rounding of a small Qts to two decimals exceeds 2 % relative but stays
+    // within the absolute tolerance: derived 0.2046, data sheet 0.20.
+    const KFilterDriverValidation::QtsConsistency rounded = checkQtsConsistency(0.20, 0.225, 2.25);
+    expect(rounded.evaluable && rounded.consistent,
+           QStringLiteral("Two-decimal rounding of a small Qts should be consistent"));
+    expect(std::abs(rounded.relativeDeviation) > KFilterDriverValidation::QtsConsistencyRelativeTolerance,
+           QStringLiteral("Rounding case must exceed the relative tolerance to test the absolute one"));
+
+    // Typical data sheet error: derived 0.3818, entered 0.40, about +4.8 %.
+    const KFilterDriverValidation::QtsConsistency high = checkQtsConsistency(0.40, 0.42, 4.2);
+    expect(high.evaluable && !high.consistent && high.relativeDeviation > 0.04,
+           QStringLiteral("Qts 4.8 % above the derived value should be inconsistent"));
+
+    const KFilterDriverValidation::QtsConsistency low = checkQtsConsistency(0.36, 0.42, 4.2);
+    expect(low.evaluable && !low.consistent && low.relativeDeviation < -0.04,
+           QStringLiteral("Qts 5.7 % below the derived value should be inconsistent"));
+
+    // Qts above Qes is physically impossible and must be flagged.
+    const KFilterDriverValidation::QtsConsistency impossible = checkQtsConsistency(0.45, 0.42, 4.2);
+    expect(impossible.evaluable && !impossible.consistent,
+           QStringLiteral("Qts above Qes should be inconsistent"));
+
+    // No statement without finite positive inputs.
+    for (const double invalid : {0.0, -1.0, std::numeric_limits<double>::quiet_NaN(),
+                                 std::numeric_limits<double>::infinity()}) {
+        expect(!checkQtsConsistency(invalid, 0.42, 4.2).evaluable,
+               QStringLiteral("Invalid Qts must not be evaluable"));
+        expect(!checkQtsConsistency(0.38, invalid, 4.2).evaluable,
+               QStringLiteral("Invalid Qes must not be evaluable"));
+        expect(!checkQtsConsistency(0.38, 0.42, invalid).evaluable,
+               QStringLiteral("Invalid Qms must not be evaluable"));
+    }
+
+    // The check is advisory only: an inconsistent tuple still loads.
+    KFilterDriverValidation::Parameters inconsistent = defaultParameters();
+    inconsistent.qts = 0.40;
+    inconsistent.qes = 0.42;
+    inconsistent.qms = 4.2;
+    expectAccepted(inconsistent, QStringLiteral("Inconsistent Qts/Qes/Qms tuple"));
 }
 
 void testRejectedParametersWouldBreakTheCore()
@@ -481,6 +539,7 @@ int main(int argc, char** argv)
     (void)app;
 
     testValidationRules();
+    testQtsConsistency();
     testRejectedParametersWouldBreakTheCore();
     testJsonProjectPath(
         QDir::temp().filePath(QStringLiteral("kfilter_driver_parameter_validation.kfp")));

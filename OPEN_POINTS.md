@@ -1,11 +1,11 @@
 # KFilter6 – Offene Punkte
 
-Stand: Patch 301. Dieses Dokument wird mitgeführt und bei jedem Patch
+Stand: Patch 302. Dieses Dokument wird mitgeführt und bei jedem Patch
 aktualisiert, der einen Punkt erledigt oder einen neuen aufwirft.
 
 ## Vorgeschlagene Reihenfolge
 
-1. **Numerische Regressionsbasis** (Patch 302). Eingecheckte Referenzwerte für
+1. **Numerische Regressionsbasis** (Patch 303). Eingecheckte Referenzwerte für
    die 150 Stützstellen definierter Parametersätze, geprüft von einem Test.
    Solange die fehlt, ist die Auflage „nur mit numerischer Regression" für das
    Driver-Refactoring eine Absicht ohne Werkzeug. Muss vor jeder
@@ -36,7 +36,7 @@ aktualisiert, der einen Punkt erledigt oder einen neuen aufwirft.
   Fehler rund 1,3e-10, unkritisch, aber unnötig.
 - **Rundungen vor der Regressionsbasis klären.** `omega = 125.6637061`,
   `pi = 3.141592654` und `bw = omega*0.159154943/F0` im Vented-Zweig gehen in
-  jede Stützstelle ein. Bevor Patch 302 Referenzwerte eincheckt, entscheiden,
+  jede Stützstelle ein. Bevor Patch 303 Referenzwerte eincheckt, entscheiden,
   ob diese Rundungen eingefroren oder vorher bereinigt werden.
 - **Bandpass ignoriert `fullCircuitFlag`.** In `calculateAcousticResponse()`
   rechnet der Bandpass-Zweig immer das volle Ersatzschaltbild einschließlich
@@ -53,9 +53,6 @@ aktualisiert, der einen Punkt erledigt oder einen neuen aufwirft.
   ändert damit persistierte Daten. Der Ersatzwert gehört lokal in die Rechnung.
 - **`findLastNetworkSectionIndex()` steht in beiden Frequenzschleifen** und
   wird 150-mal pro Berechnung ausgewertet, obwohl das Ergebnis invariant ist.
-- **`Qts`, `Qms` und `Qes` sind unabhängig setzbar**, ohne Prüfung gegen
-  `1/Qts = 1/Qms + 1/Qes`. Ein nicht blockierender Konsistenzhinweis gehört in
-  den Driver-Parameters-Dialog, nicht in den Loader.
 
 ## Architektur
 
@@ -116,3 +113,10 @@ aktualisiert, der einen Punkt erledigt oder einen neuen aufwirft.
   `fullCircuitFlag`, `calculateParameters()` mutiert `Dm`, Rundungen vor der
   Regressionsbasis, liegengebliebene abgeleitete Member, CTest-Struktur,
   Projektversion und Testumgebung. Die Regressionsbasis rückt auf Patch 302.
+- **Patch 302** – `Qts`, `Qes` und `Qms` waren unabhängig setzbar, ohne
+  Hinweis auf einen Widerspruch zu `1/Qts = 1/Qes + 1/Qms`. Der
+  Driver-Parameters-Dialog zeigt jetzt neben `Qts` einen nicht blockierenden
+  Hinweis mit abgeleitetem Wert und Abweichung; „Calculate Qts from Qes and
+  Qms“ ist nur bei Inkonsistenz aktiv. Toleranz 2 % relativ oder 0,005 absolut.
+  Loader und Validierung bleiben unverändert. Die Regressionsbasis rückt auf
+  Patch 303.
