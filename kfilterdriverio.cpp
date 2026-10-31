@@ -22,7 +22,9 @@
 
 namespace
 {
-constexpr int FormatVersion = 2;
+constexpr int FormatVersion = 3;
+// v2 lacks the series trap coil resistance and still loads with its default.
+constexpr int OldestSupportedFormatVersion = 2;
 const QString FormatName = QStringLiteral("KFilter driver slot");
 const QString ApplicationName = QStringLiteral("KFilter6");
 
@@ -136,6 +138,39 @@ bool readRequiredBool(const QJsonObject& object,
 void writeBool(QJsonObject& object, const QString& key, bool value)
 {
     object.insert(key, value);
+}
+
+bool loadSeriesCoilResistances(const QJsonObject& networkObject,
+                               driver& drv,
+                               QString* errorMessage)
+{
+    const QJsonValue coilValue = networkObject.value(NetworkSerializationUtils::SeriesCoilResistanceKey);
+    if (!coilValue.isArray()) {
+        setError(errorMessage,
+                 QStringLiteral("Missing or invalid network array '%1'.")
+                     .arg(NetworkSerializationUtils::SeriesCoilResistanceKey));
+        return false;
+    }
+
+    const QJsonArray coilValues = coilValue.toArray();
+    if (coilValues.size() != NetworkSerializationUtils::SectionCount) {
+        setError(errorMessage,
+                 QStringLiteral("Network array '%1' must contain %2 entries.")
+                     .arg(NetworkSerializationUtils::SeriesCoilResistanceKey)
+                     .arg(NetworkSerializationUtils::SectionCount));
+        return false;
+    }
+
+    for (int index = 0; index < coilValues.size(); ++index) {
+        const QJsonValue jsonValue = coilValues.at(index);
+        if (!jsonValue.isDouble() || !std::isfinite(jsonValue.toDouble()) || jsonValue.toDouble() < 0.0) {
+            setError(errorMessage,
+                     QStringLiteral("Invalid series coil resistance in section %1.").arg(index + 1));
+            return false;
+        }
+        drv.setSeriesCoilResistance(index, jsonValue.toDouble());
+    }
+    return true;
 }
 
 bool loadNetworkValues(const QJsonObject& networkObject,
@@ -419,7 +454,7 @@ bool KFilterDriverIo::loadDriverSlotFromFile(const QString& filePath,
         return false;
     }
 
-    if (formatVersion != FormatVersion) {
+    if (formatVersion < OldestSupportedFormatVersion || formatVersion > FormatVersion) {
         setError(errorMessage,
                  QStringLiteral("Unsupported driver slot format version %1.").arg(formatVersion));
         return false;
@@ -435,6 +470,8 @@ bool KFilterDriverIo::loadDriverSlotFromFile(const QString& filePath,
     DriverSlot parsedSlot;
     if (!jsonToDriver(driverObject, parsedSlot.driverData, errorMessage) ||
         !loadNetworkValues(networkObject, parsedSlot.driverData, errorMessage) ||
+        (formatVersion >= 3 &&
+         !loadSeriesCoilResistances(networkObject, parsedSlot.driverData, errorMessage)) ||
         !KFilterProjectIo::readDriverSupplementFromJson(
             root,
             parsedSlot.measurementCurve,
@@ -503,6 +540,8 @@ bool KFilterDriverIo::saveDriverSlotToFile(const QString& filePath,
     QJsonObject networkObject;
     networkObject.insert(QStringLiteral("unitBaseIndex"), 1);
     networkObject.insert(QStringLiteral("values"), networkValues);
+    networkObject.insert(NetworkSerializationUtils::SeriesCoilResistanceKey,
+                         NetworkSerializationUtils::seriesCoilResistancesToJson(slot.driverData));
     root.insert(QStringLiteral("network"), networkObject);
 
     if (!KFilterProjectIo::writeDriverSupplementToJson(

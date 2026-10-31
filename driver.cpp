@@ -189,7 +189,7 @@ void driver::calculatePressureResponse(void)
 				const NetworkSection& section = network[static_cast<std::size_t>(sectionIndex)];
 				calculateParallelBranch(networkImpedance, omega, section.parallel);
 				const std::complex<double> terminationImpedance = networkImpedance;
-				calculateSeriesBranch(networkImpedance, omega, section.series);
+				calculateSeriesBranch(networkImpedance, omega, section.series, section.seriesCoilResistance);
 				response *= terminationImpedance / networkImpedance;
 			}
 			if (F0 != 0)
@@ -219,7 +219,7 @@ void driver::calculateImpedanceResponse(void)
 			{
 				const NetworkSection& section = network[static_cast<std::size_t>(sectionIndex)];
 				calculateParallelBranch(networkImpedance, omega, section.parallel);
-				calculateSeriesBranch(networkImpedance, omega, section.series);
+				calculateSeriesBranch(networkImpedance, omega, section.series, section.seriesCoilResistance);
 			}
 			resultImpedance[sampleIndex] = networkImpedance;
 			omega=omega*KFilterFrequencyStep;
@@ -458,8 +458,20 @@ void driver::calculateParallelBranch(std::complex<double>& networkImpedance, dou
 	networkImpedance = 1.0 / (1.0 / networkImpedance + 1.0 / branchImpedance);
 }
 
-void driver::calculateSeriesBranch(std::complex<double>& networkImpedance, double omega, const NetworkBranch& branch)
+void driver::calculateSeriesBranch(std::complex<double>& networkImpedance, double omega, const NetworkBranch& branch,
+                                   double coilResistance)
 {
+	// Series trap circuit with a lossy coil: R || C || (R_L + jwL).
+	// R_L == 0 falls through to the historical ideal-coil path below.
+	if (branch.resistance != 0 && branch.capacitance != 0 && branch.inductance != 0 && coilResistance != 0)
+	{
+		const std::complex<double> coilImpedance{coilResistance, omega*branch.inductance};
+		const std::complex<double> branchAdmittance =
+			std::complex<double>{1/branch.resistance, omega*branch.capacitance} + 1.0 / coilImpedance;
+		networkImpedance += 1.0 / branchAdmittance;
+		return;
+	}
+
 	if (branch.capacitance==0)
 	{
 		if (branch.inductance==0)
@@ -752,4 +764,25 @@ double driver::getNetworkValue(int sectionIndex,
 		return selectedBranch->inductance;
 	}
 	return -1.0;
+}
+
+void driver::setSeriesCoilResistance(int sectionIndex, double resistanceOhm)
+{
+	if (sectionIndex < 0 || sectionIndex >= static_cast<int>(NetworkSectionCount))
+	{
+		return;
+	}
+
+	network[static_cast<std::size_t>(sectionIndex)].seriesCoilResistance = resistanceOhm;
+	setModified();
+}
+
+double driver::getSeriesCoilResistance(int sectionIndex) const
+{
+	if (sectionIndex < 0 || sectionIndex >= static_cast<int>(NetworkSectionCount))
+	{
+		return -1.0;
+	}
+
+	return network[static_cast<std::size_t>(sectionIndex)].seriesCoilResistance;
 }

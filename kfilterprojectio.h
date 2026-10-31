@@ -25,7 +25,7 @@ public:
     static constexpr int DriverCount = 4;
     static constexpr int NetworkUnitCount = 48;
     static constexpr int LegacyJsonFormatVersion = 1;
-    static constexpr int JsonFormatVersion = 10;
+    static constexpr int JsonFormatVersion = 11;
 
     using ActiveFilterChains = std::array<ActiveFilterChain, DriverCount>;
     using BaffleSettingsPerDriver = std::array<BaffleSettings, DriverCount>;

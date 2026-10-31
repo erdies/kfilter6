@@ -14,14 +14,29 @@ Stand: Patch 303.
 ## 1. Persistenzformate
 
 ```text
-.kfp Projektformat           JSON v10
+.kfp Projektformat           JSON v11
 .kfp Legacy-Textformat       lesend unterstützt, wird nicht geschrieben
-.kfd Driver-Slot-Format      v2, ausschließlich
+.kfd Driver-Slot-Format      v3; v2 lesend unterstützt
 ```
 
 Ältere JSON-Formatversionen bleiben lesend unterstützt und werden auf den
 aktuellen Stand angehoben. Fehlende Objekte einer neueren Version werden exakt
 auf ihre Defaults gesetzt.
+
+### Spulenwiderstand im seriellen Sperrkreis
+
+`.kfp` v11 und `.kfd` v3 speichern im `network`-Objekt jedes Treibers das Array
+`seriesCoilResistance_ohm` mit genau 8 Werten (je Section einer, endlich und
+`>= 0`). Ab diesen Versionen ist das Array Pflicht.
+
+Ältere Dateien (`.kfp` v1–v10, Legacy-Textformat, `.kfd` v2) laden für jede
+Section `driver::DefaultSeriesCoilResistanceOhm` = 0.5 Ohm. Projekte mit
+seriellem Sperrkreis rechnen dadurch nach dem Laden bewusst mit verlustbehafteter
+Spule und damit anders als vor Einführung des Werts.
+
+Der Wert wirkt nur, wenn Series R, C und L einer Section alle ungleich 0 sind:
+`R || C || (R_L + jwL)`. Bei `R_L = 0` bleibt die historische Rechnung bitgenau
+erhalten.
 
 Keine Formatänderung ohne explizite Versionserhöhung und ohne I/O-Regression im
 Test.

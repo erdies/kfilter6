@@ -9,11 +9,26 @@
 
 #include "driver.h"
 
+#include <QJsonArray>
+#include <QString>
+
 namespace NetworkSerializationUtils
 {
 constexpr int SectionCount = 8;
 constexpr int ValuesPerSection = 6;
 constexpr int ValueCount = SectionCount * ValuesPerSection;
+
+// Network-object key for the per-section series trap coil DC resistance (.kfp v11, .kfd v3).
+inline const QString SeriesCoilResistanceKey = QStringLiteral("seriesCoilResistance_ohm");
+
+inline QJsonArray seriesCoilResistancesToJson(const driver& drv)
+{
+    QJsonArray values;
+    for (int sectionIndex = 0; sectionIndex < SectionCount; ++sectionIndex) {
+        values.append(drv.getSeriesCoilResistance(sectionIndex));
+    }
+    return values;
+}
 
 struct Address
 {

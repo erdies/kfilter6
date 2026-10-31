@@ -1178,6 +1178,7 @@ bool jsonToDriverParameters(const QJsonObject& parameters,
 
 bool jsonToDriverNetwork(const QJsonObject& network,
                          driver& currentDriver,
+                         int formatVersion,
                          const QString& context,
                          QString* errorMessage)
 {
@@ -1224,6 +1225,40 @@ bool jsonToDriverNetwork(const QJsonObject& network,
             return false;
         }
         NetworkSerializationUtils::setValue(currentDriver, index, value.toDouble());
+    }
+
+    // Since v11; older files keep driver::DefaultSeriesCoilResistanceOhm.
+    if (formatVersion < 11) {
+        return true;
+    }
+
+    const QJsonValue coilValue = network.value(NetworkSerializationUtils::SeriesCoilResistanceKey);
+    if (!coilValue.isArray()) {
+        setError(errorMessage,
+                 QStringLiteral("Missing or invalid array '%1.%2'.")
+                     .arg(context, NetworkSerializationUtils::SeriesCoilResistanceKey));
+        return false;
+    }
+
+    const QJsonArray coilValues = coilValue.toArray();
+    if (coilValues.size() != NetworkSerializationUtils::SectionCount) {
+        setError(errorMessage,
+                 QStringLiteral("Array '%1.%2' must contain exactly %3 entries.")
+                     .arg(context, NetworkSerializationUtils::SeriesCoilResistanceKey)
+                     .arg(NetworkSerializationUtils::SectionCount));
+        return false;
+    }
+
+    for (int index = 0; index < coilValues.size(); ++index) {
+        const QJsonValue value = coilValues.at(index);
+        if (!value.isDouble() || !std::isfinite(value.toDouble()) || value.toDouble() < 0.0) {
+            setError(errorMessage,
+                     QStringLiteral("Invalid series coil resistance '%1.%2[%3]'.")
+                         .arg(context, NetworkSerializationUtils::SeriesCoilResistanceKey)
+                         .arg(index));
+            return false;
+        }
+        currentDriver.setSeriesCoilResistance(index, value.toDouble());
     }
 
     return true;
@@ -1517,6 +1552,7 @@ bool loadJsonProject(const QByteArray& data,
                                     errorMessage) ||
             !jsonToDriverNetwork(network,
                                  drivers[driverIndex],
+                                 formatVersion,
                                  driverContext + QStringLiteral(".network"),
                                  errorMessage)) {
             return false;
@@ -1663,6 +1699,8 @@ QJsonObject driverNetworkToJson(const driver& currentDriver)
     QJsonObject network;
     network.insert(QStringLiteral("unitBaseIndex"), 1);
     network.insert(QStringLiteral("values"), values);
+    network.insert(NetworkSerializationUtils::SeriesCoilResistanceKey,
+                   NetworkSerializationUtils::seriesCoilResistancesToJson(currentDriver));
     return network;
 }
 
@@ -2127,6 +2165,17 @@ bool validateFiniteDriverData(const driver& currentDriver,
         if (!std::isfinite(NetworkSerializationUtils::value(currentDriver, index))) {
             setError(errorMessage,
                      QStringLiteral("Driver %1 contains a non-finite network value at unit %2.")
+                         .arg(driverIndex + 1)
+                         .arg(index + 1));
+            return false;
+        }
+    }
+
+    for (int index = 0; index < NetworkSerializationUtils::SectionCount; ++index) {
+        const double coilResistance = currentDriver.getSeriesCoilResistance(index);
+        if (!std::isfinite(coilResistance) || coilResistance < 0.0) {
+            setError(errorMessage,
+                     QStringLiteral("Driver %1 has an invalid series coil resistance in section %2.")
                          .arg(driverIndex + 1)
                          .arg(index + 1));
             return false;

@@ -201,6 +201,9 @@ void populateSlot(KFilterDriverIo::DriverSlot& slot)
     for (int unitIndex = 1; unitIndex <= KFilterDriverIo::NetworkUnitCount; ++unitIndex) {
         NetworkSerializationUtils::setValue(slot.driverData, unitIndex - 1, 0.25 * unitIndex);
     }
+    for (int sectionIndex = 0; sectionIndex < NetworkSerializationUtils::SectionCount; ++sectionIndex) {
+        slot.driverData.setSeriesCoilResistance(sectionIndex, 0.3 + 0.05 * sectionIndex);
+    }
 
     slot.measurementCurve.appendPoint(80.0, -2.25);
     slot.measurementCurve.appendPoint(800.0, 1.75);
@@ -273,13 +276,16 @@ int main(int argc, char *argv[])
     }
     const QJsonDocument document = QJsonDocument::fromJson(jsonFile.readAll());
     const QJsonObject root = document.object();
-    if (root.value(QStringLiteral("formatVersion")).toInt() != 2 ||
+    if (root.value(QStringLiteral("formatVersion")).toInt() != 3 ||
+        root.value(QStringLiteral("network")).toObject()
+                .value(NetworkSerializationUtils::SeriesCoilResistanceKey).toArray().size() !=
+            NetworkSerializationUtils::SectionCount ||
         !root.value(QStringLiteral("measurements")).isObject() ||
         !root.value(QStringLiteral("activeFilter")).isObject() ||
         !root.value(QStringLiteral("baffle")).isObject() ||
         !root.value(QStringLiteral("floorReflection")).isObject() ||
         !root.value(QStringLiteral("measurementSettings")).isObject()) {
-        errorStream << "Saved KFD v2 does not contain the complete driver-slot state.\n";
+        errorStream << "Saved KFD v3 does not contain the complete driver-slot state.\n";
         return 4;
     }
 
@@ -303,6 +309,14 @@ int main(int argc, char *argv[])
         }
         errorStream << error << '\n';
         return 6;
+    }
+    for (int sectionIndex = 0; sectionIndex < NetworkSerializationUtils::SectionCount; ++sectionIndex) {
+        if (!fuzzyEqual(expected.driverData.getSeriesCoilResistance(sectionIndex),
+                        actual.driverData.getSeriesCoilResistance(sectionIndex))) {
+            errorStream << "KFD series coil resistance round-trip mismatch in section "
+                        << (sectionIndex + 1) << ".\n";
+            return 6;
+        }
     }
 
     if (!KFilterDriverIo::mergeMeasurementsEnabledAfterImport(false, false, true) ||
@@ -370,6 +384,47 @@ int main(int argc, char *argv[])
         !error.contains(QStringLiteral("version 1"))) {
         errorStream << "KFD v1 was not rejected as intended.\n";
         return 13;
+    }
+
+    // KFD v2 predates the series coil resistance and must load its default.
+    const auto writeFixture = [&](const QString& name, const QJsonObject& fixtureRoot) {
+        const QString path = temporaryDirectory.filePath(name);
+        QFile fixtureFile(path);
+        if (!fixtureFile.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
+            fixtureFile.write(QJsonDocument(fixtureRoot).toJson()) <= 0) {
+            return QString();
+        }
+        return path;
+    };
+    QJsonObject withoutCoilRoot = root;
+    QJsonObject withoutCoilNetwork = withoutCoilRoot.value(QStringLiteral("network")).toObject();
+    withoutCoilNetwork.remove(NetworkSerializationUtils::SeriesCoilResistanceKey);
+    withoutCoilRoot.insert(QStringLiteral("network"), withoutCoilNetwork);
+    withoutCoilRoot.insert(QStringLiteral("formatVersion"), 2);
+    const QString version2Path = writeFixture(QStringLiteral("v2.kfd"), withoutCoilRoot);
+
+    KFilterDriverIo::DriverSlot version2Slot;
+    if (version2Path.isEmpty() ||
+        !KFilterDriverIo::loadDriverSlotFromFile(version2Path, version2Slot, &error) ||
+        !compareDriver(expected.driverData, version2Slot.driverData, error)) {
+        errorStream << "KFD v2 compatibility failed: " << error << '\n';
+        return 14;
+    }
+    for (int sectionIndex = 0; sectionIndex < NetworkSerializationUtils::SectionCount; ++sectionIndex) {
+        if (version2Slot.driverData.getSeriesCoilResistance(sectionIndex) !=
+            driver::DefaultSeriesCoilResistanceOhm) {
+            errorStream << "KFD v2 did not default the series coil resistance.\n";
+            return 15;
+        }
+    }
+
+    withoutCoilRoot.insert(QStringLiteral("formatVersion"), 3);
+    const QString brokenVersion3Path = writeFixture(QStringLiteral("v3-without-coil.kfd"), withoutCoilRoot);
+    KFilterDriverIo::DriverSlot brokenVersion3Slot;
+    if (brokenVersion3Path.isEmpty() ||
+        KFilterDriverIo::loadDriverSlotFromFile(brokenVersion3Path, brokenVersion3Slot, &error)) {
+        errorStream << "KFD v3 without series coil resistance was accepted.\n";
+        return 16;
     }
 
     return 0;

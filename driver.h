@@ -146,6 +146,12 @@ public:
   void setNetworkValue(int sectionIndex, NetworkBranchType branch, NetworkComponent component, double value);
   /** Reads one component of a passive-network branch. Section indices are 0-based. */
   double getNetworkValue(int sectionIndex, NetworkBranchType branch, NetworkComponent component) const;
+  /** Default DC resistance of the coil inside a series trap circuit, in ohms. */
+  static constexpr double DefaultSeriesCoilResistanceOhm = 0.5;
+  /** Sets the coil DC resistance of a series trap circuit (series R, C and L all non-zero). */
+  void setSeriesCoilResistance(int sectionIndex, double resistanceOhm);
+  /** Reads the series trap coil DC resistance. Returns -1 for an invalid section index. */
+  double getSeriesCoilResistance(int sectionIndex) const;
 private:
 	void setModified(void);
 	void calculateParameters(void);
@@ -159,6 +165,8 @@ private:
 	struct NetworkSection {
 		NetworkBranch series;
 		NetworkBranch parallel;
+		// Only evaluated when the series branch is a trap circuit (R, C and L non-zero).
+		double seriesCoilResistance = DefaultSeriesCoilResistanceOhm;
 	};
 
 	static constexpr std::size_t NetworkSectionCount = 8;
@@ -176,7 +184,8 @@ private:
 	void calculateAcousticResponse(std::complex<double>& response, double omega);
 	int  findLastNetworkSectionIndex(void) const;
 	void calculateParallelBranch(std::complex<double>& networkImpedance, double omega, const NetworkBranch& branch);
-	void calculateSeriesBranch(std::complex<double>& networkImpedance, double omega, const NetworkBranch& branch);
+	void calculateSeriesBranch(std::complex<double>& networkImpedance, double omega, const NetworkBranch& branch,
+	                           double coilResistance);
 
 	EnclosureType enclosureType, enclosureTypeProposal;
 	bool dirty_pressure,dirty_impedance;

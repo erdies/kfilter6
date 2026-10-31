@@ -26,7 +26,8 @@ class driver;
  * The legacy NetworkDialog uses Qt3/KDE3 widgets and fixed pixmap based circuit previews.
  * This dialog keeps the same data model: 8 network sections per driver, each section
  * containing series/shunt R/C/L values. Capacitors are shown in uF and inductors in mH,
- * while the driver core continues to store them in F and H.
+ * while the driver core continues to store them in F and H. An additional "Coil DCR"
+ * row is editable only for sections whose series R, C and L form a trap circuit.
  */
 class NetworkParametersDialog : public QDialog
 {
@@ -76,6 +77,11 @@ private:
     bool sectionShuntIsEmpty(QTableWidget *table, int section, QString *errorMessage = nullptr) const;
     int findRightmostFreeSectionBlock(QTableWidget *table, int requiredSections) const;
     void clearSectionBlock(QTableWidget *table, int startSection, int sectionCount) const;
+    bool sectionIsSeriesTrap(QTableWidget *table, int section) const;
+    void setCoilDcrValue(QTableWidget *table, int section, double value) const;
+    double coilDcrValue(QTableWidget *table, int section) const;
+    void updateCoilDcrCell(QTableWidget *table, int section) const;
+    void tableItemChanged(QTableWidget *table, int row, int column) const;
 
     static double displayFromInternal(int row, double value);
     static double internalFromDisplay(int row, double value);

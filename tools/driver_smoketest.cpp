@@ -586,6 +586,10 @@ bool checkLegacyNetworkCase(const char* label, const LegacyNetwork& units)
                             component,
                             units[static_cast<std::size_t>(unitIndex)]);
     }
+    // The legacy model knows only ideal coils; Coil DCR = 0 must reproduce it bitwise.
+    for (int sectionIndex = 0; sectionIndex < 8; ++sectionIndex) {
+        drv.setSeriesCoilResistance(sectionIndex, 0.0);
+    }
     calculateResults(drv);
 
     const LegacyNetworkResult expected =
@@ -787,6 +791,91 @@ bool checkPassiveNetworkBitwiseRegression()
     return true;
 }
 
+double minimumMagnitude(const ResultArray& values)
+{
+    double minimum = std::abs(values[0]);
+    for (const std::complex<double>& value : values) {
+        minimum = std::min(minimum, std::abs(value));
+    }
+    return minimum;
+}
+
+bool checkSeriesTrapCoilResistance()
+{
+    constexpr double r = 8.2;
+    constexpr double c = 6.8e-6;
+    constexpr double l = 0.00082;
+    constexpr double coilResistance = 0.5;
+
+    driver drv;
+    for (int sectionIndex = 0; sectionIndex < 8; ++sectionIndex) {
+        if (drv.getSeriesCoilResistance(sectionIndex) != driver::DefaultSeriesCoilResistanceOhm) {
+            QTextStream(stderr) << "Series trap coil resistance default is not "
+                                << driver::DefaultSeriesCoilResistanceOhm << " Ohm\n";
+            return false;
+        }
+    }
+    if (drv.getSeriesCoilResistance(-1) != -1.0 || drv.getSeriesCoilResistance(8) != -1.0) {
+        QTextStream(stderr) << "Series trap coil resistance accepted an invalid section index\n";
+        return false;
+    }
+
+    drv.setF0(0.0); // isolates the passive network from the acoustic T/S model
+    drv.setNetworkValue(0, NetworkBranchType::Series, NetworkComponent::Resistance, r);
+    drv.setNetworkValue(0, NetworkBranchType::Series, NetworkComponent::Capacitance, c);
+    drv.setNetworkValue(0, NetworkBranchType::Series, NetworkComponent::Inductance, l);
+    drv.setSeriesCoilResistance(0, 0.0);
+    calculateResults(drv);
+    const ResultArray idealPressure = copyResult(drv.pressureResponse());
+
+    drv.setSeriesCoilResistance(0, coilResistance);
+    calculateResults(drv);
+    if (resultArraysEqual(idealPressure, drv.pressureResponse())) {
+        QTextStream(stderr) << "setSeriesCoilResistance left stale cached results\n";
+        return false;
+    }
+
+    // Independent reference: R || C || (R_L + jwL) in series with Rdc + jwLsp.
+    double omega = 125.6637061;
+    for (std::size_t sampleIndex = 0; sampleIndex < ResultSampleCount; ++sampleIndex) {
+        const std::complex<double> load{drv.getRdc(), omega * drv.getLsp()};
+        const std::complex<double> trapAdmittance =
+            1.0 / r + std::complex<double>{0.0, omega * c} +
+            1.0 / std::complex<double>{coilResistance, omega * l};
+        const std::complex<double> expectedImpedance = load + 1.0 / trapAdmittance;
+        if (!nearlyEqual(drv.impedanceResponse()[sampleIndex], expectedImpedance) ||
+            !nearlyEqual(drv.pressureResponse()[sampleIndex], load / expectedImpedance)) {
+            QTextStream(stderr) << "Series trap with coil resistance mismatch at sample "
+                                << static_cast<unsigned long long>(sampleIndex) << '\n';
+            return false;
+        }
+        omega *= 1.047128548;
+    }
+
+    if (!(minimumMagnitude(drv.pressureResponse()) > minimumMagnitude(idealPressure))) {
+        QTextStream(stderr) << "Coil resistance did not reduce the series trap depth\n";
+        return false;
+    }
+
+    // Without a complete R/C/L triplet the coil resistance must be ignored.
+    driver seriesRl;
+    seriesRl.setF0(0.0);
+    seriesRl.setNetworkValue(0, NetworkBranchType::Series, NetworkComponent::Resistance, r);
+    seriesRl.setNetworkValue(0, NetworkBranchType::Series, NetworkComponent::Inductance, l);
+    calculateResults(seriesRl);
+    const ResultArray rlPressure = copyResult(seriesRl.pressureResponse());
+    const ResultArray rlImpedance = copyResult(seriesRl.impedanceResponse());
+    seriesRl.setSeriesCoilResistance(0, 3.3);
+    calculateResults(seriesRl);
+    if (!resultArraysEqual(rlPressure, seriesRl.pressureResponse()) ||
+        !resultArraysEqual(rlImpedance, seriesRl.impedanceResponse())) {
+        QTextStream(stderr) << "Coil resistance changed a series branch that is not a trap circuit\n";
+        return false;
+    }
+
+    return true;
+}
+
 bool checkPlotStateEncapsulation()
 {
     driver drv;
@@ -890,6 +979,7 @@ int main()
         !checkSemanticNetworkMapping() ||
         !checkNetworkSerializationMapping() ||
         !checkPassiveNetworkBitwiseRegression() ||
+        !checkSeriesTrapCoilResistance() ||
         !checkEnclosureTransitionConsistency() ||
         !checkEquivalentCircuitEnclosureTransitions() ||
         !checkZeroF0ImpedanceModel() ||

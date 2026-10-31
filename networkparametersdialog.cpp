@@ -10,6 +10,7 @@
 #include "networkvalueutils.h"
 
 #include <QAbstractItemView>
+#include <QBrush>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
@@ -20,6 +21,7 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QObject>
+#include <QPalette>
 #include <QPushButton>
 #include <QSizePolicy>
 #include <QTableWidget>
@@ -36,8 +38,11 @@
 namespace
 {
 constexpr int NetworkSectionCount = 8;
-constexpr int NetworkRowsPerSection = 6;
+constexpr int NetworkRowsPerSection = 6; // series/shunt R/C/L component rows
+constexpr int NetworkTableRowCount = NetworkRowsPerSection + 1; // plus the Coil DCR row
 constexpr int ImpedanceCorrectionSection = NetworkSectionCount - 1;
+// Remembers the Coil DCR value while the cell is greyed out (no trap circuit).
+constexpr int CoilDcrValueRole = Qt::UserRole;
 
 QStringList rowLabels()
 {
@@ -47,7 +52,8 @@ QStringList rowLabels()
         QObject::tr("Series L [mH]"),
         QObject::tr("Shunt R [Ohm]"),
         QObject::tr("Shunt C [uF]"),
-        QObject::tr("Shunt L [mH]")
+        QObject::tr("Shunt L [mH]"),
+        QObject::tr("Coil DCR [Ohm]")
     };
 }
 
@@ -100,7 +106,8 @@ enum NetworkRow
     RowSeriesL = 2,
     RowShuntR = 3,
     RowShuntC = 4,
-    RowShuntL = 5
+    RowShuntL = 5,
+    RowSeriesCoilDcr = 6
 };
 
 NetworkBranchType branchForRow(int row)
@@ -273,7 +280,7 @@ QWidget *NetworkParametersDialog::createDriverPage(int index)
     presetLayout->setColumnStretch(1, 1);
     presetLayout->setColumnStretch(2, 1);
 
-    page.table = new QTableWidget(NetworkRowsPerSection, NetworkSectionCount, page.page);
+    page.table = new QTableWidget(NetworkTableRowCount, NetworkSectionCount, page.page);
     page.table->setHorizontalHeaderLabels(columnLabels());
     page.table->setVerticalHeaderLabels(rowLabels());
     page.table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
@@ -289,6 +296,17 @@ QWidget *NetworkParametersDialog::createDriverPage(int index)
             page.table->setItem(row, column, item);
         }
     }
+    for (int column = 0; column < NetworkSectionCount; ++column) {
+        auto *item = new QTableWidgetItem;
+        item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        item->setToolTip(tr("DC resistance of the trap-circuit coil. Editable only when Series R, C and L are all non-zero."));
+        page.table->setItem(RowSeriesCoilDcr, column, item);
+        setCoilDcrValue(page.table, column, driver::DefaultSeriesCoilResistanceOhm);
+    }
+    QTableWidget *table = page.table;
+    connect(table, &QTableWidget::itemChanged, this, [this, table](QTableWidgetItem *item) {
+        tableItemChanged(table, item->row(), item->column());
+    });
 
     auto *layout = new QVBoxLayout(page.page);
     layout->addWidget(presetGroup);
@@ -322,12 +340,16 @@ void NetworkParametersDialog::loadFromDrivers()
                 setCellValue(table, row, column, displayFromInternal(row, internalValue));
             }
         }
+        for (int column = 0; column < NetworkSectionCount; ++column) {
+            setCoilDcrValue(table, column, drv.getSeriesCoilResistance(column));
+        }
     }
 }
 
 bool NetworkParametersDialog::applyToDrivers()
 {
     double displayValues[KFilterProjectIo::DriverCount][NetworkRowsPerSection][NetworkSectionCount] = {};
+    double coilDcrValues[KFilterProjectIo::DriverCount][NetworkSectionCount] = {};
 
     for (int driverIndex = 0; driverIndex < KFilterProjectIo::DriverCount; ++driverIndex) {
         QTableWidget *table = m_pages.at(driverIndex).table;
@@ -349,6 +371,26 @@ bool NetworkParametersDialog::applyToDrivers()
                 displayValues[driverIndex][row][column] = value;
             }
         }
+        for (int column = 0; column < NetworkSectionCount; ++column) {
+            if (!sectionIsSeriesTrap(table, column)) {
+                coilDcrValues[driverIndex][column] = coilDcrValue(table, column);
+                continue;
+            }
+            double value = 0.0;
+            QString parseError;
+            if (!readCellValue(table, RowSeriesCoilDcr, column, value, &parseError)) {
+                table->setCurrentCell(RowSeriesCoilDcr, column);
+                QMessageBox::warning(this,
+                                     tr("Network / Filter Parameters"),
+                                     tr("Invalid numeric value in driver %1, row '%2', section %3.\n\n%4")
+                                         .arg(driverIndex + 1)
+                                         .arg(rowLabels().at(RowSeriesCoilDcr))
+                                         .arg(column + 1)
+                                         .arg(parseError));
+                return false;
+            }
+            coilDcrValues[driverIndex][column] = value;
+        }
     }
 
     for (int driverIndex = 0; driverIndex < KFilterProjectIo::DriverCount; ++driverIndex) {
@@ -360,6 +402,9 @@ bool NetworkParametersDialog::applyToDrivers()
                                     componentForRow(row),
                                     internalFromDisplay(row, displayValues[driverIndex][row][column]));
             }
+        }
+        for (int column = 0; column < NetworkSectionCount; ++column) {
+            drv.setSeriesCoilResistance(column, coilDcrValues[driverIndex][column]);
         }
     }
 
@@ -401,6 +446,9 @@ void NetworkParametersDialog::resetTable(QTableWidget *table)
         for (int column = 0; column < NetworkSectionCount; ++column) {
             setCellValue(table, row, column, 0.0);
         }
+    }
+    for (int column = 0; column < NetworkSectionCount; ++column) {
+        setCoilDcrValue(table, column, driver::DefaultSeriesCoilResistanceOhm);
     }
 }
 
@@ -519,6 +567,79 @@ void NetworkParametersDialog::clearSectionBlock(QTableWidget *table, int startSe
         for (int row = 0; row < NetworkRowsPerSection; ++row) {
             setCellValue(table, row, column, 0.0);
         }
+        setCoilDcrValue(table, column, driver::DefaultSeriesCoilResistanceOhm);
+    }
+}
+
+bool NetworkParametersDialog::sectionIsSeriesTrap(QTableWidget *table, int section) const
+{
+    for (int row = RowSeriesR; row <= RowSeriesL; ++row) {
+        double value = 0.0;
+        if (!readCellValue(table, row, section, value) || value <= 0.0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void NetworkParametersDialog::setCoilDcrValue(QTableWidget *table, int section, double value) const
+{
+    QTableWidgetItem *item = table->item(RowSeriesCoilDcr, section);
+    if (item == nullptr) {
+        return;
+    }
+    item->setData(CoilDcrValueRole, value);
+    if (item->flags() & Qt::ItemIsEditable) {
+        item->setText(displayNumber(value));
+    }
+    updateCoilDcrCell(table, section);
+}
+
+double NetworkParametersDialog::coilDcrValue(QTableWidget *table, int section) const
+{
+    const QTableWidgetItem *item = table->item(RowSeriesCoilDcr, section);
+    if (item == nullptr) {
+        return driver::DefaultSeriesCoilResistanceOhm;
+    }
+    return item->data(CoilDcrValueRole).toDouble();
+}
+
+void NetworkParametersDialog::updateCoilDcrCell(QTableWidget *table, int section) const
+{
+    QTableWidgetItem *item = table->item(RowSeriesCoilDcr, section);
+    if (item == nullptr) {
+        return;
+    }
+
+    const bool editable = (item->flags() & Qt::ItemIsEditable) != 0;
+    const bool trap = sectionIsSeriesTrap(table, section);
+    if (trap && !editable) {
+        item->setText(displayNumber(coilDcrValue(table, section)));
+        item->setBackground(QBrush());
+        item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable);
+    } else if (!trap && item->flags() != Qt::NoItemFlags) {
+        // Greyed out and empty; the last value stays in CoilDcrValueRole.
+        item->setFlags(Qt::NoItemFlags);
+        item->setBackground(table->palette().brush(QPalette::Disabled, QPalette::Window));
+        item->setText(QString());
+    }
+}
+
+void NetworkParametersDialog::tableItemChanged(QTableWidget *table, int row, int column) const
+{
+    if (row >= RowSeriesR && row <= RowSeriesL) {
+        updateCoilDcrCell(table, column);
+        return;
+    }
+    if (row != RowSeriesCoilDcr) {
+        return;
+    }
+
+    QTableWidgetItem *item = table->item(row, column);
+    double value = 0.0;
+    if (item != nullptr && (item->flags() & Qt::ItemIsEditable) &&
+        readCellValue(table, row, column, value)) {
+        item->setData(CoilDcrValueRole, value);
     }
 }
 

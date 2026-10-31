@@ -602,6 +602,11 @@ int main(int argc, char** argv)
     QString errorMessage;
     driver original[KFilterProjectIo::DriverCount];
     populateDrivers(original, true);
+    for (int driverIndex = 0; driverIndex < KFilterProjectIo::DriverCount; ++driverIndex) {
+        for (int sectionIndex = 0; sectionIndex < NetworkSerializationUtils::SectionCount; ++sectionIndex) {
+            original[driverIndex].setSeriesCoilResistance(sectionIndex, 0.1 * driverIndex + 0.01 * sectionIndex);
+        }
+    }
     KFilterProjectIo::MeasurementCurves originalMeasurements;
     populateMeasurements(originalMeasurements);
     KFilterProjectIo::MeasurementHiddenStates originalHiddenStates{};
@@ -745,6 +750,121 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // Format version 11 adds the series trap coil resistance per section.
+    const QJsonArray savedCoilResistances =
+        jsonDrivers.at(1).toObject()
+            .value(QStringLiteral("network")).toObject()
+            .value(NetworkSerializationUtils::SeriesCoilResistanceKey).toArray();
+    if (savedCoilResistances.size() != NetworkSerializationUtils::SectionCount ||
+        !fuzzyEqual(savedCoilResistances.at(3).toDouble(), 0.13)) {
+        QTextStream(stderr) << "Saved JSON project lacks the series coil resistance array\n";
+        return 1;
+    }
+    for (int driverIndex = 0; driverIndex < KFilterProjectIo::DriverCount; ++driverIndex) {
+        for (int sectionIndex = 0; sectionIndex < NetworkSerializationUtils::SectionCount; ++sectionIndex) {
+            if (!fuzzyEqual(original[driverIndex].getSeriesCoilResistance(sectionIndex),
+                            jsonLoaded[driverIndex].getSeriesCoilResistance(sectionIndex))) {
+                QTextStream(stderr) << "Series coil resistance round-trip mismatch for driver "
+                                    << (driverIndex + 1) << ", section " << (sectionIndex + 1) << '\n';
+                return 1;
+            }
+        }
+    }
+
+    const auto coilResistancesAreDefault = [](driver (&drivers)[KFilterProjectIo::DriverCount]) {
+        for (driver& currentDriver : drivers) {
+            for (int sectionIndex = 0; sectionIndex < NetworkSerializationUtils::SectionCount; ++sectionIndex) {
+                if (currentDriver.getSeriesCoilResistance(sectionIndex) != driver::DefaultSeriesCoilResistanceOhm) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    };
+
+    // Version 10 predates the array; every section must load the default.
+    QJsonObject version10Root = validRoot;
+    version10Root.insert(QStringLiteral("formatVersion"), 10);
+    QJsonObject version10Project = version10Root.value(QStringLiteral("project")).toObject();
+    QJsonArray version10Drivers = version10Project.value(QStringLiteral("drivers")).toArray();
+    for (int index = 0; index < version10Drivers.size(); ++index) {
+        QJsonObject driverObject = version10Drivers.at(index).toObject();
+        QJsonObject networkObject = driverObject.value(QStringLiteral("network")).toObject();
+        networkObject.remove(NetworkSerializationUtils::SeriesCoilResistanceKey);
+        driverObject.insert(QStringLiteral("network"), networkObject);
+        version10Drivers[index] = driverObject;
+    }
+    version10Project.insert(QStringLiteral("drivers"), version10Drivers);
+    version10Root.insert(QStringLiteral("project"), version10Project);
+    if (!writeTextFile(invalidFilePath,
+                       QString::fromUtf8(QJsonDocument(version10Root).toJson(QJsonDocument::Indented)),
+                       errorMessage)) {
+        QTextStream(stderr) << errorMessage << '\n';
+        return 1;
+    }
+
+    driver version10Loaded[KFilterProjectIo::DriverCount];
+    KFilterProjectIo::MeasurementCurves version10Measurements;
+    bool version10MergeEnabled = false;
+    KFilterProjectIo::MeasurementHiddenStates version10HiddenStates{};
+    KFilterProjectIo::ActiveFilterChains version10ActiveFilters{};
+    KFilterProjectIo::BaffleSettingsPerDriver version10BaffleSettings{};
+    KFilterProjectIo::FloorReflectionSettingsPerDriver version10FloorReflectionSettings{};
+    if (!KFilterProjectIo::loadFromFile(invalidFilePath,
+                                        version10Loaded, version10Measurements,
+                                        version10MergeEnabled, version10HiddenStates,
+                                        version10ActiveFilters, version10BaffleSettings,
+                                        version10FloorReflectionSettings, &errorMessage) ||
+        !compareDrivers(original, version10Loaded, true, errorMessage) ||
+        !coilResistancesAreDefault(version10Loaded)) {
+        QTextStream(stderr) << "Format version 10 compatibility failed: " << errorMessage << '\n';
+        return 1;
+    }
+
+    // Version 11 requires a complete, non-negative array.
+    for (const bool removeArray : {true, false}) {
+        QJsonObject brokenRoot = validRoot;
+        QJsonObject brokenProject = brokenRoot.value(QStringLiteral("project")).toObject();
+        QJsonArray brokenDrivers = brokenProject.value(QStringLiteral("drivers")).toArray();
+        QJsonObject driverObject = brokenDrivers.at(2).toObject();
+        QJsonObject networkObject = driverObject.value(QStringLiteral("network")).toObject();
+        if (removeArray) {
+            networkObject.remove(NetworkSerializationUtils::SeriesCoilResistanceKey);
+        } else {
+            QJsonArray coilValues = networkObject.value(NetworkSerializationUtils::SeriesCoilResistanceKey).toArray();
+            coilValues[5] = -0.5;
+            networkObject.insert(NetworkSerializationUtils::SeriesCoilResistanceKey, coilValues);
+        }
+        driverObject.insert(QStringLiteral("network"), networkObject);
+        brokenDrivers[2] = driverObject;
+        brokenProject.insert(QStringLiteral("drivers"), brokenDrivers);
+        brokenRoot.insert(QStringLiteral("project"), brokenProject);
+        if (!writeTextFile(invalidFilePath,
+                           QString::fromUtf8(QJsonDocument(brokenRoot).toJson(QJsonDocument::Indented)),
+                           errorMessage)) {
+            QTextStream(stderr) << errorMessage << '\n';
+            return 1;
+        }
+
+        driver brokenLoaded[KFilterProjectIo::DriverCount];
+        KFilterProjectIo::MeasurementCurves brokenMeasurements;
+        bool brokenMergeEnabled = false;
+        KFilterProjectIo::MeasurementHiddenStates brokenHiddenStates{};
+        KFilterProjectIo::ActiveFilterChains brokenActiveFilters{};
+        KFilterProjectIo::BaffleSettingsPerDriver brokenBaffleSettings{};
+        KFilterProjectIo::FloorReflectionSettingsPerDriver brokenFloorReflectionSettings{};
+        if (KFilterProjectIo::loadFromFile(invalidFilePath,
+                                           brokenLoaded, brokenMeasurements,
+                                           brokenMergeEnabled, brokenHiddenStates,
+                                           brokenActiveFilters, brokenBaffleSettings,
+                                           brokenFloorReflectionSettings, &errorMessage)) {
+            QTextStream(stderr) << (removeArray
+                                        ? "Version 11 project without series coil resistance was accepted\n"
+                                        : "Negative series coil resistance was accepted\n");
+            return 1;
+        }
+    }
+
     driver legacyOriginal[KFilterProjectIo::DriverCount];
     populateDrivers(legacyOriginal, false);
     if (!writeTextFile(legacyFilePath, createLegacyProject(legacyOriginal, true), errorMessage)) {
@@ -778,6 +898,7 @@ int main(int argc, char** argv)
     }
 
     if (!compareDrivers(legacyOriginal, legacyLoaded, false, errorMessage) ||
+        !coilResistancesAreDefault(legacyLoaded) ||
         !std::all_of(legacyMeasurements.cbegin(),
                      legacyMeasurements.cend(),
                      [](const KFilterMeasurementCurve& curve) { return curve.isEmpty(); }) ||

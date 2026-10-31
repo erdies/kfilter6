@@ -102,7 +102,7 @@ With **Merge Measurement** enabled, the interpolated correction is applied to th
 
 The **Hide Measurement for Driver** submenu controls each driver independently. A checked driver keeps its simulated SPL curve visible but suppresses both the stored correction curve and its correction influence. With Merge enabled, hidden drivers therefore contribute their uncorrected simulation to vector and energetic sums, while non-hidden drivers contribute their corrected simulation. The same effective contribution is used for the individual curve and both sum modes, so mixed hide states remain mathematically and visually consistent.
 
-Only the resulting relative correction points are project data. The original measurement file, absolute raw levels, calibration range, offset settings, and fade settings are not persisted. Measurement correction persistence was introduced with `.kfp` JSON format version 6 and remains part of the current format version 10: each correction curve is stored together with its per-driver hide state and the project-wide merge switch. The current format also persists every driver's complete active-filter, Baffle / Diffraction, and Floor Reflection settings. Calculated complex transfer-response arrays remain transient and are rebuilt from the stored metadata after loading. PDF rendering follows the same effective per-driver correction state as the plot.
+Only the resulting relative correction points are project data. The original measurement file, absolute raw levels, calibration range, offset settings, and fade settings are not persisted. Measurement correction persistence was introduced with `.kfp` JSON format version 6 and remains part of the current format version 11: each correction curve is stored together with its per-driver hide state and the project-wide merge switch. The current format also persists every driver's complete active-filter, Baffle / Diffraction, and Floor Reflection settings. Calculated complex transfer-response arrays remain transient and are rebuilt from the stored metadata after loading. PDF rendering follows the same effective per-driver correction state as the plot.
 
 ### Active filters
 
@@ -286,7 +286,7 @@ released. **Apply** or **OK** commits the current Baffle and Floor Reflection se
 **Cancel** restores the last applied state.
 
 Baffle persistence was introduced with `.kfp` format version 6 and remains part of
-the current format version 10. Each driver's Baffle enable state, model, width,
+the current format version 11. Each driver's Baffle enable state, model, width,
 rectangular geometry, diagnostic visibility, and edge-source count are stored. The
 150-point complex Baffle response and cache generation are not serialized. Projects
 through format version 5 load with Baffle processing disabled and default settings.
@@ -458,11 +458,11 @@ updates `Qts` from the entered `Qes` and `Qms` values.
 #### Complete driver-slot import/export (`.kfd`)
 
 `Import Driver...` and `Export Driver...` in the Driver Parameters dialog use the
-KFilter driver-slot format (`.kfd`). Format version 2 stores the complete state
+KFilter driver-slot format (`.kfd`). Format version 3 stores the complete state
 associated with that driver slot:
 
 - driver parameters, curve/total enable flags, polarity and enclosure state
-- all 48 passive network values
+- all 48 passive network values and the per-section series trap coil resistance
 - the driver's SPL measurement/correction curve and its per-driver Hide state
 - the current project `Merge Measurements` state as import metadata
 - the complete Active Filter chain, including enable/diagnostic state
@@ -478,7 +478,8 @@ imported driver's Hide state is always restored when a measurement curve is pres
 
 `.kfd` version 1 is intentionally not supported. The format had not yet been released
 for compatibility-sensitive use, so version 2 stays simpler by requiring the complete
-driver-slot state instead of maintaining partial legacy semantics.
+driver-slot state instead of maintaining partial legacy semantics. Version 2 files
+still load; they lack the series trap coil resistance, which defaults to 0.5 Ohm.
 
 ### 3. Enable curves and totals
 
@@ -512,6 +513,12 @@ Each driver has eight network sections. Each section contains:
 - shunt L
 
 Capacitors and inductors are edited in user-friendly units, while the internal model keeps the historical storage units.
+
+When series R, C and L of a section are all non-zero, the series element is a
+trap circuit (R, C and L in parallel). For such sections the additional
+`Coil DCR [Ohm]` row becomes editable and models the coil's DC resistance in
+series with L (default 0.5 Ohm). In all other sections the field is greyed out;
+the last entered value is kept and reappears when the trap circuit is restored.
 
 The `Standard Filter Preset` area can insert simple Butterworth low-pass and
 high-pass start values. The `Impedance correction` filter type inserts a
@@ -562,7 +569,7 @@ File -> Save
 File -> Save As...
 ```
 
-Projects are saved as versioned, human-readable JSON while retaining the `.kfp` extension. Legacy text-based `.kfp` files and JSON format versions 1 through 9 can still be opened; saving such a project rewrites it in the current version 10 format. SPL correction curves, per-driver active-filter and Baffle settings, and Floor Reflection placement/surface metadata are project data. Floor Reflection remains disabled by default for backward-compatible project behavior; version 10 adds the experimental porous-surface preset introduced in Patch 229.
+Projects are saved as versioned, human-readable JSON while retaining the `.kfp` extension. Legacy text-based `.kfp` files and JSON format versions 1 through 10 can still be opened; saving such a project rewrites it in the current version 11 format. SPL correction curves, per-driver active-filter and Baffle settings, and Floor Reflection placement/surface metadata are project data. Floor Reflection remains disabled by default for backward-compatible project behavior; version 10 adds the experimental porous-surface preset introduced in Patch 229. Version 11 adds the per-section coil DC resistance of series trap circuits; older files load it as 0.5 Ohm.
 
 ## User settings
 
