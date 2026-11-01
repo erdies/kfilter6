@@ -171,6 +171,9 @@ private:
     void drawDriverPressureCurve(QPainter& painter, const double values[200]);
     void drawActiveFilterResponses(QPainter& painter);
     void drawBaffleResponses(QPainter& painter);
+    bool impedanceReferenceVisibleForDriver(int driverIndex) const;
+    double impedanceOhmToY(double valueOhm) const;
+    void drawImpedanceReferenceCurves(QPainter& painter);
     void drawCurveLabel(QPainter& painter, const QPointF& point, const QString& label) const;
     void drawDriverCurveLabels(QPainter& painter);
     void drawMeasurementCurves(QPainter& painter);

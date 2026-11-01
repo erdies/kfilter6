@@ -669,6 +669,24 @@ void KFilterQt6App::createActions()
                 this, [this, index](bool hidden) {
                     setMeasurementHiddenForDriver(index, hidden);
                 });
+
+        m_importImpedanceReferenceDriverActions[index] = new QAction(measurementDriverMenuText(index), this);
+        connect(m_importImpedanceReferenceDriverActions[index], &QAction::triggered, this, [this, index]() {
+            importImpedanceReferenceForDriver(index);
+        });
+
+        m_clearImpedanceReferenceDriverActions[index] = new QAction(measurementDriverMenuText(index), this);
+        connect(m_clearImpedanceReferenceDriverActions[index], &QAction::triggered, this, [this, index]() {
+            clearImpedanceReferenceForDriver(index);
+        });
+
+        m_hideImpedanceReferenceDriverActions[index] = new QAction(measurementDriverMenuText(index), this);
+        m_hideImpedanceReferenceDriverActions[index]->setCheckable(true);
+        m_hideImpedanceReferenceDriverActions[index]->setChecked(false);
+        connect(m_hideImpedanceReferenceDriverActions[index], &QAction::toggled,
+                this, [this, index](bool hidden) {
+                    setImpedanceReferenceHiddenForDriver(index, hidden);
+                });
     }
 
     m_finishMeasurementDrawingAction = new QAction(tr("&Finish Drawing"), this);
@@ -761,6 +779,13 @@ void KFilterQt6App::createMenusAndToolBar()
         }
     }
 
+    QMenu *importImpedanceReferenceMenu = measurementMenu->addMenu(tr("Import Impedance &ZMA for Driver"));
+    for (QAction *driverAction : m_importImpedanceReferenceDriverActions) {
+        if (driverAction != nullptr) {
+            importImpedanceReferenceMenu->addAction(driverAction);
+        }
+    }
+
     QMenu *exportMeasurementMenu = measurementMenu->addMenu(tr("&Export Measurement for Driver"));
     for (QAction *driverAction : m_exportMeasurementDriverActions) {
         if (driverAction != nullptr) {
@@ -784,10 +809,24 @@ void KFilterQt6App::createMenusAndToolBar()
     clearMeasurementMenu->addSeparator();
     clearMeasurementMenu->addAction(m_clearAllMeasurementsAction);
 
+    QMenu *clearImpedanceReferenceMenu = measurementMenu->addMenu(tr("Clear Impedance ZMA for Driver"));
+    for (QAction *driverAction : m_clearImpedanceReferenceDriverActions) {
+        if (driverAction != nullptr) {
+            clearImpedanceReferenceMenu->addAction(driverAction);
+        }
+    }
+
     QMenu *hideMeasurementMenu = measurementMenu->addMenu(tr("&Hide Measurement for Driver"));
     for (QAction *driverAction : m_hideMeasurementDriverActions) {
         if (driverAction != nullptr) {
             hideMeasurementMenu->addAction(driverAction);
+        }
+    }
+
+    QMenu *hideImpedanceReferenceMenu = measurementMenu->addMenu(tr("Hide Impedance ZMA for Driver"));
+    for (QAction *driverAction : m_hideImpedanceReferenceDriverActions) {
+        if (driverAction != nullptr) {
+            hideImpedanceReferenceMenu->addAction(driverAction);
         }
     }
 
@@ -1010,6 +1049,119 @@ void KFilterQt6App::importMeasurementForDriver(int driverIndex)
             .arg(measurementDriverMenuText(driverIndex))
             .arg(importResult.effectiveOffsetDb, 0, 'f', 3),
         5000);
+}
+
+void KFilterQt6App::importImpedanceReferenceForDriver(int driverIndex)
+{
+    if (raiseActiveNetworkSectionEditor() || m_plotView == nullptr || m_doc == nullptr ||
+        driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount ||
+        m_plotView->measurementDrawingActive()) {
+        return;
+    }
+
+    const QString driverText = measurementDriverMenuText(driverIndex);
+    if (!m_doc->impedanceReferenceCurve(driverIndex).isEmpty()) {
+        const QMessageBox::StandardButton answer = QMessageBox::question(
+            this,
+            tr("Replace Impedance ZMA"),
+            tr("%1 already has an impedance ZMA curve. Replace it?\n\n"
+               "The existing curve will remain unchanged if the import is cancelled.")
+                .arg(driverText),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);
+        if (answer != QMessageBox::Yes) {
+            return;
+        }
+    }
+
+    const QString filePath = QFileDialog::getOpenFileName(
+        this,
+        tr("Select Impedance ZMA File"),
+        dialogStartDirectory(),
+        tr("Impedance files (*.zma);;All files (*)"));
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    const KFilterImpedanceParseResult parseResult = parseKFilterZmaFile(filePath);
+    if (!parseResult.isValid()) {
+        QMessageBox::critical(
+            this,
+            tr("Impedance ZMA Import Failed"),
+            parseResult.errorMessage.isEmpty()
+                ? tr("The selected file does not contain a usable impedance curve.")
+                : parseResult.errorMessage);
+        return;
+    }
+
+    rememberDirectoryForPath(filePath);
+    // Reference only and not saved yet: the project stays unmodified.
+    m_doc->setImpedanceReferenceCurve(driverIndex, parseResult.points);
+    m_plotView->update();
+    updateActionState();
+
+    QString message =
+        tr("Imported %1 impedance points for %2, %3 Hz - %4 Hz.")
+            .arg(static_cast<qlonglong>(parseResult.points.size()))
+            .arg(driverText)
+            .arg(parseResult.points.constFirst().frequencyHz, 0, 'f', 1)
+            .arg(parseResult.points.constLast().frequencyHz, 0, 'f', 1);
+    if (parseResult.ignoredLineCount > 0) {
+        message += QLatin1Char(' ') + tr("%1 invalid line(s) ignored.").arg(parseResult.ignoredLineCount);
+    }
+    if (!m_doc->m_driverDriver[driverIndex].plotState().impedance) {
+        message += QLatin1Char(' ') + tr("Enable the impedance curve of this driver to see it.");
+    }
+    statusBar()->showMessage(message, 6000);
+}
+
+void KFilterQt6App::clearImpedanceReferenceForDriver(int driverIndex)
+{
+    if (raiseActiveNetworkSectionEditor() || m_plotView == nullptr || m_doc == nullptr ||
+        driverIndex < 0 || driverIndex >= KFilterProjectIo::DriverCount ||
+        m_doc->impedanceReferenceCurve(driverIndex).isEmpty()) {
+        return;
+    }
+
+    const QString driverText = measurementDriverMenuText(driverIndex);
+    const QMessageBox::StandardButton answer = QMessageBox::question(
+        this,
+        tr("Clear Impedance ZMA"),
+        tr("Clear the impedance ZMA curve for %1?").arg(driverText),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No);
+    if (answer != QMessageBox::Yes) {
+        return;
+    }
+
+    if (m_doc->clearImpedanceReferenceCurve(driverIndex)) {
+        statusBar()->showMessage(tr("Impedance ZMA curve for %1 cleared.").arg(driverText), 3000);
+    }
+    m_plotView->update();
+    updateActionState();
+}
+
+void KFilterQt6App::setImpedanceReferenceHiddenForDriver(int driverIndex, bool hidden)
+{
+    if (m_plotView == nullptr || m_doc == nullptr || driverIndex < 0 ||
+        driverIndex >= KFilterProjectIo::DriverCount) {
+        return;
+    }
+
+    m_doc->setImpedanceReferenceHiddenForDriver(driverIndex, hidden);
+    const bool effectiveHidden = m_doc->impedanceReferenceHiddenForDriver(driverIndex);
+    QAction *hideAction = m_hideImpedanceReferenceDriverActions[driverIndex];
+    if (hideAction != nullptr && hideAction->isChecked() != effectiveHidden) {
+        const QSignalBlocker blocker(hideAction);
+        hideAction->setChecked(effectiveHidden);
+    }
+    m_plotView->update();
+
+    const QString driverText = measurementDriverMenuText(driverIndex);
+    statusBar()->showMessage(effectiveHidden
+                                 ? tr("Impedance ZMA for %1 hidden.").arg(driverText)
+                                 : tr("Impedance ZMA for %1 shown.").arg(driverText),
+                             3000);
 }
 
 void KFilterQt6App::exportMeasurementForDriver(int driverIndex)
@@ -1283,6 +1435,31 @@ void KFilterQt6App::updateMeasurementActions()
             hideAction->setChecked(
                 m_plotView != nullptr &&
                 m_plotView->measurementHiddenForDriver(index));
+        }
+
+        const bool driverHasImpedanceReference =
+            m_doc != nullptr && !m_doc->impedanceReferenceCurve(index).isEmpty();
+        QAction *importImpedanceAction = m_importImpedanceReferenceDriverActions[index];
+        if (importImpedanceAction != nullptr) {
+            importImpedanceAction->setText(measurementDriverMenuText(index));
+            importImpedanceAction->setEnabled(!networkEditorOpen && !drawingActive);
+        }
+
+        QAction *clearImpedanceAction = m_clearImpedanceReferenceDriverActions[index];
+        if (clearImpedanceAction != nullptr) {
+            clearImpedanceAction->setText(measurementDriverMenuText(index));
+            clearImpedanceAction->setEnabled(
+                !networkEditorOpen && !drawingActive && driverHasImpedanceReference);
+        }
+
+        QAction *hideImpedanceAction = m_hideImpedanceReferenceDriverActions[index];
+        if (hideImpedanceAction != nullptr) {
+            const QSignalBlocker blocker(hideImpedanceAction);
+            hideImpedanceAction->setText(measurementDriverMenuText(index));
+            hideImpedanceAction->setEnabled(
+                !networkEditorOpen && !drawingActive && driverHasImpedanceReference);
+            hideImpedanceAction->setChecked(
+                m_doc != nullptr && m_doc->impedanceReferenceHiddenForDriver(index));
         }
     }
 

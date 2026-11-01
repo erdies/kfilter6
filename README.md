@@ -104,6 +104,20 @@ The **Hide Measurement for Driver** submenu controls each driver independently. 
 
 Only the resulting relative correction points are project data. The original measurement file, absolute raw levels, calibration range, offset settings, and fade settings are not persisted. Measurement correction persistence was introduced with `.kfp` JSON format version 6 and remains part of the current format version 11: each correction curve is stored together with its per-driver hide state and the project-wide merge switch. The current format also persists every driver's complete active-filter, Baffle / Diffraction, and Floor Reflection settings. Calculated complex transfer-response arrays remain transient and are rebuilt from the stored metadata after loading. PDF rendering follows the same effective per-driver correction state as the plot.
 
+#### Impedance reference (`.zma`)
+
+**Measurements -> Import Impedance ZMA for Driver** loads a measured impedance
+curve (`frequency |Z| [phase]` per row; `*`, `#`, `;` and `//` start comments;
+frequencies must strictly increase). It is drawn as a dashed line in the
+driver's impedance color whenever the driver's impedance curve is enabled and
+the driver is not checked in **Hide Impedance ZMA for Driver**. A new import
+always shows the curve. **Clear Impedance ZMA for Driver** removes it.
+
+The ZMA curve is a pure reference: it never changes the simulation or the total
+impedance. The phase is read but not yet displayed. ZMA curves are not saved in
+the project yet; importing one does not mark the project modified, and New,
+Open and a `.kfd` driver import into that slot clear them.
+
 ### Active filters
 
 The **Edit -> Active Filter Parameters...** dialog maintains one ordered active-filter

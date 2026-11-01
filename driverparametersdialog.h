@@ -8,6 +8,7 @@
 #define DRIVERPARAMETERSDIALOG_H
 
 #include "driver.h"
+#include "impedancereferencecurve.h"
 #include "kfilterprojectio.h"
 
 #include <QDialog>
@@ -127,6 +128,8 @@ private:
     KFilterProjectIo::ActiveFilterChains m_committedActiveFilterChains;
     KFilterProjectIo::BaffleSettingsPerDriver m_committedBaffleSettings;
     KFilterProjectIo::FloorReflectionSettingsPerDriver m_committedFloorReflectionSettings;
+    std::array<KFilterImpedanceReferenceCurve, KFilterProjectIo::DriverCount> m_committedImpedanceReferenceCurves;
+    std::array<bool, KFilterProjectIo::DriverCount> m_committedImpedanceReferenceHiddenStates{};
     bool m_committedMeasurementMergeEnabled = false;
     QTabWidget *m_tabs = nullptr;
     QTimer *m_previewTimer = nullptr;

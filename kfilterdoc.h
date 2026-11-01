@@ -27,6 +27,7 @@
 #include "driver.h"
 #include "kfilterfrequencygrid.h"
 #include "kfiltermeasurementcurve.h"
+#include "impedancereferencecurve.h"
 
 
 /** KFilterDoc provides the document and simulation state for KFilter.
@@ -72,6 +73,15 @@ bool setMeasurementHiddenForDriver(int driverIndex, bool hidden);
 bool splCorrectionActiveForDriver(int driverIndex) const;
 double splCorrectionDb(int driverIndex, int sampleIndex) const;
 double splCorrectionAmplitudeFactor(int driverIndex, int sampleIndex) const;
+
+// Measured impedance (.zma) shown as a plot reference only. Not part of the
+// project file yet, so changing it does not mark the document modified.
+const KFilterImpedanceReferenceCurve& impedanceReferenceCurve(int driverIndex) const;
+bool setImpedanceReferenceCurve(int driverIndex, const KFilterImpedanceReferenceCurve& curve);
+bool clearImpedanceReferenceCurve(int driverIndex);
+void clearImpedanceReferenceCurves();
+bool impedanceReferenceHiddenForDriver(int driverIndex) const;
+bool setImpedanceReferenceHiddenForDriver(int driverIndex, bool hidden);
 
 ActiveFilterChain& activeFilterChain(int driverIndex);
 const ActiveFilterChain& activeFilterChain(int driverIndex) const;
@@ -138,6 +148,8 @@ const FloorReflectionResponse& floorReflectionResponse(int driverIndex) const;
     mutable std::array<SplCorrectionCache, 4> m_splCorrectionCaches;
     bool m_measurementMergeEnabled = false;
     std::array<bool, 4> m_measurementHiddenForDrivers{};
+    std::array<KFilterImpedanceReferenceCurve, 4> m_impedanceReferenceCurves{};
+    std::array<bool, 4> m_impedanceReferenceHiddenForDrivers{};
     ActiveFilterChains m_activeFilterChains{};
     mutable std::array<ActiveFilterResponseCache, 4> m_activeFilterResponseCaches{};
     BaffleSettingsPerDriver m_baffleSettings{};

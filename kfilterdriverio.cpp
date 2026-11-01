@@ -409,6 +409,8 @@ bool KFilterDriverIo::applyDriverSlotToDocument(KFilterDoc& document,
     document.baffleSettings(driverIndex) = slot.baffleSettings;
     document.floorReflectionSettings(driverIndex) = slot.floorReflectionSettings;
     document.setMeasurementHiddenForDriver(driverIndex, slot.measurementHidden);
+    // A .kfd import replaces the driver; its old impedance reference no longer applies.
+    document.clearImpedanceReferenceCurve(driverIndex);
     document.setMeasurementMergeEnabled(mergeMeasurementsEnabledAfterImport(
         existingMergeState, otherDriversHaveMeasurements, slot.mergeMeasurementsEnabled));
     return true;

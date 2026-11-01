@@ -18,6 +18,7 @@
 #include <QMouseEvent>
 #include <QPaintEvent>
 #include <QPainter>
+#include <QPolygonF>
 #include <QPalette>
 #include <QPen>
 #include <QPoint>
@@ -725,6 +726,64 @@ void KFilterView::drawMeasurementCurves(QPainter& painter)
     painter.restore();
 }
 
+bool KFilterView::impedanceReferenceVisibleForDriver(int driverIndex) const
+{
+    // Shown only next to its own simulated impedance curve.
+    return m_document != nullptr && driverIndex >= 0 && driverIndex < 4 &&
+           !m_document->impedanceReferenceCurve(driverIndex).isEmpty() &&
+           !m_document->impedanceReferenceHiddenForDriver(driverIndex) &&
+           m_document->m_driverDriver[driverIndex].plotState().impedance;
+}
+
+double KFilterView::impedanceOhmToY(double valueOhm) const
+{
+    if (!std::isfinite(valueOhm) || height() <= 0) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    // Same linear impedance axis as YScale(value, 1): 0 Ohm at 5/6 height.
+    return 5.0 * static_cast<double>(height()) / 6.0 -
+           valueOhm * static_cast<double>(height()) / 60.0;
+}
+
+void KFilterView::drawImpedanceReferenceCurves(QPainter& painter)
+{
+    if (m_document == nullptr) {
+        return;
+    }
+
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setBrush(Qt::NoBrush);
+
+    for (int driverIndex = 0; driverIndex < 4; ++driverIndex) {
+        if (!impedanceReferenceVisibleForDriver(driverIndex)) {
+            continue;
+        }
+
+        QPen curvePen(impedanceCurveColor(driverIndex));
+        curvePen.setStyle(Qt::DashLine);
+        curvePen.setWidth(2);
+        painter.setPen(curvePen);
+
+        // One polyline per finite run keeps the dash pattern continuous across
+        // the densely spaced ZMA points.
+        QPolygonF polyline;
+        for (const KFilterImpedancePoint& point : m_document->impedanceReferenceCurve(driverIndex)) {
+            const QPointF plotPoint(frequencyHzToX(point.frequencyHz), impedanceOhmToY(point.magnitudeOhm));
+            if (!std::isfinite(plotPoint.x()) || !std::isfinite(plotPoint.y())) {
+                painter.drawPolyline(polyline);
+                polyline.clear();
+                continue;
+            }
+            polyline.append(plotPoint);
+        }
+        painter.drawPolyline(polyline);
+    }
+
+    painter.restore();
+}
+
 void KFilterView::drawLegend(QPainter& painter)
 {
     KFilterDoc* mydoc = getDocument();
@@ -771,6 +830,13 @@ void KFilterView::drawLegend(QPainter& painter)
                       Qt::DotLine,
                       1,
                       tr("Driver %1 impedance").arg(driverIndex + 1));
+        }
+
+        if (impedanceReferenceVisibleForDriver(driverIndex)) {
+            drawEntry(impedanceCurveColor(driverIndex),
+                      Qt::DashLine,
+                      2,
+                      tr("Driver %1 impedance ZMA").arg(driverIndex + 1));
         }
     }
 
@@ -1009,6 +1075,7 @@ void KFilterView::paintEvent(QPaintEvent *event)
 
     drawActiveFilterResponses(mypainter);
     drawBaffleResponses(mypainter);
+    drawImpedanceReferenceCurves(mypainter);
     drawMeasurementCurves(mypainter);
 
     pen.setColor(foregroundTextColor());

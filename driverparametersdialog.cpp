@@ -806,6 +806,9 @@ void DriverParametersDialog::rememberCommittedState()
         m_committedBaffleSettings[arrayIndex] = m_document.baffleSettings(index);
         m_committedFloorReflectionSettings[arrayIndex] =
             m_document.floorReflectionSettings(index);
+        m_committedImpedanceReferenceCurves[arrayIndex] = m_document.impedanceReferenceCurve(index);
+        m_committedImpedanceReferenceHiddenStates[arrayIndex] =
+            m_document.impedanceReferenceHiddenForDriver(index);
     }
     m_committedMeasurementMergeEnabled = m_document.measurementMergeEnabled();
 }
@@ -822,6 +825,9 @@ void DriverParametersDialog::restoreCommittedState()
         m_document.floorReflectionSettings(index) = m_committedFloorReflectionSettings[arrayIndex];
         m_document.setMeasurementHiddenForDriver(
             index, m_committedMeasurementHiddenStates[arrayIndex]);
+        m_document.setImpedanceReferenceCurve(index, m_committedImpedanceReferenceCurves[arrayIndex]);
+        m_document.setImpedanceReferenceHiddenForDriver(
+            index, m_committedImpedanceReferenceHiddenStates[arrayIndex]);
     }
     m_document.setMeasurementMergeEnabled(m_committedMeasurementMergeEnabled);
     m_restoringDrivers = false;

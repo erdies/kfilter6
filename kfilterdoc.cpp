@@ -156,6 +156,71 @@ bool KFilterDoc::setMeasurementHiddenForDriver(int driverIndex, bool hidden)
   return true;
 }
 
+const KFilterImpedanceReferenceCurve& KFilterDoc::impedanceReferenceCurve(int driverIndex) const
+{
+  return m_impedanceReferenceCurves.at(static_cast<std::size_t>(driverIndex));
+}
+
+bool KFilterDoc::setImpedanceReferenceCurve(int driverIndex, const KFilterImpedanceReferenceCurve& curve)
+{
+  if (driverIndex < 0 || driverIndex >= static_cast<int>(m_impedanceReferenceCurves.size())) {
+    return false;
+  }
+
+  const std::size_t index = static_cast<std::size_t>(driverIndex);
+  m_impedanceReferenceCurves[index] = curve;
+  // A freshly imported reference is always shown.
+  m_impedanceReferenceHiddenForDrivers[index] = false;
+  return true;
+}
+
+bool KFilterDoc::clearImpedanceReferenceCurve(int driverIndex)
+{
+  if (driverIndex < 0 || driverIndex >= static_cast<int>(m_impedanceReferenceCurves.size())) {
+    return false;
+  }
+
+  const std::size_t index = static_cast<std::size_t>(driverIndex);
+  const bool changed = !m_impedanceReferenceCurves[index].isEmpty() ||
+                       m_impedanceReferenceHiddenForDrivers[index];
+  m_impedanceReferenceCurves[index].clear();
+  m_impedanceReferenceHiddenForDrivers[index] = false;
+  return changed;
+}
+
+void KFilterDoc::clearImpedanceReferenceCurves()
+{
+  for (KFilterImpedanceReferenceCurve& curve : m_impedanceReferenceCurves) {
+    curve.clear();
+  }
+  m_impedanceReferenceHiddenForDrivers.fill(false);
+}
+
+bool KFilterDoc::impedanceReferenceHiddenForDriver(int driverIndex) const
+{
+  if (driverIndex < 0 || driverIndex >= static_cast<int>(m_impedanceReferenceHiddenForDrivers.size())) {
+    return false;
+  }
+
+  return m_impedanceReferenceHiddenForDrivers[static_cast<std::size_t>(driverIndex)];
+}
+
+bool KFilterDoc::setImpedanceReferenceHiddenForDriver(int driverIndex, bool hidden)
+{
+  if (driverIndex < 0 || driverIndex >= static_cast<int>(m_impedanceReferenceHiddenForDrivers.size())) {
+    return false;
+  }
+
+  const std::size_t index = static_cast<std::size_t>(driverIndex);
+  const bool effectiveHidden = hidden && !m_impedanceReferenceCurves[index].isEmpty();
+  if (m_impedanceReferenceHiddenForDrivers[index] == effectiveHidden) {
+    return false;
+  }
+
+  m_impedanceReferenceHiddenForDrivers[index] = effectiveHidden;
+  return true;
+}
+
 const KFilterDoc::SplCorrectionCache* KFilterDoc::ensureSplCorrectionCache(int driverIndex) const
 {
   if (driverIndex < 0 || driverIndex >= static_cast<int>(m_splCorrectionCurves.size())) {
@@ -388,6 +453,8 @@ bool KFilterDoc::openDocument(const QUrl& url, const char *format /*=nullptr*/)
   }
 
   setURL(url);
+  // Impedance references are not part of the project file yet.
+  clearImpedanceReferenceCurves();
   markLoadedContentsReady();
   return true;
 }
@@ -430,6 +497,7 @@ void KFilterDoc::deleteContents()
   }
   m_measurementMergeEnabled = false;
   m_measurementHiddenForDrivers.fill(false);
+  clearImpedanceReferenceCurves();
   resetActiveFilterChains();
   resetBaffleSettings();
   resetFloorReflectionSettings();
