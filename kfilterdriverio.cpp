@@ -22,8 +22,10 @@
 
 namespace
 {
-constexpr int FormatVersion = 3;
-// v2 lacks the series trap coil resistance and still loads with its default.
+constexpr int FormatVersion = 5;
+// v2 lacks the series trap coil resistance, v2/v3 lack the LR2 voice-coil
+// branch, v2-v4 lack the impedance ZMA reference; all still load with their
+// defaults.
 constexpr int OldestSupportedFormatVersion = 2;
 const QString FormatName = QStringLiteral("KFilter driver slot");
 const QString ApplicationName = QStringLiteral("KFilter6");
@@ -241,6 +243,8 @@ QJsonObject driverToJson(const driver& drv)
     driverObject.insert(QStringLiteral("title"), drv.getTitle());
     driverObject.insert(QStringLiteral("rdc_ohm"), drv.getRdc());
     driverObject.insert(QStringLiteral("lsp_h"), drv.getLsp());
+    driverObject.insert(QStringLiteral("r2_ohm"), drv.getR2());
+    driverObject.insert(QStringLiteral("l2_h"), drv.getL2());
     driverObject.insert(QStringLiteral("fs_hz"), drv.getF0());
     driverObject.insert(QStringLiteral("qts"), drv.getQts());
     driverObject.insert(QStringLiteral("qes"), drv.getQes());
@@ -266,11 +270,14 @@ QJsonObject driverToJson(const driver& drv)
 
 bool jsonToDriver(const QJsonObject& driverObject,
                   driver& drv,
+                  int formatVersion,
                   QString* errorMessage)
 {
     QString title;
     double rdc = 0.0;
     double lsp = 0.0;
+    double r2 = 0.0;
+    double l2 = 0.0;
     double fs = 0.0;
     double qts = 0.0;
     double qes = 0.0;
@@ -316,6 +323,12 @@ bool jsonToDriver(const QJsonObject& driverObject,
         return false;
     }
 
+    if (formatVersion >= 4 &&
+        (!readRequiredDouble(driverObject, QStringLiteral("r2_ohm"), r2, errorMessage) ||
+         !readRequiredDouble(driverObject, QStringLiteral("l2_h"), l2, errorMessage))) {
+        return false;
+    }
+
     if (ql <= 0.0) {
         setError(errorMessage, QStringLiteral("Field 'ql' must be greater than zero."));
         return false;
@@ -334,6 +347,8 @@ bool jsonToDriver(const QJsonObject& driverObject,
     KFilterDriverValidation::Parameters validationParameters;
     validationParameters.rdcOhm = rdc;
     validationParameters.lspH = lsp;
+    validationParameters.r2Ohm = r2;
+    validationParameters.l2H = l2;
     validationParameters.fsHz = fs;
     validationParameters.qts = qts;
     validationParameters.qes = qes;
@@ -354,6 +369,8 @@ bool jsonToDriver(const QJsonObject& driverObject,
     drv.setTitle(title);
     drv.setRdc(rdc);
     drv.setLsp(lsp);
+    drv.setR2(r2);
+    drv.setL2(l2);
     drv.setF0(fs);
     drv.setQts(qts);
     drv.setQes(qes);
@@ -409,8 +426,12 @@ bool KFilterDriverIo::applyDriverSlotToDocument(KFilterDoc& document,
     document.baffleSettings(driverIndex) = slot.baffleSettings;
     document.floorReflectionSettings(driverIndex) = slot.floorReflectionSettings;
     document.setMeasurementHiddenForDriver(driverIndex, slot.measurementHidden);
-    // A .kfd import replaces the driver; its old impedance reference no longer applies.
+    // The slot's impedance reference replaces the old one; none in the file clears it.
     document.clearImpedanceReferenceCurve(driverIndex);
+    if (!slot.impedanceReferenceCurve.isEmpty()) {
+        document.setImpedanceReferenceCurve(driverIndex, slot.impedanceReferenceCurve);
+        document.setImpedanceReferenceHiddenForDriver(driverIndex, slot.impedanceReferenceHidden);
+    }
     document.setMeasurementMergeEnabled(mergeMeasurementsEnabledAfterImport(
         existingMergeState, otherDriversHaveMeasurements, slot.mergeMeasurementsEnabled));
     return true;
@@ -470,7 +491,7 @@ bool KFilterDriverIo::loadDriverSlotFromFile(const QString& filePath,
     }
 
     DriverSlot parsedSlot;
-    if (!jsonToDriver(driverObject, parsedSlot.driverData, errorMessage) ||
+    if (!jsonToDriver(driverObject, parsedSlot.driverData, formatVersion, errorMessage) ||
         !loadNetworkValues(networkObject, parsedSlot.driverData, errorMessage) ||
         (formatVersion >= 3 &&
          !loadSeriesCoilResistances(networkObject, parsedSlot.driverData, errorMessage)) ||
@@ -482,7 +503,13 @@ bool KFilterDriverIo::loadDriverSlotFromFile(const QString& filePath,
             parsedSlot.baffleSettings,
             parsedSlot.floorReflectionSettings,
             QStringLiteral("root"),
-            errorMessage)) {
+            errorMessage) ||
+        (formatVersion >= 5 &&
+         !KFilterProjectIo::readImpedanceReferenceFromJson(root,
+                                                           parsedSlot.impedanceReferenceCurve,
+                                                           parsedSlot.impedanceReferenceHidden,
+                                                           QStringLiteral("root"),
+                                                           errorMessage))) {
         return false;
     }
 
@@ -554,7 +581,12 @@ bool KFilterDriverIo::saveDriverSlotToFile(const QString& filePath,
             slot.baffleSettings,
             slot.floorReflectionSettings,
             0,
-            errorMessage)) {
+            errorMessage) ||
+        !KFilterProjectIo::writeImpedanceReferenceToJson(root,
+                                                         slot.impedanceReferenceCurve,
+                                                         slot.impedanceReferenceHidden,
+                                                         0,
+                                                         errorMessage)) {
         return false;
     }
 

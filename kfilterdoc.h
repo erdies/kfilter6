@@ -74,8 +74,8 @@ bool splCorrectionActiveForDriver(int driverIndex) const;
 double splCorrectionDb(int driverIndex, int sampleIndex) const;
 double splCorrectionAmplitudeFactor(int driverIndex, int sampleIndex) const;
 
-// Measured impedance (.zma) shown as a plot reference only. Not part of the
-// project file yet, so changing it does not mark the document modified.
+// Measured impedance (.zma) shown as a plot reference only; saved with the
+// project (.kfp v13). The setters do not touch the modified flag; callers set it.
 const KFilterImpedanceReferenceCurve& impedanceReferenceCurve(int driverIndex) const;
 bool setImpedanceReferenceCurve(int driverIndex, const KFilterImpedanceReferenceCurve& curve);
 bool clearImpedanceReferenceCurve(int driverIndex);

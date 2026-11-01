@@ -8,6 +8,7 @@
 
 #include "driver.h"
 #include "driverparametervalidation.h"
+#include "impedancefitdialog.h"
 #include "kfilterdriverio.h"
 #include "kfilterdoc.h"
 #include "networkvalueutils.h"
@@ -340,6 +341,8 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     page.title = new QLineEdit(page.page);
     page.rdc = createSpinBox(0.001, 1000.0, 4, 0.1, tr(" Ohm"));
     page.lspMilliHenry = createSpinBox(0.0, 1000.0, 6, 0.01, tr(" mH"));
+    page.r2 = createSpinBox(0.0, 10000.0, 4, 0.1, tr(" Ohm"));
+    page.l2MilliHenry = createSpinBox(0.0, 1000.0, 6, 0.01, tr(" mH"));
     page.f0 = createSpinBox(0.0, 100000.0, 3, 1.0, tr(" Hz"));
     page.qts = createSpinBox(0.001, 1000.0, 5, 0.01);
     page.qes = createSpinBox(0.001, 1000.0, 5, 0.01);
@@ -366,6 +369,8 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     page.qms->setObjectName(QStringLiteral("driverQmsSpin") + controlSuffix);
     page.v2->setObjectName(QStringLiteral("driverV2Spin") + controlSuffix);
     page.gainDb->setObjectName(QStringLiteral("driverGainSpin") + controlSuffix);
+    page.r2->setObjectName(QStringLiteral("driverR2Spin") + controlSuffix);
+    page.l2MilliHenry->setObjectName(QStringLiteral("driverL2Spin") + controlSuffix);
 
     const int enclosureEditorWidth = page.gainDb->sizeHint().width();
     page.vb->setFixedWidth(enclosureEditorWidth);
@@ -399,12 +404,28 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     page.fullCircuit->setToolTip(tr("Use the full crossover network for this driver instead of the simplified calculation."));
     page.ql->setToolTip(tr("Enclosure loss damping factor. It affects sealed, vented, and bandpass calculations. Must be greater than zero."));
     page.tubeDiameter->setToolTip(tr("Inner diameter of one round bass reflex tube. Editing it recalculates the tube length from Vb and Fb."));
+    page.r2->setToolTip(tr("LR2 voice-coil model: R2 in parallel with L2, in series with Rdc and Lsp. "
+                           "Models eddy-current losses that flatten the impedance rise at high frequencies. "
+                           "0 disables the R2/L2 branch."));
+    page.l2MilliHenry->setToolTip(page.r2->toolTip());
     page.tubeLength->setToolTip(tr("Physical bass reflex tube length. Editing it recalculates the tube diameter from Vb and Fb."));
 
     auto *leftForm = new QFormLayout;
     addRow(leftForm, tr("Driver name"), page.title);
     addRow(leftForm, tr("Rdc"), page.rdc);
     addRow(leftForm, tr("Lsp"), page.lspMilliHenry);
+    addRow(leftForm, tr("R2"), page.r2);
+    auto *l2LayoutWidget = new QWidget(page.page);
+    auto *l2Layout = new QHBoxLayout(l2LayoutWidget);
+    l2Layout->setContentsMargins(0, 0, 0, 0);
+    l2Layout->addWidget(page.l2MilliHenry);
+    page.fitZmaButton = new QPushButton(tr("Fit to ZMA..."), l2LayoutWidget);
+    page.fitZmaButton->setObjectName(QStringLiteral("driverFitZmaButton") + controlSuffix);
+    l2Layout->addWidget(page.fitZmaButton);
+    addRow(leftForm, tr("L2"), l2LayoutWidget);
+    connect(page.fitZmaButton, &QPushButton::clicked, this, [this, index]() {
+        fitVoiceCoilToZma(index);
+    });
     addRow(leftForm, tr("Fs"), page.f0);
     auto *qtsLayoutWidget = new QWidget(page.page);
     auto *qtsLayout = new QHBoxLayout(qtsLayoutWidget);
@@ -557,6 +578,8 @@ void DriverParametersDialog::connectPreviewSignals(DriverPage& page, int index)
 
     connectSpinBox(page.rdc);
     connectSpinBox(page.lspMilliHenry);
+    connectSpinBox(page.r2);
+    connectSpinBox(page.l2MilliHenry);
     connectSpinBox(page.f0);
     connectSpinBox(page.qts);
     connectSpinBox(page.qes);
@@ -640,6 +663,8 @@ void DriverParametersDialog::loadPageFromDriver(int index,
     page.title->setText(drv.getTitle());
     page.rdc->setValue(drv.getRdc());
     page.lspMilliHenry->setValue(drv.getLsp() * 1000.0);
+    page.r2->setValue(drv.getR2());
+    page.l2MilliHenry->setValue(drv.getL2() * 1000.0);
     page.f0->setValue(drv.getF0());
     page.qts->setValue(drv.getQts());
     page.qes->setValue(drv.getQes());
@@ -668,6 +693,7 @@ void DriverParametersDialog::loadPageFromDriver(int index,
     page.invertPhase->setChecked(drv.isPhaseInverted());
     page.fullCircuit->setChecked(drv.getFullCircuit());
     updateTubeLengthForPage(page);
+    updateFitZmaButton(index);
 
     m_loadingFromDrivers = wasLoading;
 }
@@ -691,6 +717,8 @@ bool DriverParametersDialog::applyToDrivers(ApplyMode mode, QString *errorMessag
         QString title;
         double rdc = 0.0;
         double lspMilliHenry = 0.0;
+        double r2 = 0.0;
+        double l2MilliHenry = 0.0;
         double f0 = 0.0;
         double qts = 0.0;
         double qes = 0.0;
@@ -725,6 +753,8 @@ bool DriverParametersDialog::applyToDrivers(ApplyMode mode, QString *errorMessag
 
         if (!readSpinBoxValue(page.rdc, tr("Rdc"), index, parsed.rdc, errorMessage) ||
             !readSpinBoxValue(page.lspMilliHenry, tr("Lsp"), index, parsed.lspMilliHenry, errorMessage) ||
+            !readSpinBoxValue(page.r2, tr("R2"), index, parsed.r2, errorMessage) ||
+            !readSpinBoxValue(page.l2MilliHenry, tr("L2"), index, parsed.l2MilliHenry, errorMessage) ||
             !readSpinBoxValue(page.f0, tr("Fs"), index, parsed.f0, errorMessage) ||
             !readSpinBoxValue(page.qts, tr("Qts"), index, parsed.qts, errorMessage) ||
             !readSpinBoxValue(page.qes, tr("Qes"), index, parsed.qes, errorMessage) ||
@@ -760,6 +790,8 @@ bool DriverParametersDialog::applyToDrivers(ApplyMode mode, QString *errorMessag
         drv.setTitle(parsed.title);
         drv.setRdc(parsed.rdc);
         drv.setLsp(parsed.lspMilliHenry / 1000.0);
+        drv.setR2(parsed.r2);
+        drv.setL2(parsed.l2MilliHenry / 1000.0);
         drv.setF0(parsed.f0);
         drv.setQts(parsed.qts);
         drv.setQes(parsed.qes);
@@ -922,6 +954,8 @@ void DriverParametersDialog::exportDriver(int index)
     slot.activeFilterChain = m_document.activeFilterChain(index);
     slot.baffleSettings = m_document.baffleSettings(index);
     slot.floorReflectionSettings = m_document.floorReflectionSettings(index);
+    slot.impedanceReferenceCurve = m_document.impedanceReferenceCurve(index);
+    slot.impedanceReferenceHidden = m_document.impedanceReferenceHiddenForDriver(index);
     slot.hasTubeDiameterCm = true;
     slot.tubeDiameterCm = m_pages.at(index).tubeDiameter->value();
 
@@ -973,7 +1007,7 @@ void DriverParametersDialog::importDriver(int index)
         this,
         tr("Import driver"),
         tr("Importing this file will replace Driver %1 including network values, measurements, "
-           "active filters, baffle settings, and floor-reflection settings.\n\nContinue?")
+           "impedance ZMA, active filters, baffle settings, and floor-reflection settings.\n\nContinue?")
             .arg(index + 1),
         QMessageBox::Yes | QMessageBox::No,
         QMessageBox::No);
@@ -1082,6 +1116,62 @@ void DriverParametersDialog::updateTubeDiameterForPage(DriverPage& page)
     // Re-evaluate the displayed length from the actual (possibly rounded or
     // range-limited) diameter. This keeps both controls numerically consistent.
     updateTubeLengthForPage(page);
+}
+
+void DriverParametersDialog::updateFitZmaButton(int index)
+{
+    if (index < 0 || index >= KFilterProjectIo::DriverCount) {
+        return;
+    }
+
+    QPushButton *button = m_pages.at(index).fitZmaButton;
+    if (button == nullptr) {
+        return;
+    }
+
+    const bool haveZma = !m_document.impedanceReferenceCurve(index).isEmpty();
+    button->setEnabled(haveZma);
+    button->setToolTip(haveZma
+                           ? tr("Fit Lsp, R2 and L2 (optionally Rdc) to this driver's impedance ZMA.")
+                           : tr("Import an impedance ZMA for this driver first (Measurements menu)."));
+}
+
+void DriverParametersDialog::fitVoiceCoilToZma(int index)
+{
+    if (index < 0 || index >= KFilterProjectIo::DriverCount ||
+        m_document.impedanceReferenceCurve(index).isEmpty()) {
+        return;
+    }
+
+    // The fit starts from the values currently shown, not the committed ones.
+    QString errorMessage;
+    if (!applyToDrivers(ApplyMode::Preview, &errorMessage)) {
+        QMessageBox::warning(this, tr("Fit to ZMA"), errorMessage);
+        return;
+    }
+
+    DriverPage& page = m_pages.at(index);
+    QString driverLabel = page.title->text().trimmed();
+    driverLabel = (driverLabel.isEmpty() || driverLabel == QStringLiteral("This is a default driver"))
+                      ? tr("Driver %1").arg(index + 1)
+                      : tr("Driver %1 (%2)").arg(index + 1).arg(driverLabel);
+
+    ImpedanceFitDialog dialog(m_drivers[index],
+                              m_document.impedanceReferenceCurve(index),
+                              driverLabel,
+                              this);
+    if (dialog.exec() != QDialog::Accepted || !dialog.fitResult().success) {
+        return;
+    }
+
+    // Writing the fields triggers the regular live preview.
+    const KFilterImpedanceFitResult& result = dialog.fitResult();
+    if (dialog.rdcFitted()) {
+        page.rdc->setValue(result.rdcOhm);
+    }
+    page.lspMilliHenry->setValue(result.lspH * 1000.0);
+    page.r2->setValue(result.r2Ohm);
+    page.l2MilliHenry->setValue(result.l2H * 1000.0);
 }
 
 void DriverParametersDialog::calculateHogeForPage(DriverPage& page)

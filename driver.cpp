@@ -42,6 +42,8 @@ void driver::resetToDefaults()
 {
 	Rdc=5.1;
 	Lsp=0.00017;
+	R2=0;
+	L2=0;
 	F0=307;
 	Qts=1.14;
 	Qms=1.9;
@@ -228,11 +230,32 @@ void driver::calculateImpedanceResponse(void)
 	}
 }
 
+std::complex<double> driver::voiceCoilImpedance(double omega) const
+{
+	// LR2 voice-coil model: Rdc + jwLsp + (R2 || jwL2). R2 || L2 approximates
+	// the eddy-current losses that flatten the impedance rise at high
+	// frequencies. R2 == 0 or L2 == 0 shorts the branch and keeps the
+	// historical Rdc + jwLsp result bit for bit.
+	const std::complex<double> simpleCoil{Rdc, omega*Lsp};
+	if (R2 == 0 || L2 == 0)
+	{
+		return simpleCoil;
+	}
+	return simpleCoil + 1.0 / std::complex<double>{1/R2, -1/(omega*L2)};
+}
+
+std::complex<double> driver::electricalImpedance(double frequencyHz)
+{
+	calculateParameters();
+	constexpr double TwoPi = 6.283185307179586;
+	return calculateEquivalentCircuit(TwoPi * frequencyHz);
+}
+
 std::complex<double> driver::calculateEquivalentCircuit(double omega)
 {
 	if (F0 == 0)
 	{
-		return {Rdc, omega * Lsp};
+		return voiceCoilImpedance(omega);
 	}
 
 	std::complex<double> admittance;
@@ -253,7 +276,7 @@ std::complex<double> driver::calculateEquivalentCircuit(double omega)
 		admittance = {1/motionalResistance, omega*motionalCapacitance-1/(omega*motionalInductance)};
 		break;
 	}
-	return std::complex<double>{Rdc, omega*Lsp} + 1.0 / admittance;
+	return voiceCoilImpedance(omega) + 1.0 / admittance;
 }
 
 void driver::calculateAcousticResponse(std::complex<double>& response, double omega)
@@ -293,7 +316,7 @@ void driver::calculateAcousticResponse(std::complex<double>& response, double om
 				  //********************************************************************************test
 
 				  terminationImpedance = 1.0 / std::complex<double>{1/motionalResistance, omega*motionalCapacitance-1/(omega*motionalInductance)};
-				  networkImpedance = terminationImpedance + std::complex<double>{Rdc, omega*Lsp};
+				  networkImpedance = terminationImpedance + voiceCoilImpedance(omega);
 				  response *= terminationImpedance / networkImpedance;
 				  terminationImpedance = {1.0, 0.0};
 				  networkImpedance = {1.0, -1/(omega*radiationCapacitance)};
@@ -315,7 +338,7 @@ void driver::calculateAcousticResponse(std::complex<double>& response, double om
 			  {
 
 				  terminationImpedance = 1.0 / std::complex<double>{1/motionalResistance+sealedLeakageConductance, omega*motionalCapacitance-1/(omega*sealedEffectiveMotionalInductance)};
-				  networkImpedance = terminationImpedance + std::complex<double>{Rdc, omega*Lsp};
+				  networkImpedance = terminationImpedance + voiceCoilImpedance(omega);
 				  response *= terminationImpedance / networkImpedance;
 				  terminationImpedance = {1.0, 0.0};
 				  networkImpedance = {1.0, -1/(omega*radiationCapacitance)};
@@ -342,7 +365,7 @@ void driver::calculateAcousticResponse(std::complex<double>& response, double om
 			networkImpedance = 1.0 / networkImpedance;
 			terminationImpedance = networkImpedance + std::complex<double>{1/motionalResistance, omega*motionalCapacitance-1/(omega*motionalInductance)};
 			terminationImpedance = 1.0 / terminationImpedance;
-			networkImpedance = terminationImpedance + std::complex<double>{Rdc, omega*Lsp};
+			networkImpedance = terminationImpedance + voiceCoilImpedance(omega);
 			response *= terminationImpedance / networkImpedance;
 			terminationImpedance = {1.0, 0.0};
 			networkImpedance = {1.0, -1/(omega*radiationCapacitance)};
@@ -376,7 +399,7 @@ void driver::calculateAcousticResponse(std::complex<double>& response, double om
 				networkImpedance = 1.0 / networkImpedance;
 				terminationImpedance = networkImpedance + std::complex<double>{1/motionalResistance, omega*motionalCapacitance-1/(omega*motionalInductance)};
 				terminationImpedance = 1.0 / terminationImpedance;
-				networkImpedance = terminationImpedance + std::complex<double>{Rdc, omega*Lsp};
+				networkImpedance = terminationImpedance + voiceCoilImpedance(omega);
 				response *= terminationImpedance / networkImpedance;
 				terminationImpedance = {1.0, 0.0};
 				networkImpedance = {1.0, -1/(omega*radiationCapacitance)};
@@ -393,7 +416,7 @@ void driver::calculateAcousticResponse(std::complex<double>& response, double om
 			networkImpedance = 1.0 / networkImpedance;
 			terminationImpedance = networkImpedance + std::complex<double>{1/motionalResistance, omega*motionalCapacitance-1/(omega*motionalInductance)};
 			terminationImpedance = 1.0 / terminationImpedance;
-			networkImpedance = terminationImpedance + std::complex<double>{Rdc, omega*Lsp};
+			networkImpedance = terminationImpedance + voiceCoilImpedance(omega);
 			response *= terminationImpedance / networkImpedance;
 			terminationImpedance = {1.0, 0.0};
 			networkImpedance = {1.0, -1/(omega*radiationCapacitance)};
@@ -626,6 +649,24 @@ return Rdc;
 /** No descriptions */
 double driver::getLsp() const{
 return Lsp;
+}
+/** Sets the LR2 eddy-current resistance R2 in ohms (0 disables the branch). */
+void driver::setR2(double r2){
+R2 = r2;
+setModified();
+}
+/** Returns the LR2 eddy-current resistance R2 in ohms. */
+double driver::getR2() const{
+return R2;
+}
+/** Sets the LR2 eddy-current inductance L2 in henry (0 disables the branch). */
+void driver::setL2(double l2){
+L2 = l2;
+setModified();
+}
+/** Returns the LR2 eddy-current inductance L2 in henry. */
+double driver::getL2() const{
+return L2;
 }
 /** No descriptions */
 double driver::getF0() const{

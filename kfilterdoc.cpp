@@ -447,14 +447,14 @@ bool KFilterDoc::openDocument(const QUrl& url, const char *format /*=nullptr*/)
                                       m_activeFilterChains,
                                       m_baffleSettings,
                                       m_floorReflectionSettings,
+                                      m_impedanceReferenceCurves,
+                                      m_impedanceReferenceHiddenForDrivers,
                                       &errorMessage)) {
     qWarning().noquote() << errorMessage;
     return false;
   }
 
   setURL(url);
-  // Impedance references are not part of the project file yet.
-  clearImpedanceReferenceCurves();
   markLoadedContentsReady();
   return true;
 }
@@ -478,6 +478,8 @@ bool KFilterDoc::saveDocument(const QUrl& url, const char *format /*=nullptr*/)
                                     m_activeFilterChains,
                                     m_baffleSettings,
                                     m_floorReflectionSettings,
+                                    m_impedanceReferenceCurves,
+                                    m_impedanceReferenceHiddenForDrivers,
                                     &errorMessage)) {
     qWarning().noquote() << errorMessage;
     return false;

@@ -102,7 +102,7 @@ With **Merge Measurement** enabled, the interpolated correction is applied to th
 
 The **Hide Measurement for Driver** submenu controls each driver independently. A checked driver keeps its simulated SPL curve visible but suppresses both the stored correction curve and its correction influence. With Merge enabled, hidden drivers therefore contribute their uncorrected simulation to vector and energetic sums, while non-hidden drivers contribute their corrected simulation. The same effective contribution is used for the individual curve and both sum modes, so mixed hide states remain mathematically and visually consistent.
 
-Only the resulting relative correction points are project data. The original measurement file, absolute raw levels, calibration range, offset settings, and fade settings are not persisted. Measurement correction persistence was introduced with `.kfp` JSON format version 6 and remains part of the current format version 11: each correction curve is stored together with its per-driver hide state and the project-wide merge switch. The current format also persists every driver's complete active-filter, Baffle / Diffraction, and Floor Reflection settings. Calculated complex transfer-response arrays remain transient and are rebuilt from the stored metadata after loading. PDF rendering follows the same effective per-driver correction state as the plot.
+Only the resulting relative correction points are project data. The original measurement file, absolute raw levels, calibration range, offset settings, and fade settings are not persisted. Measurement correction persistence was introduced with `.kfp` JSON format version 6 and remains part of the current format version 13: each correction curve is stored together with its per-driver hide state and the project-wide merge switch. The current format also persists every driver's complete active-filter, Baffle / Diffraction, and Floor Reflection settings. Calculated complex transfer-response arrays remain transient and are rebuilt from the stored metadata after loading. PDF rendering follows the same effective per-driver correction state as the plot.
 
 #### Impedance reference (`.zma`)
 
@@ -114,9 +114,11 @@ the driver is not checked in **Hide Impedance ZMA for Driver**. A new import
 always shows the curve. **Clear Impedance ZMA for Driver** removes it.
 
 The ZMA curve is a pure reference: it never changes the simulation or the total
-impedance. The phase is read but not yet displayed. ZMA curves are not saved in
-the project yet; importing one does not mark the project modified, and New,
-Open and a `.kfd` driver import into that slot clear them.
+impedance. The phase is read but not yet displayed. Since `.kfp` format
+version 13 the ZMA points (frequency, |Z|, phase) and the per-driver hide state
+are saved with the project, so import, clear and hide mark it modified. New
+clears all ZMA curves; a `.kfd` driver import replaces the slot's ZMA with the
+one stored in the driver file (none clears it).
 
 ### Active filters
 
@@ -300,7 +302,7 @@ released. **Apply** or **OK** commits the current Baffle and Floor Reflection se
 **Cancel** restores the last applied state.
 
 Baffle persistence was introduced with `.kfp` format version 6 and remains part of
-the current format version 11. Each driver's Baffle enable state, model, width,
+the current format version 13. Each driver's Baffle enable state, model, width,
 rectangular geometry, diagnostic visibility, and edge-source count are stored. The
 150-point complex Baffle response and cache generation are not serialized. Projects
 through format version 5 load with Baffle processing disabled and default settings.
@@ -450,6 +452,7 @@ Important fields include:
 - `Driver name`
 - `Rdc`
 - `Lsp`
+- `R2`, `L2` (optional LR2 voice-coil branch)
 - `Fs`
 - `Qts`
 - `Qes`
@@ -469,15 +472,47 @@ Calculate Qts from Qes and Qms
 
 updates `Qts` from the entered `Qes` and `Qms` values.
 
+#### LR2 voice-coil model
+
+A plain `Rdc + jωLsp` coil lets the impedance rise proportionally with
+frequency. Real voice coils rise more slowly because eddy currents in the pole
+piece reduce the effective inductance and add losses. The optional LR2 branch
+models this:
+
+```text
+Zcoil = Rdc + jωLsp + (R2 || jωL2)
+```
+
+`R2 = 0` or `L2 = 0` disables the branch and keeps the plain model exactly. The
+coil model is used everywhere the driver impedance enters: impedance curve,
+total impedance, crossover loading and the full-circuit SPL path. The
+`Impedance correction` preset still uses only `Rdc` and `Lsp` and is therefore
+approximate for LR2 drivers.
+
+**Fit to ZMA...** next to `L2` fits the coil to the driver's imported `.zma`
+(Measurements menu). It adjusts `Lsp`, `R2` and `L2`; `Rdc` stays fixed unless
+`Also fit Rdc` is checked, because Rdc is normally measured directly. `Fs`,
+`Qes`, `Qms`, `Vas` and the enclosure values are not changed but are part of
+the model, so the resonance tail does not bias the coil values. The default
+band runs from 2 x Fs to the last ZMA frequency. The fit is a
+Levenberg-Marquardt least-squares fit of the complex impedance error relative
+to |Z| (magnitude only when the ZMA has no phase). The dialog shows the
+current and fitted values and the mean deviation before and after;
+`Apply to Driver` writes them into the fields, where the live preview shows
+the result and `Cancel` of the Driver Parameters dialog still reverts it.
+The ZMA must be measured in the same condition as modelled: a free-air ZMA
+only fits a driver set to `Open baffle driver`.
+
 #### Complete driver-slot import/export (`.kfd`)
 
 `Import Driver...` and `Export Driver...` in the Driver Parameters dialog use the
-KFilter driver-slot format (`.kfd`). Format version 3 stores the complete state
+KFilter driver-slot format (`.kfd`). Format version 5 stores the complete state
 associated with that driver slot:
 
 - driver parameters, curve/total enable flags, polarity and enclosure state
 - all 48 passive network values and the per-section series trap coil resistance
 - the driver's SPL measurement/correction curve and its per-driver Hide state
+- the driver's impedance ZMA reference and its Hide state
 - the current project `Merge Measurements` state as import metadata
 - the complete Active Filter chain, including enable/diagnostic state
 - Baffle / Diffraction settings, including enable/diagnostic state and chamfers
@@ -494,6 +529,8 @@ imported driver's Hide state is always restored when a measurement curve is pres
 for compatibility-sensitive use, so version 2 stays simpler by requiring the complete
 driver-slot state instead of maintaining partial legacy semantics. Version 2 files
 still load; they lack the series trap coil resistance, which defaults to 0.5 Ohm.
+Version 2 and 3 files lack the LR2 values R2/L2, which load as 0 (branch disabled).
+Version 2 to 4 files carry no impedance ZMA.
 
 ### 3. Enable curves and totals
 
@@ -583,7 +620,7 @@ File -> Save
 File -> Save As...
 ```
 
-Projects are saved as versioned, human-readable JSON while retaining the `.kfp` extension. Legacy text-based `.kfp` files and JSON format versions 1 through 10 can still be opened; saving such a project rewrites it in the current version 11 format. SPL correction curves, per-driver active-filter and Baffle settings, and Floor Reflection placement/surface metadata are project data. Floor Reflection remains disabled by default for backward-compatible project behavior; version 10 adds the experimental porous-surface preset introduced in Patch 229. Version 11 adds the per-section coil DC resistance of series trap circuits; older files load it as 0.5 Ohm.
+Projects are saved as versioned, human-readable JSON while retaining the `.kfp` extension. Legacy text-based `.kfp` files and JSON format versions 1 through 12 can still be opened; saving such a project rewrites it in the current version 13 format. SPL correction curves, per-driver active-filter and Baffle settings, and Floor Reflection placement/surface metadata are project data. Floor Reflection remains disabled by default for backward-compatible project behavior; version 10 adds the experimental porous-surface preset introduced in Patch 229. Version 11 adds the per-section coil DC resistance of series trap circuits; older files load it as 0.5 Ohm. Version 12 adds the LR2 voice-coil values R2 and L2; older files load them as 0, i.e. the plain `Rdc + jωLsp` coil. Version 13 adds the per-driver impedance ZMA reference and its hide state; older files load without ZMA.
 
 ## User settings
 

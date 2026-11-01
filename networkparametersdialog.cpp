@@ -472,7 +472,8 @@ void NetworkParametersDialog::updatePresetControlState(int driverIndex)
         if (driverRdc > 0.0) {
             page.presetImpedanceSpin->setValue(driverRdc);
         }
-        page.presetImpedanceSpin->setToolTip(tr("Impedance correction uses the selected driver's Rdc and Lsp values."));
+        page.presetImpedanceSpin->setToolTip(tr("Impedance correction uses the selected driver's Rdc and Lsp values. "
+                                                     "An R2/L2 branch is ignored, so the correction is approximate for LR2 drivers."));
     } else {
         page.presetImpedanceSpin->setToolTip(tr("The preset assumes an ideal resistive load with this impedance. Real driver impedance is still simulated by KFilter after applying."));
     }

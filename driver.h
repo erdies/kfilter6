@@ -140,6 +140,20 @@ public:
   double getF0() const;
   /** No descriptions */
   double getLsp() const;
+  /** Sets the LR2 eddy-current resistance R2 in ohms; 0 disables R2 || L2. */
+  void setR2(double r2);
+  /** Returns the LR2 eddy-current resistance R2 in ohms. */
+  double getR2() const;
+  /** Sets the LR2 eddy-current inductance L2 in henry; 0 disables R2 || L2. */
+  void setL2(double l2);
+  /** Returns the LR2 eddy-current inductance L2 in henry. */
+  double getL2() const;
+  /**
+   * Electrical impedance of the driver alone (voice coil plus motional and
+   * enclosure branches, without the passive network) at an arbitrary
+   * frequency. Used to compare the model with a measured .zma curve.
+   */
+  std::complex<double> electricalImpedance(double frequencyHz);
   /** No descriptions */
   double getRdc() const;
   /** Sets one component of a passive-network branch. Section indices are 0-based. */
@@ -180,6 +194,7 @@ private:
 
 	NetworkBranch* networkBranch(int sectionIndex, NetworkBranchType branch);
 	const NetworkBranch* networkBranch(int sectionIndex, NetworkBranchType branch) const;
+	std::complex<double> voiceCoilImpedance(double omega) const;
 	std::complex<double> calculateEquivalentCircuit(double omega);
 	void calculateAcousticResponse(std::complex<double>& response, double omega);
 	int  findLastNetworkSectionIndex(void) const;
@@ -199,6 +214,8 @@ private:
 
 	double
 		Rdc,Lsp,F0,Qts,Qms,Qes,Dm,Vas,Vb,Fb,Ql,V2,gain,
+		// LR2 voice-coil extension: R2 || L2 in series with Rdc + jwLsp.
+		R2,L2,
 		//    Anpassung,Ausgleichsfaktor,Versatz,
 		ventedDenominatorA0,ventedDenominatorA1,ventedDenominatorA2,ventedDenominatorA3,
 		// Historical physical-model approximation of the driver's natural upper

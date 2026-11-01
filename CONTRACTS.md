@@ -14,9 +14,9 @@ Stand: Patch 303.
 ## 1. Persistenzformate
 
 ```text
-.kfp Projektformat           JSON v11
+.kfp Projektformat           JSON v13
 .kfp Legacy-Textformat       lesend unterstützt, wird nicht geschrieben
-.kfd Driver-Slot-Format      v3; v2 lesend unterstützt
+.kfd Driver-Slot-Format      v5; v2 bis v4 lesend unterstützt
 ```
 
 Ältere JSON-Formatversionen bleiben lesend unterstützt und werden auf den
@@ -37,6 +37,36 @@ Spule und damit anders als vor Einführung des Werts.
 Der Wert wirkt nur, wenn Series R, C und L einer Section alle ungleich 0 sind:
 `R || C || (R_L + jwL)`. Bei `R_L = 0` bleibt die historische Rechnung bitgenau
 erhalten.
+
+### LR2-Schwingspulenmodell
+
+Die Schwingspule wird überall über `driver::voiceCoilImpedance()` gerechnet:
+`Rdc + jwLsp + (R2 || jwL2)`. `R2 == 0` oder `L2 == 0` schließt den Zweig kurz
+und liefert bitgenau das historische `Rdc + jwLsp`.
+
+`.kfp` v12 speichert `r2_ohm` und `l2_h` in `parameters`, `.kfd` v4 im
+`driver`-Objekt; ab diesen Versionen sind beide Felder Pflicht. Ältere Dateien
+(`.kfp` v1–v11, Legacy-Textformat, `.kfd` v2/v3) laden `R2 = L2 = 0` und rechnen
+damit unverändert.
+
+### Impedanz-Referenz (ZMA)
+
+`.kfp` v13 speichert pro Treiber, `.kfd` v5 im Wurzelobjekt das optionale Objekt
+`impedanceReference`:
+
+```text
+{"hidden": bool, "points": [[frequencyHz, |Z| Ohm, phaseDeg | null], ...]}
+```
+
+Es wird nur für eine nicht leere Kurve geschrieben; fehlt es, hat der Treiber
+keine ZMA. Beim Lesen gelten: `hidden` Pflicht, mindestens zwei Punkte, jeder
+Punkt genau drei Einträge, Frequenz endlich, `> 0` und streng steigend, `|Z|`
+endlich und `>= 0`, Phase endlich oder `null` (ZMA ohne Phasenspalte). Ältere
+Dateien (`.kfp` v1–v12, Legacy-Textformat, `.kfd` v2–v4) laden ohne ZMA; ein
+dort vorhandenes Objekt wird ignoriert.
+
+Die ZMA ist reine Plot-Referenz und geht nie in Simulation oder
+Gesamtimpedanz ein. Import, Clear und Hide markieren das Projekt als geändert.
 
 Keine Formatänderung ohne explizite Versionserhöhung und ohne I/O-Regression im
 Test.
@@ -126,7 +156,7 @@ parameter über `driverparametervalidation.{h,cpp}`, bevor Werte auf eine
 Legacy-Text-`.kfp`-Pfad und der `.kfd`-Pfad.
 
 ```text
-1. Rdc, Lsp, F0, Qts, Qes, Qms, Vas, Dm, Vb, Fb, V2 endlich und >= 0
+1. Rdc, Lsp, R2, L2, F0, Qts, Qes, Qms, Vas, Dm, Vb, Fb, V2 endlich und >= 0
 2. enclosureTypeProposal in 0..3
 3. Rdc > 0
 4. wenn F0 != 0:  Qts > 0, Qes > 0, Qms > 0

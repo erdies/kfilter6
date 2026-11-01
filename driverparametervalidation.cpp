@@ -34,9 +34,11 @@ namespace KFilterDriverValidation
 
 bool validateDriverParameters(const Parameters& parameters, QString* reason)
 {
-    const std::array<NamedValue, 11> nonNegative{{
+    const std::array<NamedValue, 13> nonNegative{{
         {"Rdc", parameters.rdcOhm},
         {"Lsp", parameters.lspH},
+        {"R2", parameters.r2Ohm},
+        {"L2", parameters.l2H},
         {"F0", parameters.fsHz},
         {"Qts", parameters.qts},
         {"Qes", parameters.qes},
@@ -78,7 +80,7 @@ bool validateDriverParameters(const Parameters& parameters, QString* reason)
     }
 
     // F0 == 0 deliberately bypasses the acoustic T/S path; the impedance then
-    // reduces to Rdc + j*omega*Lsp and none of the quantities below is used.
+    // reduces to the voice-coil impedance and none of the quantities below is used.
     if (parameters.fsHz == 0.0) {
         return true;
     }

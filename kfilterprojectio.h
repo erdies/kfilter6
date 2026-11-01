@@ -11,6 +11,7 @@
 #include "bafflemodel.h"
 #include "driver.h"
 #include "floorreflectionmodel.h"
+#include "impedancereferencecurve.h"
 #include "kfiltermeasurementcurve.h"
 
 #include <QString>
@@ -25,13 +26,32 @@ public:
     static constexpr int DriverCount = 4;
     static constexpr int NetworkUnitCount = 48;
     static constexpr int LegacyJsonFormatVersion = 1;
-    static constexpr int JsonFormatVersion = 11;
+    static constexpr int JsonFormatVersion = 13;
 
     using ActiveFilterChains = std::array<ActiveFilterChain, DriverCount>;
     using BaffleSettingsPerDriver = std::array<BaffleSettings, DriverCount>;
     using FloorReflectionSettingsPerDriver = std::array<FloorReflectionSettings, DriverCount>;
     using MeasurementCurves = std::array<KFilterMeasurementCurve, DriverCount>;
     using MeasurementHiddenStates = std::array<bool, DriverCount>;
+    using ImpedanceReferenceCurves = std::array<KFilterImpedanceReferenceCurve, DriverCount>;
+    using ImpedanceReferenceHiddenStates = std::array<bool, DriverCount>;
+
+    /**
+     * Optional per-driver "impedanceReference" object (.kfp v13, .kfd v5):
+     * {"hidden": bool, "points": [[frequencyHz, |Z| Ohm, phaseDeg or null], ...]}.
+     * Written only for a non-empty curve; a missing object means no ZMA.
+     */
+    static bool writeImpedanceReferenceToJson(QJsonObject& driverObject,
+                                              const KFilterImpedanceReferenceCurve& curve,
+                                              bool hidden,
+                                              int driverIndex,
+                                              QString* errorMessage = nullptr);
+
+    static bool readImpedanceReferenceFromJson(const QJsonObject& driverObject,
+                                               KFilterImpedanceReferenceCurve& curve,
+                                               bool& hidden,
+                                               const QString& context,
+                                               QString* errorMessage = nullptr);
 
     static bool writeDriverSupplementToJson(QJsonObject& driverObject,
                                             const KFilterMeasurementCurve& measurementCurve,
@@ -61,6 +81,19 @@ public:
                              FloorReflectionSettingsPerDriver& floorReflectionSettings,
                              QString* errorMessage = nullptr);
 
+    /** As above, additionally loading the per-driver impedance ZMA references. */
+    static bool loadFromFile(const QString& filePath,
+                             driver (&drivers)[DriverCount],
+                             MeasurementCurves& splCorrectionCurves,
+                             bool& mergeMeasurementsEnabled,
+                             MeasurementHiddenStates& measurementHiddenForDrivers,
+                             ActiveFilterChains& activeFilterChains,
+                             BaffleSettingsPerDriver& baffleSettings,
+                             FloorReflectionSettingsPerDriver& floorReflectionSettings,
+                             ImpedanceReferenceCurves& impedanceReferenceCurves,
+                             ImpedanceReferenceHiddenStates& impedanceReferenceHiddenForDrivers,
+                             QString* errorMessage = nullptr);
+
     static bool saveToFile(const QString& filePath,
                            driver (&drivers)[DriverCount],
                            const MeasurementCurves& splCorrectionCurves,
@@ -69,6 +102,19 @@ public:
                            const ActiveFilterChains& activeFilterChains,
                            const BaffleSettingsPerDriver& baffleSettings,
                            const FloorReflectionSettingsPerDriver& floorReflectionSettings,
+                           QString* errorMessage = nullptr);
+
+    /** As above, additionally saving the per-driver impedance ZMA references. */
+    static bool saveToFile(const QString& filePath,
+                           driver (&drivers)[DriverCount],
+                           const MeasurementCurves& splCorrectionCurves,
+                           bool mergeMeasurementsEnabled,
+                           const MeasurementHiddenStates& measurementHiddenForDrivers,
+                           const ActiveFilterChains& activeFilterChains,
+                           const BaffleSettingsPerDriver& baffleSettings,
+                           const FloorReflectionSettingsPerDriver& floorReflectionSettings,
+                           const ImpedanceReferenceCurves& impedanceReferenceCurves,
+                           const ImpedanceReferenceHiddenStates& impedanceReferenceHiddenForDrivers,
                            QString* errorMessage = nullptr);
 };
 

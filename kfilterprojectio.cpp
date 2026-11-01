@@ -1063,12 +1063,16 @@ bool jsonToActiveFilterChain(const QJsonObject& driverObject,
 
 bool jsonToDriverParameters(const QJsonObject& parameters,
                             driver& currentDriver,
+                            int formatVersion,
                             const QString& context,
                             QString* errorMessage)
 {
     QString title;
     double rdc = 0.0;
     double lsp = 0.0;
+    // LR2 branch since v12; older files keep R2 = L2 = 0 (plain Rdc + jwLsp).
+    double r2 = 0.0;
+    double l2 = 0.0;
     double fs = 0.0;
     double qts = 0.0;
     double qes = 0.0;
@@ -1126,6 +1130,12 @@ bool jsonToDriverParameters(const QJsonObject& parameters,
         return false;
     }
 
+    if (formatVersion >= 12 &&
+        (!readRequiredDouble(parameters, QStringLiteral("r2_ohm"), r2, context, errorMessage) ||
+         !readRequiredDouble(parameters, QStringLiteral("l2_h"), l2, context, errorMessage))) {
+        return false;
+    }
+
     if (ql <= 0.0) {
         setError(errorMessage, QStringLiteral("Field '%1.ql' must be greater than zero.").arg(context));
         return false;
@@ -1134,6 +1144,8 @@ bool jsonToDriverParameters(const QJsonObject& parameters,
     KFilterDriverValidation::Parameters validationParameters;
     validationParameters.rdcOhm = rdc;
     validationParameters.lspH = lsp;
+    validationParameters.r2Ohm = r2;
+    validationParameters.l2H = l2;
     validationParameters.fsHz = fs;
     validationParameters.qts = qts;
     validationParameters.qes = qes;
@@ -1154,6 +1166,8 @@ bool jsonToDriverParameters(const QJsonObject& parameters,
     currentDriver.setTitle(title);
     currentDriver.setRdc(rdc);
     currentDriver.setLsp(lsp);
+    currentDriver.setR2(r2);
+    currentDriver.setL2(l2);
     currentDriver.setF0(fs);
     currentDriver.setQts(qts);
     currentDriver.setQes(qes);
@@ -1438,10 +1452,14 @@ bool loadJsonProject(const QByteArray& data,
                      KFilterProjectIo::ActiveFilterChains& activeFilterChains,
                      KFilterProjectIo::BaffleSettingsPerDriver& baffleSettings,
                      KFilterProjectIo::FloorReflectionSettingsPerDriver& floorReflectionSettings,
+                     KFilterProjectIo::ImpedanceReferenceCurves& impedanceReferenceCurves,
+                     KFilterProjectIo::ImpedanceReferenceHiddenStates& impedanceReferenceHiddenForDrivers,
                      QString* errorMessage)
 {
     mergeMeasurementsEnabled = false;
     measurementHiddenForDrivers.fill(false);
+    impedanceReferenceCurves = KFilterProjectIo::ImpedanceReferenceCurves{};
+    impedanceReferenceHiddenForDrivers.fill(false);
     activeFilterChains = KFilterProjectIo::ActiveFilterChains{};
     baffleSettings = KFilterProjectIo::BaffleSettingsPerDriver{};
     floorReflectionSettings = KFilterProjectIo::FloorReflectionSettingsPerDriver{};
@@ -1548,6 +1566,7 @@ bool loadJsonProject(const QByteArray& data,
                         errorMessage) ||
             !jsonToDriverParameters(parameters,
                                     drivers[driverIndex],
+                                    formatVersion,
                                     driverContext + QStringLiteral(".parameters"),
                                     errorMessage) ||
             !jsonToDriverNetwork(network,
@@ -1592,6 +1611,16 @@ bool loadJsonProject(const QByteArray& data,
             !jsonToFloorReflectionSettings(
                 entry,
                 floorReflectionSettings[static_cast<std::size_t>(driverIndex)],
+                driverContext,
+                errorMessage)) {
+            return false;
+        }
+
+        if (formatVersion >= 13 &&
+            !KFilterProjectIo::readImpedanceReferenceFromJson(
+                entry,
+                impedanceReferenceCurves[static_cast<std::size_t>(driverIndex)],
+                impedanceReferenceHiddenForDrivers[static_cast<std::size_t>(driverIndex)],
                 driverContext,
                 errorMessage)) {
             return false;
@@ -1666,6 +1695,8 @@ QJsonObject driverParametersToJson(const driver& currentDriver)
     parameters.insert(QStringLiteral("title"), currentDriver.getTitle());
     parameters.insert(QStringLiteral("rdc_ohm"), currentDriver.getRdc());
     parameters.insert(QStringLiteral("lsp_h"), currentDriver.getLsp());
+    parameters.insert(QStringLiteral("r2_ohm"), currentDriver.getR2());
+    parameters.insert(QStringLiteral("l2_h"), currentDriver.getL2());
     parameters.insert(QStringLiteral("fs_hz"), currentDriver.getF0());
     parameters.insert(QStringLiteral("qts"), currentDriver.getQts());
     parameters.insert(QStringLiteral("qes"), currentDriver.getQes());
@@ -2132,6 +2163,8 @@ bool validateFiniteDriverData(const driver& currentDriver,
     const double scalarValues[] = {
         currentDriver.getRdc(),
         currentDriver.getLsp(),
+        currentDriver.getR2(),
+        currentDriver.getL2(),
         currentDriver.getF0(),
         currentDriver.getQts(),
         currentDriver.getQes(),
@@ -2203,6 +2236,98 @@ qsizetype firstSignificantByte(const QByteArray& data)
     return -1;
 }
 
+}
+
+bool KFilterProjectIo::writeImpedanceReferenceToJson(QJsonObject& driverObject,
+                                                     const KFilterImpedanceReferenceCurve& curve,
+                                                     bool hidden,
+                                                     int driverIndex,
+                                                     QString* errorMessage)
+{
+    if (curve.isEmpty()) {
+        return true;
+    }
+
+    QJsonArray points;
+    double previousFrequencyHz = 0.0;
+    for (const KFilterImpedancePoint& point : curve) {
+        if (!std::isfinite(point.frequencyHz) || point.frequencyHz <= previousFrequencyHz ||
+            !std::isfinite(point.magnitudeOhm) || point.magnitudeOhm < 0.0 ||
+            std::isinf(point.phaseDeg)) {
+            setError(errorMessage,
+                     QStringLiteral("Driver %1 has an invalid impedance ZMA point at %2 Hz.")
+                         .arg(driverIndex + 1)
+                         .arg(point.frequencyHz));
+            return false;
+        }
+        previousFrequencyHz = point.frequencyHz;
+        points.append(QJsonArray{point.frequencyHz,
+                                 point.magnitudeOhm,
+                                 std::isfinite(point.phaseDeg) ? QJsonValue(point.phaseDeg)
+                                                               : QJsonValue(QJsonValue::Null)});
+    }
+
+    QJsonObject reference;
+    reference.insert(QStringLiteral("hidden"), hidden);
+    reference.insert(QStringLiteral("points"), points);
+    driverObject.insert(QStringLiteral("impedanceReference"), reference);
+    return true;
+}
+
+bool KFilterProjectIo::readImpedanceReferenceFromJson(const QJsonObject& driverObject,
+                                                      KFilterImpedanceReferenceCurve& curve,
+                                                      bool& hidden,
+                                                      const QString& context,
+                                                      QString* errorMessage)
+{
+    curve.clear();
+    hidden = false;
+    if (!driverObject.contains(QStringLiteral("impedanceReference"))) {
+        return true;
+    }
+
+    const QString referenceContext = context + QStringLiteral(".impedanceReference");
+    QJsonObject reference;
+    bool parsedHidden = false;
+    if (!readObject(driverObject, QStringLiteral("impedanceReference"), reference, context, errorMessage) ||
+        !readRequiredBool(reference, QStringLiteral("hidden"), parsedHidden, referenceContext, errorMessage)) {
+        return false;
+    }
+
+    const QJsonValue pointsValue = reference.value(QStringLiteral("points"));
+    if (!pointsValue.isArray() || pointsValue.toArray().size() < 2) {
+        setError(errorMessage,
+                 QStringLiteral("Array '%1.points' must contain at least two points.").arg(referenceContext));
+        return false;
+    }
+
+    KFilterImpedanceReferenceCurve parsedCurve;
+    const QJsonArray points = pointsValue.toArray();
+    for (int index = 0; index < points.size(); ++index) {
+        const QJsonArray row = points.at(index).toArray();
+        const bool phaseValid = row.size() == 3 &&
+                                (row.at(2).isNull() ||
+                                 (row.at(2).isDouble() && std::isfinite(row.at(2).toDouble())));
+        if (!points.at(index).isArray() || row.size() != 3 ||
+            !row.at(0).isDouble() || !row.at(1).isDouble() || !phaseValid ||
+            !std::isfinite(row.at(0).toDouble()) || row.at(0).toDouble() <= 0.0 ||
+            !std::isfinite(row.at(1).toDouble()) || row.at(1).toDouble() < 0.0 ||
+            (!parsedCurve.isEmpty() && row.at(0).toDouble() <= parsedCurve.constLast().frequencyHz)) {
+            setError(errorMessage,
+                     QStringLiteral("Invalid impedance ZMA point '%1.points[%2]'.")
+                         .arg(referenceContext)
+                         .arg(index));
+            return false;
+        }
+        parsedCurve.append(KFilterImpedancePoint{
+            row.at(0).toDouble(),
+            row.at(1).toDouble(),
+            row.at(2).isNull() ? std::numeric_limits<double>::quiet_NaN() : row.at(2).toDouble()});
+    }
+
+    curve = parsedCurve;
+    hidden = parsedHidden;
+    return true;
 }
 
 bool KFilterProjectIo::writeDriverSupplementToJson(
@@ -2297,6 +2422,25 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
                                     FloorReflectionSettingsPerDriver& floorReflectionSettings,
                                     QString* errorMessage)
 {
+    ImpedanceReferenceCurves ignoredCurves;
+    ImpedanceReferenceHiddenStates ignoredHiddenStates{};
+    return loadFromFile(filePath, drivers, splCorrectionCurves, mergeMeasurementsEnabled,
+                        measurementHiddenForDrivers, activeFilterChains, baffleSettings,
+                        floorReflectionSettings, ignoredCurves, ignoredHiddenStates, errorMessage);
+}
+
+bool KFilterProjectIo::loadFromFile(const QString& filePath,
+                                    driver (&drivers)[DriverCount],
+                                    MeasurementCurves& splCorrectionCurves,
+                                    bool& mergeMeasurementsEnabled,
+                                    MeasurementHiddenStates& measurementHiddenForDrivers,
+                                    ActiveFilterChains& activeFilterChains,
+                                    BaffleSettingsPerDriver& baffleSettings,
+                                    FloorReflectionSettingsPerDriver& floorReflectionSettings,
+                                    ImpedanceReferenceCurves& impedanceReferenceCurves,
+                                    ImpedanceReferenceHiddenStates& impedanceReferenceHiddenForDrivers,
+                                    QString* errorMessage)
+{
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly)) {
         setError(errorMessage,
@@ -2319,6 +2463,8 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
     ActiveFilterChains parsedActiveFilterChains{};
     BaffleSettingsPerDriver parsedBaffleSettings{};
     FloorReflectionSettingsPerDriver parsedFloorReflectionSettings{};
+    ImpedanceReferenceCurves parsedImpedanceReferenceCurves;
+    ImpedanceReferenceHiddenStates parsedImpedanceReferenceHiddenForDrivers{};
     const char firstByte = data.at(firstByteIndex);
     const bool isJson = firstByte == '{' || firstByte == '[';
     const QByteArray significantData = data.mid(firstByteIndex);
@@ -2331,6 +2477,8 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
                           parsedActiveFilterChains,
                           parsedBaffleSettings,
                           parsedFloorReflectionSettings,
+                          parsedImpedanceReferenceCurves,
+                          parsedImpedanceReferenceHiddenForDrivers,
                           errorMessage)
         : loadLegacyProject(significantData, parsedDrivers, errorMessage);
     if (!loaded) {
@@ -2343,6 +2491,9 @@ bool KFilterProjectIo::loadFromFile(const QString& filePath,
         splCorrectionCurves[index] = parsedSplCorrectionCurves[index];
         measurementHiddenForDrivers[index] =
             parsedMeasurementHiddenForDrivers[index] && !splCorrectionCurves[index].isEmpty();
+        impedanceReferenceCurves[index] = parsedImpedanceReferenceCurves[index];
+        impedanceReferenceHiddenForDrivers[index] =
+            parsedImpedanceReferenceHiddenForDrivers[index] && !impedanceReferenceCurves[index].isEmpty();
     }
     mergeMeasurementsEnabled = parsedMergeMeasurementsEnabled &&
         std::any_of(splCorrectionCurves.cbegin(),
@@ -2365,6 +2516,24 @@ bool KFilterProjectIo::saveToFile(const QString& filePath,
                                   const FloorReflectionSettingsPerDriver& floorReflectionSettings,
                                   QString* errorMessage)
 {
+    return saveToFile(filePath, drivers, splCorrectionCurves, mergeMeasurementsEnabled,
+                      measurementHiddenForDrivers, activeFilterChains, baffleSettings,
+                      floorReflectionSettings, ImpedanceReferenceCurves{},
+                      ImpedanceReferenceHiddenStates{}, errorMessage);
+}
+
+bool KFilterProjectIo::saveToFile(const QString& filePath,
+                                  driver (&drivers)[DriverCount],
+                                  const MeasurementCurves& splCorrectionCurves,
+                                  bool mergeMeasurementsEnabled,
+                                  const MeasurementHiddenStates& measurementHiddenForDrivers,
+                                  const ActiveFilterChains& activeFilterChains,
+                                  const BaffleSettingsPerDriver& baffleSettings,
+                                  const FloorReflectionSettingsPerDriver& floorReflectionSettings,
+                                  const ImpedanceReferenceCurves& impedanceReferenceCurves,
+                                  const ImpedanceReferenceHiddenStates& impedanceReferenceHiddenForDrivers,
+                                  QString* errorMessage)
+{
     QJsonArray driverArray;
     for (int driverIndex = 0; driverIndex < DriverCount; ++driverIndex) {
         const driver& currentDriver = drivers[driverIndex];
@@ -2384,6 +2553,12 @@ bool KFilterProjectIo::saveToFile(const QString& filePath,
                 activeFilterChains[static_cast<std::size_t>(driverIndex)],
                 baffleSettings[static_cast<std::size_t>(driverIndex)],
                 floorReflectionSettings[static_cast<std::size_t>(driverIndex)],
+                driverIndex,
+                errorMessage) ||
+            !writeImpedanceReferenceToJson(
+                driverObject,
+                impedanceReferenceCurves[static_cast<std::size_t>(driverIndex)],
+                impedanceReferenceHiddenForDrivers[static_cast<std::size_t>(driverIndex)],
                 driverIndex,
                 errorMessage)) {
             return false;

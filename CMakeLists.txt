@@ -28,6 +28,7 @@ option(KFILTER_BUILD_DEFAULTS_SMOKETEST "Build a regression test for historical 
 option(KFILTER_BUILD_MEASUREMENT_CURVE_SMOKETEST "Build a measurement curve model test" ON)
 option(KFILTER_BUILD_MEASUREMENT_IMPORT_SMOKETEST "Build a measurement parser and calibration test" ON)
 option(KFILTER_BUILD_IMPEDANCE_REFERENCE_SMOKETEST "Build a ZMA impedance reference parser and document-state test" ON)
+option(KFILTER_BUILD_IMPEDANCE_FIT_SMOKETEST "Build the LR2 voice-coil fit-to-ZMA test" ON)
 option(KFILTER_BUILD_MEASUREMENT_EXPORT_SMOKETEST "Build an FRD correction-curve export test" ON)
 option(KFILTER_BUILD_QT6_APP "Build the minimal Qt6 Widgets application shell" ON)
 option(KFILTER_BUILD_DRIVER_PARAMETERS_DIALOG_SMOKETEST "Build the Driver Parameters enclosure-control state smoke test" ON)
@@ -84,6 +85,8 @@ add_library(kfilter_core STATIC
     measurementcurveparser.h
     impedancereferencecurve.cpp
     impedancereferencecurve.h
+    impedancefit.cpp
+    impedancefit.h
     correctioncurveimport.cpp
     correctioncurveimport.h
     correctioncurveexport.cpp
@@ -116,6 +119,8 @@ if(KFILTER_BUILD_QT6_APP)
         kfilterqt6app.h
         driverparametersdialog.cpp
         driverparametersdialog.h
+        impedancefitdialog.cpp
+        impedancefitdialog.h
         activefilterparametersdialog.cpp
         activefilterparametersdialog.h
         baffleparametersdialog.cpp
@@ -155,6 +160,8 @@ if(KFILTER_BUILD_QT6_APP)
             tools/driverparameters_dialog_smoketest.cpp
             driverparametersdialog.cpp
             driverparametersdialog.h
+            impedancefitdialog.cpp
+            impedancefitdialog.h
             networkvalueutils.cpp
             networkvalueutils.h
         )
@@ -501,6 +508,17 @@ if(KFILTER_BUILD_IMPEDANCE_REFERENCE_SMOKETEST)
 
     enable_testing()
     add_test(NAME kfilter_impedance_reference_smoketest COMMAND kfilter_impedance_reference_smoketest)
+endif()
+
+
+if(KFILTER_BUILD_IMPEDANCE_FIT_SMOKETEST)
+    add_executable(kfilter_impedance_fit_smoketest
+        tools/impedance_fit_smoketest.cpp
+    )
+    target_link_libraries(kfilter_impedance_fit_smoketest PRIVATE kfilter_core)
+
+    enable_testing()
+    add_test(NAME kfilter_impedance_fit_smoketest COMMAND kfilter_impedance_fit_smoketest)
 endif()
 
 

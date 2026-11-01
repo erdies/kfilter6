@@ -1095,10 +1095,10 @@ void KFilterQt6App::importImpedanceReferenceForDriver(int driverIndex)
     }
 
     rememberDirectoryForPath(filePath);
-    // Reference only and not saved yet: the project stays unmodified.
     m_doc->setImpedanceReferenceCurve(driverIndex, parseResult.points);
+    m_doc->setModified(true);
     m_plotView->update();
-    updateActionState();
+    refreshOverview();
 
     QString message =
         tr("Imported %1 impedance points for %2, %3 Hz - %4 Hz.")
@@ -1135,10 +1135,11 @@ void KFilterQt6App::clearImpedanceReferenceForDriver(int driverIndex)
     }
 
     if (m_doc->clearImpedanceReferenceCurve(driverIndex)) {
+        m_doc->setModified(true);
         statusBar()->showMessage(tr("Impedance ZMA curve for %1 cleared.").arg(driverText), 3000);
     }
     m_plotView->update();
-    updateActionState();
+    refreshOverview();
 }
 
 void KFilterQt6App::setImpedanceReferenceHiddenForDriver(int driverIndex, bool hidden)
@@ -1148,7 +1149,10 @@ void KFilterQt6App::setImpedanceReferenceHiddenForDriver(int driverIndex, bool h
         return;
     }
 
-    m_doc->setImpedanceReferenceHiddenForDriver(driverIndex, hidden);
+    if (m_doc->setImpedanceReferenceHiddenForDriver(driverIndex, hidden)) {
+        m_doc->setModified(true);
+        refreshOverview();
+    }
     const bool effectiveHidden = m_doc->impedanceReferenceHiddenForDriver(driverIndex);
     QAction *hideAction = m_hideImpedanceReferenceDriverActions[driverIndex];
     if (hideAction != nullptr && hideAction->isChecked() != effectiveHidden) {

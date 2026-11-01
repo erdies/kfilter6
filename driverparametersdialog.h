@@ -64,6 +64,9 @@ private:
         QLineEdit *title = nullptr;
         QDoubleSpinBox *rdc = nullptr;
         QDoubleSpinBox *lspMilliHenry = nullptr;
+        QDoubleSpinBox *r2 = nullptr;
+        QDoubleSpinBox *l2MilliHenry = nullptr;
+        QPushButton *fitZmaButton = nullptr;
         QDoubleSpinBox *f0 = nullptr;
         QDoubleSpinBox *qts = nullptr;
         QDoubleSpinBox *qes = nullptr;
@@ -118,6 +121,8 @@ private:
     void updateTubeLengthForPage(DriverPage& page);
     void updateTubeDiameterForPage(DriverPage& page);
     void calculateHogeForPage(DriverPage& page);
+    void updateFitZmaButton(int index);
+    void fitVoiceCoilToZma(int index);
 
     KFilterDoc& m_document;
     driver (&m_drivers)[KFilterProjectIo::DriverCount];

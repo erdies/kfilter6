@@ -12,6 +12,7 @@
 #include <QFile>
 #include <QTemporaryDir>
 #include <QTextStream>
+#include <QUrl>
 
 #include <cmath>
 #include <iostream>
@@ -140,6 +141,21 @@ int main(int argc, char **argv)
     if (!require(KFilterDriverIo::applyDriverSlotToDocument(document, 2, slot), "driver slot apply failed") ||
         !require(document.impedanceReferenceCurve(2).isEmpty(), ".kfd import kept the old ZMA") ||
         !require(!document.impedanceReferenceCurve(3).isEmpty(), ".kfd import cleared another driver's ZMA")) {
+        return 1;
+    }
+
+    // The project file keeps the ZMA and its hide state; New clears it.
+    document.setImpedanceReferenceHiddenForDriver(3, true);
+    const QUrl projectUrl = QUrl::fromLocalFile(temporaryDir.filePath(QStringLiteral("zma.kfp")));
+    KFilterDoc reopened;
+    if (!require(document.saveDocument(projectUrl), "saving project with ZMA failed") ||
+        !require(reopened.openDocument(projectUrl), "opening project with ZMA failed") ||
+        !require(reopened.impedanceReferenceCurve(3).size() == 4 &&
+                     reopened.impedanceReferenceHiddenForDriver(3) &&
+                     reopened.impedanceReferenceCurve(1).isEmpty(),
+                 "ZMA state did not survive save/open") ||
+        !require(std::isnan(reopened.impedanceReferenceCurve(3).at(2).phaseDeg),
+                 "missing ZMA phase did not survive save/open")) {
         return 1;
     }
 

@@ -19,6 +19,8 @@
 #include <QTextStream>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <cstddef>
 
 namespace
@@ -606,6 +608,8 @@ int main(int argc, char** argv)
         for (int sectionIndex = 0; sectionIndex < NetworkSerializationUtils::SectionCount; ++sectionIndex) {
             original[driverIndex].setSeriesCoilResistance(sectionIndex, 0.1 * driverIndex + 0.01 * sectionIndex);
         }
+        original[driverIndex].setR2(4.5 + driverIndex);
+        original[driverIndex].setL2(0.0002 * (driverIndex + 1));
     }
     KFilterProjectIo::MeasurementCurves originalMeasurements;
     populateMeasurements(originalMeasurements);
@@ -618,6 +622,13 @@ int main(int argc, char** argv)
     KFilterProjectIo::FloorReflectionSettingsPerDriver originalFloorReflectionSettings{};
     populateFloorReflectionSettings(originalFloorReflectionSettings);
     KFilterProjectIo::FloorReflectionSettingsPerDriver scratchFloorReflectionSettings{};
+    // Impedance ZMA for drivers 1 and 3; driver 3 is hidden and has no phase.
+    KFilterProjectIo::ImpedanceReferenceCurves originalImpedanceReferences;
+    originalImpedanceReferences[0] = {{20.0, 6.5, -2.0}, {1000.0, 7.8, 22.5}, {20000.0, 21.25, 40.0}};
+    originalImpedanceReferences[2] = {{50.0, 4.0, std::numeric_limits<double>::quiet_NaN()},
+                                      {5000.0, 9.5, std::numeric_limits<double>::quiet_NaN()}};
+    KFilterProjectIo::ImpedanceReferenceHiddenStates originalImpedanceReferenceHidden{};
+    originalImpedanceReferenceHidden[2] = true;
 
     if (!KFilterProjectIo::saveToFile(jsonFilePath,
                                       original,
@@ -627,6 +638,8 @@ int main(int argc, char** argv)
                                       originalActiveFilters,
                                       originalBaffleSettings,
                                       originalFloorReflectionSettings,
+                                      originalImpedanceReferences,
+                                      originalImpedanceReferenceHidden,
                                       &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -721,6 +734,8 @@ int main(int argc, char** argv)
     KFilterProjectIo::ActiveFilterChains jsonLoadedActiveFilters{};
     KFilterProjectIo::BaffleSettingsPerDriver jsonLoadedBaffleSettings{};
     KFilterProjectIo::FloorReflectionSettingsPerDriver jsonLoadedFloorReflectionSettings{};
+    KFilterProjectIo::ImpedanceReferenceCurves jsonLoadedImpedanceReferences;
+    KFilterProjectIo::ImpedanceReferenceHiddenStates jsonLoadedImpedanceReferenceHidden{};
     if (!KFilterProjectIo::loadFromFile(jsonFilePath,
                                         jsonLoaded,
                                         jsonLoadedMeasurements,
@@ -729,6 +744,8 @@ int main(int argc, char** argv)
                                         jsonLoadedActiveFilters,
                                         jsonLoadedBaffleSettings,
                                         jsonLoadedFloorReflectionSettings,
+                                        jsonLoadedImpedanceReferences,
+                                        jsonLoadedImpedanceReferenceHidden,
                                         &errorMessage)) {
         QTextStream(stderr) << errorMessage << '\n';
         return 1;
@@ -768,6 +785,188 @@ int main(int argc, char** argv)
                                     << (driverIndex + 1) << ", section " << (sectionIndex + 1) << '\n';
                 return 1;
             }
+        }
+    }
+
+    // Format version 13 adds the per-driver impedance ZMA reference.
+    for (int driverIndex = 0; driverIndex < KFilterProjectIo::DriverCount; ++driverIndex) {
+        const std::size_t index = static_cast<std::size_t>(driverIndex);
+        const KFilterImpedanceReferenceCurve& expected = originalImpedanceReferences[index];
+        const KFilterImpedanceReferenceCurve& actual = jsonLoadedImpedanceReferences[index];
+        bool same = expected.size() == actual.size() &&
+                    originalImpedanceReferenceHidden[index] == jsonLoadedImpedanceReferenceHidden[index];
+        for (qsizetype point = 0; same && point < expected.size(); ++point) {
+            same = fuzzyEqual(expected[point].frequencyHz, actual[point].frequencyHz) &&
+                   fuzzyEqual(expected[point].magnitudeOhm, actual[point].magnitudeOhm) &&
+                   (std::isnan(expected[point].phaseDeg)
+                        ? std::isnan(actual[point].phaseDeg)
+                        : fuzzyEqual(expected[point].phaseDeg, actual[point].phaseDeg));
+        }
+        if (!same) {
+            QTextStream(stderr) << "Impedance ZMA round-trip mismatch for driver " << (driverIndex + 1) << '\n';
+            return 1;
+        }
+    }
+    if (jsonDrivers.at(1).toObject().contains(QStringLiteral("impedanceReference")) ||
+        !jsonDrivers.at(2).toObject().value(QStringLiteral("impedanceReference")).toObject()
+             .value(QStringLiteral("points")).toArray().at(0).toArray().at(2).isNull()) {
+        QTextStream(stderr) << "Impedance ZMA JSON layout mismatch (empty driver or missing phase)\n";
+        return 1;
+    }
+
+    const auto loadImpedanceReferences =
+        [&](const QJsonObject& root,
+            KFilterProjectIo::ImpedanceReferenceCurves& curves,
+            KFilterProjectIo::ImpedanceReferenceHiddenStates& hidden) {
+            if (!writeTextFile(invalidFilePath,
+                               QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Indented)),
+                               errorMessage)) {
+                return false;
+            }
+            driver loaded[KFilterProjectIo::DriverCount];
+            KFilterProjectIo::MeasurementCurves measurements;
+            bool mergeEnabled = false;
+            KFilterProjectIo::MeasurementHiddenStates hiddenStates{};
+            KFilterProjectIo::ActiveFilterChains activeFilters{};
+            KFilterProjectIo::BaffleSettingsPerDriver baffles{};
+            KFilterProjectIo::FloorReflectionSettingsPerDriver floors{};
+            return KFilterProjectIo::loadFromFile(invalidFilePath, loaded, measurements, mergeEnabled,
+                                                  hiddenStates, activeFilters, baffles, floors,
+                                                  curves, hidden, &errorMessage);
+        };
+
+    // Version 12 predates the object; even a present object is ignored.
+    {
+        QJsonObject version12Root = validRoot;
+        version12Root.insert(QStringLiteral("formatVersion"), 12);
+        KFilterProjectIo::ImpedanceReferenceCurves curves;
+        curves[3] = originalImpedanceReferences[0];
+        KFilterProjectIo::ImpedanceReferenceHiddenStates hidden{};
+        if (!loadImpedanceReferences(version12Root, curves, hidden) ||
+            std::any_of(curves.cbegin(), curves.cend(),
+                        [](const KFilterImpedanceReferenceCurve& curve) { return !curve.isEmpty(); })) {
+            QTextStream(stderr) << "Format version 12 did not load without impedance ZMA: " << errorMessage << '\n';
+            return 1;
+        }
+    }
+
+    // Version 13 rejects non-increasing frequencies and single-point curves.
+    for (const bool singlePoint : {false, true}) {
+        QJsonObject brokenRoot = validRoot;
+        QJsonObject brokenProject = brokenRoot.value(QStringLiteral("project")).toObject();
+        QJsonArray brokenDrivers = brokenProject.value(QStringLiteral("drivers")).toArray();
+        QJsonObject driverObject = brokenDrivers.at(0).toObject();
+        QJsonObject reference = driverObject.value(QStringLiteral("impedanceReference")).toObject();
+        QJsonArray points = reference.value(QStringLiteral("points")).toArray();
+        if (singlePoint) {
+            points = QJsonArray{points.at(0)};
+        } else {
+            points[1] = QJsonArray{10.0, 7.0, 0.0};
+        }
+        reference.insert(QStringLiteral("points"), points);
+        driverObject.insert(QStringLiteral("impedanceReference"), reference);
+        brokenDrivers[0] = driverObject;
+        brokenProject.insert(QStringLiteral("drivers"), brokenDrivers);
+        brokenRoot.insert(QStringLiteral("project"), brokenProject);
+        KFilterProjectIo::ImpedanceReferenceCurves curves;
+        KFilterProjectIo::ImpedanceReferenceHiddenStates hidden{};
+        if (loadImpedanceReferences(brokenRoot, curves, hidden)) {
+            QTextStream(stderr) << "Invalid impedance ZMA points were accepted\n";
+            return 1;
+        }
+    }
+
+    // Format version 12 adds the LR2 voice-coil branch.
+    for (int driverIndex = 0; driverIndex < KFilterProjectIo::DriverCount; ++driverIndex) {
+        if (!fuzzyEqual(original[driverIndex].getR2(), jsonLoaded[driverIndex].getR2()) ||
+            !fuzzyEqual(original[driverIndex].getL2(), jsonLoaded[driverIndex].getL2())) {
+            QTextStream(stderr) << "LR2 voice-coil round-trip mismatch for driver "
+                                << (driverIndex + 1) << '\n';
+            return 1;
+        }
+    }
+
+    const auto lr2BranchesAreDisabled = [](driver (&drivers)[KFilterProjectIo::DriverCount]) {
+        for (driver& currentDriver : drivers) {
+            if (currentDriver.getR2() != 0.0 || currentDriver.getL2() != 0.0) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    QJsonObject version11Root = validRoot;
+    version11Root.insert(QStringLiteral("formatVersion"), 11);
+    QJsonObject version11Project = version11Root.value(QStringLiteral("project")).toObject();
+    QJsonArray version11Drivers = version11Project.value(QStringLiteral("drivers")).toArray();
+    for (int index = 0; index < version11Drivers.size(); ++index) {
+        QJsonObject driverObject = version11Drivers.at(index).toObject();
+        QJsonObject parametersObject = driverObject.value(QStringLiteral("parameters")).toObject();
+        parametersObject.remove(QStringLiteral("r2_ohm"));
+        parametersObject.remove(QStringLiteral("l2_h"));
+        driverObject.insert(QStringLiteral("parameters"), parametersObject);
+        version11Drivers[index] = driverObject;
+    }
+    version11Project.insert(QStringLiteral("drivers"), version11Drivers);
+    version11Root.insert(QStringLiteral("project"), version11Project);
+    if (!writeTextFile(invalidFilePath,
+                       QString::fromUtf8(QJsonDocument(version11Root).toJson(QJsonDocument::Indented)),
+                       errorMessage)) {
+        QTextStream(stderr) << errorMessage << '\n';
+        return 1;
+    }
+
+    driver version11Loaded[KFilterProjectIo::DriverCount];
+    KFilterProjectIo::MeasurementCurves version11Measurements;
+    bool version11MergeEnabled = false;
+    KFilterProjectIo::MeasurementHiddenStates version11HiddenStates{};
+    KFilterProjectIo::ActiveFilterChains version11ActiveFilters{};
+    KFilterProjectIo::BaffleSettingsPerDriver version11BaffleSettings{};
+    KFilterProjectIo::FloorReflectionSettingsPerDriver version11FloorReflectionSettings{};
+    if (!KFilterProjectIo::loadFromFile(invalidFilePath,
+                                        version11Loaded, version11Measurements,
+                                        version11MergeEnabled, version11HiddenStates,
+                                        version11ActiveFilters, version11BaffleSettings,
+                                        version11FloorReflectionSettings, &errorMessage) ||
+        !compareDrivers(original, version11Loaded, true, errorMessage) ||
+        !lr2BranchesAreDisabled(version11Loaded)) {
+        QTextStream(stderr) << "Format version 11 compatibility failed: " << errorMessage << '\n';
+        return 1;
+    }
+
+    // Version 12 requires both LR2 fields.
+    {
+        QJsonObject brokenRoot = validRoot;
+        QJsonObject brokenProject = brokenRoot.value(QStringLiteral("project")).toObject();
+        QJsonArray brokenDrivers = brokenProject.value(QStringLiteral("drivers")).toArray();
+        QJsonObject driverObject = brokenDrivers.at(1).toObject();
+        QJsonObject parametersObject = driverObject.value(QStringLiteral("parameters")).toObject();
+        parametersObject.remove(QStringLiteral("l2_h"));
+        driverObject.insert(QStringLiteral("parameters"), parametersObject);
+        brokenDrivers[1] = driverObject;
+        brokenProject.insert(QStringLiteral("drivers"), brokenDrivers);
+        brokenRoot.insert(QStringLiteral("project"), brokenProject);
+        if (!writeTextFile(invalidFilePath,
+                           QString::fromUtf8(QJsonDocument(brokenRoot).toJson(QJsonDocument::Indented)),
+                           errorMessage)) {
+            QTextStream(stderr) << errorMessage << '\n';
+            return 1;
+        }
+
+        driver brokenLoaded[KFilterProjectIo::DriverCount];
+        KFilterProjectIo::MeasurementCurves brokenMeasurements;
+        bool brokenMergeEnabled = false;
+        KFilterProjectIo::MeasurementHiddenStates brokenHiddenStates{};
+        KFilterProjectIo::ActiveFilterChains brokenActiveFilters{};
+        KFilterProjectIo::BaffleSettingsPerDriver brokenBaffleSettings{};
+        KFilterProjectIo::FloorReflectionSettingsPerDriver brokenFloorReflectionSettings{};
+        if (KFilterProjectIo::loadFromFile(invalidFilePath,
+                                           brokenLoaded, brokenMeasurements,
+                                           brokenMergeEnabled, brokenHiddenStates,
+                                           brokenActiveFilters, brokenBaffleSettings,
+                                           brokenFloorReflectionSettings, &errorMessage)) {
+            QTextStream(stderr) << "Version 12 project without L2 was accepted\n";
+            return 1;
         }
     }
 
@@ -899,6 +1098,7 @@ int main(int argc, char** argv)
 
     if (!compareDrivers(legacyOriginal, legacyLoaded, false, errorMessage) ||
         !coilResistancesAreDefault(legacyLoaded) ||
+        !lr2BranchesAreDisabled(legacyLoaded) ||
         !std::all_of(legacyMeasurements.cbegin(),
                      legacyMeasurements.cend(),
                      [](const KFilterMeasurementCurve& curve) { return curve.isEmpty(); }) ||

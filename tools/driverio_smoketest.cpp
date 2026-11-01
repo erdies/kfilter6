@@ -16,6 +16,7 @@
 #include <QTextStream>
 
 #include <cmath>
+#include <limits>
 #include <variant>
 
 namespace
@@ -204,6 +205,12 @@ void populateSlot(KFilterDriverIo::DriverSlot& slot)
     for (int sectionIndex = 0; sectionIndex < NetworkSerializationUtils::SectionCount; ++sectionIndex) {
         slot.driverData.setSeriesCoilResistance(sectionIndex, 0.3 + 0.05 * sectionIndex);
     }
+    slot.driverData.setR2(7.25);
+    slot.driverData.setL2(0.00042);
+    slot.impedanceReferenceCurve = {{20.0, 6.4, -1.5},
+                                    {2000.0, 9.9, 31.5},
+                                    {20000.0, 20.3, std::numeric_limits<double>::quiet_NaN()}};
+    slot.impedanceReferenceHidden = true;
 
     slot.measurementCurve.appendPoint(80.0, -2.25);
     slot.measurementCurve.appendPoint(800.0, 1.75);
@@ -276,7 +283,11 @@ int main(int argc, char *argv[])
     }
     const QJsonDocument document = QJsonDocument::fromJson(jsonFile.readAll());
     const QJsonObject root = document.object();
-    if (root.value(QStringLiteral("formatVersion")).toInt() != 3 ||
+    if (root.value(QStringLiteral("formatVersion")).toInt() != 5 ||
+        root.value(QStringLiteral("impedanceReference")).toObject()
+                .value(QStringLiteral("points")).toArray().size() != 3 ||
+        !fuzzyEqual(root.value(QStringLiteral("driver")).toObject().value(QStringLiteral("r2_ohm")).toDouble(), 7.25) ||
+        !fuzzyEqual(root.value(QStringLiteral("driver")).toObject().value(QStringLiteral("l2_h")).toDouble(), 0.00042) ||
         root.value(QStringLiteral("network")).toObject()
                 .value(NetworkSerializationUtils::SeriesCoilResistanceKey).toArray().size() !=
             NetworkSerializationUtils::SectionCount ||
@@ -285,7 +296,7 @@ int main(int argc, char *argv[])
         !root.value(QStringLiteral("baffle")).isObject() ||
         !root.value(QStringLiteral("floorReflection")).isObject() ||
         !root.value(QStringLiteral("measurementSettings")).isObject()) {
-        errorStream << "Saved KFD v3 does not contain the complete driver-slot state.\n";
+        errorStream << "Saved KFD v5 does not contain the complete driver-slot state.\n";
         return 4;
     }
 
@@ -318,6 +329,18 @@ int main(int argc, char *argv[])
             return 6;
         }
     }
+    if (!fuzzyEqual(actual.driverData.getR2(), 7.25) ||
+        !fuzzyEqual(actual.driverData.getL2(), 0.00042)) {
+        errorStream << "KFD LR2 voice-coil round-trip mismatch.\n";
+        return 6;
+    }
+    if (actual.impedanceReferenceCurve.size() != 3 || !actual.impedanceReferenceHidden ||
+        !fuzzyEqual(actual.impedanceReferenceCurve[1].magnitudeOhm, 9.9) ||
+        !fuzzyEqual(actual.impedanceReferenceCurve[1].phaseDeg, 31.5) ||
+        !std::isnan(actual.impedanceReferenceCurve[2].phaseDeg)) {
+        errorStream << "KFD impedance ZMA round-trip mismatch.\n";
+        return 6;
+    }
 
     if (!KFilterDriverIo::mergeMeasurementsEnabledAfterImport(false, false, true) ||
         KFilterDriverIo::mergeMeasurementsEnabledAfterImport(true, false, false) ||
@@ -334,7 +357,9 @@ int main(int argc, char *argv[])
         emptyProject.splCorrectionCurve(0).size() != actual.measurementCurve.size() ||
         emptyProject.activeFilterChain(0).sectionCount() != actual.activeFilterChain.sectionCount() ||
         !compareBaffle(actual.baffleSettings, emptyProject.baffleSettings(0), error) ||
-        !compareFloor(actual.floorReflectionSettings, emptyProject.floorReflectionSettings(0), error)) {
+        !compareFloor(actual.floorReflectionSettings, emptyProject.floorReflectionSettings(0), error) ||
+        emptyProject.impedanceReferenceCurve(0).size() != 3 ||
+        !emptyProject.impedanceReferenceHiddenForDriver(0)) {
         errorStream << "Complete driver-slot application to an empty project failed: "
                     << error << '\n';
         return 8;
@@ -417,6 +442,10 @@ int main(int argc, char *argv[])
             return 15;
         }
     }
+    if (version2Slot.driverData.getR2() != 0.0 || version2Slot.driverData.getL2() != 0.0) {
+        errorStream << "KFD v2 did not default the LR2 voice-coil branch.\n";
+        return 15;
+    }
 
     withoutCoilRoot.insert(QStringLiteral("formatVersion"), 3);
     const QString brokenVersion3Path = writeFixture(QStringLiteral("v3-without-coil.kfd"), withoutCoilRoot);
@@ -425,6 +454,67 @@ int main(int argc, char *argv[])
         KFilterDriverIo::loadDriverSlotFromFile(brokenVersion3Path, brokenVersion3Slot, &error)) {
         errorStream << "KFD v3 without series coil resistance was accepted.\n";
         return 16;
+    }
+
+    // KFD v3 predates the LR2 branch: R2 = L2 = 0. v4 requires both fields.
+    QJsonObject withoutLr2Root = root;
+    QJsonObject withoutLr2Driver = withoutLr2Root.value(QStringLiteral("driver")).toObject();
+    withoutLr2Driver.remove(QStringLiteral("r2_ohm"));
+    withoutLr2Driver.remove(QStringLiteral("l2_h"));
+    withoutLr2Root.insert(QStringLiteral("driver"), withoutLr2Driver);
+    withoutLr2Root.insert(QStringLiteral("formatVersion"), 3);
+    const QString version3Path = writeFixture(QStringLiteral("v3.kfd"), withoutLr2Root);
+    KFilterDriverIo::DriverSlot version3Slot;
+    if (version3Path.isEmpty() ||
+        !KFilterDriverIo::loadDriverSlotFromFile(version3Path, version3Slot, &error) ||
+        version3Slot.driverData.getR2() != 0.0 || version3Slot.driverData.getL2() != 0.0) {
+        errorStream << "KFD v3 did not load with the LR2 branch disabled: " << error << '\n';
+        return 17;
+    }
+
+    withoutLr2Root.insert(QStringLiteral("formatVersion"), 4);
+    const QString brokenVersion4Path = writeFixture(QStringLiteral("v4-without-lr2.kfd"), withoutLr2Root);
+    KFilterDriverIo::DriverSlot brokenVersion4Slot;
+    if (brokenVersion4Path.isEmpty() ||
+        KFilterDriverIo::loadDriverSlotFromFile(brokenVersion4Path, brokenVersion4Slot, &error)) {
+        errorStream << "KFD v4 without R2/L2 was accepted.\n";
+        return 18;
+    }
+
+    QJsonObject negativeLr2Root = root;
+    QJsonObject negativeLr2Driver = negativeLr2Root.value(QStringLiteral("driver")).toObject();
+    negativeLr2Driver.insert(QStringLiteral("r2_ohm"), -1.0);
+    negativeLr2Root.insert(QStringLiteral("driver"), negativeLr2Driver);
+    const QString negativeLr2Path = writeFixture(QStringLiteral("v4-negative-r2.kfd"), negativeLr2Root);
+    KFilterDriverIo::DriverSlot negativeLr2Slot;
+    if (negativeLr2Path.isEmpty() ||
+        KFilterDriverIo::loadDriverSlotFromFile(negativeLr2Path, negativeLr2Slot, &error)) {
+        errorStream << "KFD v4 with negative R2 was accepted.\n";
+        return 19;
+    }
+
+    // KFD v4 predates the impedance ZMA: a present object is ignored.
+    QJsonObject version4Root = root;
+    version4Root.insert(QStringLiteral("formatVersion"), 4);
+    const QString version4Path = writeFixture(QStringLiteral("v4.kfd"), version4Root);
+    KFilterDriverIo::DriverSlot version4Slot;
+    if (version4Path.isEmpty() ||
+        !KFilterDriverIo::loadDriverSlotFromFile(version4Path, version4Slot, &error) ||
+        !version4Slot.impedanceReferenceCurve.isEmpty()) {
+        errorStream << "KFD v4 did not load without impedance ZMA: " << error << '\n';
+        return 20;
+    }
+
+    QJsonObject brokenZmaRoot = root;
+    QJsonObject brokenReference = brokenZmaRoot.value(QStringLiteral("impedanceReference")).toObject();
+    brokenReference.remove(QStringLiteral("hidden"));
+    brokenZmaRoot.insert(QStringLiteral("impedanceReference"), brokenReference);
+    const QString brokenZmaPath = writeFixture(QStringLiteral("v5-broken-zma.kfd"), brokenZmaRoot);
+    KFilterDriverIo::DriverSlot brokenZmaSlot;
+    if (brokenZmaPath.isEmpty() ||
+        KFilterDriverIo::loadDriverSlotFromFile(brokenZmaPath, brokenZmaSlot, &error)) {
+        errorStream << "KFD v5 impedance ZMA without hidden flag was accepted.\n";
+        return 21;
     }
 
     return 0;

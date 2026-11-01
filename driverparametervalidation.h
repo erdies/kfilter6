@@ -32,6 +32,8 @@ struct Parameters
 {
     double rdcOhm = 0.0;
     double lspH = 0.0;
+    double r2Ohm = 0.0; // LR2 eddy-current branch; 0 disables it
+    double l2H = 0.0;
     double fsHz = 0.0;
     double qts = 0.0;
     double qes = 0.0;

@@ -876,6 +876,71 @@ bool checkSeriesTrapCoilResistance()
     return true;
 }
 
+bool checkLr2VoiceCoil()
+{
+    constexpr double r2 = 6.0;
+    constexpr double l2 = 0.0004;
+
+    driver drv;
+    if (drv.getR2() != 0.0 || drv.getL2() != 0.0) {
+        QTextStream(stderr) << "LR2 branch is not disabled by default\n";
+        return false;
+    }
+
+    // F0 == 0 reduces the driver to its voice coil, so the result is exactly
+    // the coil model. R2 or L2 equal to 0 must stay bitwise at Rdc + jwLsp.
+    drv.setF0(0.0);
+    for (const std::pair<double, double>& disabled : {std::pair<double, double>{0.0, 0.0},
+                                                      std::pair<double, double>{r2, 0.0},
+                                                      std::pair<double, double>{0.0, l2}}) {
+        drv.setR2(disabled.first);
+        drv.setL2(disabled.second);
+        calculateResults(drv);
+        double omega = 125.6637061;
+        for (std::size_t sampleIndex = 0; sampleIndex < ResultSampleCount; ++sampleIndex) {
+            if (!exactComplexEqual(drv.impedanceResponse()[sampleIndex],
+                                   std::complex<double>{drv.getRdc(), omega * drv.getLsp()})) {
+                QTextStream(stderr) << "Disabled LR2 branch changed the voice-coil impedance\n";
+                return false;
+            }
+            omega *= KFilterFrequencyStep;
+        }
+    }
+
+    drv.setR2(r2);
+    drv.setL2(l2);
+    calculateResults(drv);
+    double omega = 125.6637061;
+    for (std::size_t sampleIndex = 0; sampleIndex < ResultSampleCount; ++sampleIndex) {
+        const std::complex<double> expected =
+            std::complex<double>{drv.getRdc(), omega * drv.getLsp()} +
+            1.0 / (1.0 / r2 + 1.0 / std::complex<double>{0.0, omega * l2});
+        if (!nearlyEqual(drv.impedanceResponse()[sampleIndex], expected)) {
+            QTextStream(stderr) << "LR2 voice-coil impedance mismatch at sample "
+                                << static_cast<unsigned long long>(sampleIndex) << '\n';
+            return false;
+        }
+        omega *= KFilterFrequencyStep;
+    }
+
+    // The T/S path and the full-circuit SPL path use the same coil model.
+    driver simple;
+    configureClosedFullCircuit(simple);
+    calculateResults(simple);
+    driver lossy;
+    configureClosedFullCircuit(lossy);
+    lossy.setR2(r2);
+    lossy.setL2(l2);
+    calculateResults(lossy);
+    if (!resultArraysDiffer(copyResult(simple.impedanceResponse()), lossy.impedanceResponse()) ||
+        !resultArraysDiffer(copyResult(simple.pressureResponse()), lossy.pressureResponse())) {
+        QTextStream(stderr) << "LR2 branch did not reach the T/S impedance or full-circuit SPL path\n";
+        return false;
+    }
+
+    return true;
+}
+
 bool checkPlotStateEncapsulation()
 {
     driver drv;
@@ -980,6 +1045,7 @@ int main()
         !checkNetworkSerializationMapping() ||
         !checkPassiveNetworkBitwiseRegression() ||
         !checkSeriesTrapCoilResistance() ||
+        !checkLr2VoiceCoil() ||
         !checkEnclosureTransitionConsistency() ||
         !checkEquivalentCircuitEnclosureTransitions() ||
         !checkZeroF0ImpedanceModel() ||

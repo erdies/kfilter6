@@ -26,6 +26,8 @@ public:
         ActiveFilterChain activeFilterChain;
         BaffleSettings baffleSettings;
         FloorReflectionSettings floorReflectionSettings;
+        KFilterImpedanceReferenceCurve impedanceReferenceCurve;
+        bool impedanceReferenceHidden = false;
         bool hasTubeDiameterCm = false;
         double tubeDiameterCm = 0.0;
     };
