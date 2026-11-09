@@ -13,6 +13,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QTabWidget>
+#include <QThread>
 
 #include <array>
 #include <cmath>
@@ -238,6 +239,36 @@ int main(int argc, char **argv)
         tubeLength->value() != 0.0) {
         std::cerr << "Invalid Vb/Fb state changed the tube diameter or retained a false length\n";
         return 8;
+    }
+
+    // Diameter and Sd are coupled; only the diameter reaches the driver.
+    auto *diameter = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("driverDiameterSpin1"));
+    auto *sd = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("driverSdSpin1"));
+    if (diameter == nullptr || sd == nullptr) {
+        std::cerr << "Diameter/Sd controls are missing\n";
+        return 13;
+    }
+    constexpr double Pi = 3.14159265358979323846;
+    if (!near(sd->value(), Pi * 0.25 * diameter->value() * diameter->value(), 0.006)) {
+        std::cerr << "Loaded diameter did not initialize Sd\n";
+        return 14;
+    }
+    diameter->setValue(10.0);
+    QApplication::processEvents();
+    if (!near(sd->value(), Pi * 25.0, 0.006)) {
+        std::cerr << "Diameter did not recalculate Sd\n";
+        return 15;
+    }
+    sd->setValue(200.0);
+    for (int wait = 0; wait < 30; ++wait) {
+        QApplication::processEvents();
+        QThread::msleep(10);
+    }
+    const double diameterForSd = 2.0 * std::sqrt(200.0 / Pi);
+    if (!near(diameter->value(), diameterForSd, 0.0006) || sd->value() != 200.0 ||
+        !near(document.m_driverDriver[0].getDm(), diameterForSd, 0.0006)) {
+        std::cerr << "Sd did not recalculate and preview the diameter while keeping the typed area\n";
+        return 16;
     }
 
     // Qts/Qes/Qms consistency hint. Default drivers are consistent within the

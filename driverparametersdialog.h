@@ -75,6 +75,7 @@ private:
         QPushButton *qtsButton = nullptr;
         QDoubleSpinBox *vas = nullptr;
         QDoubleSpinBox *dm = nullptr;
+        QDoubleSpinBox *sd = nullptr;
         QDoubleSpinBox *vb = nullptr;
         QDoubleSpinBox *ql = nullptr;
         QDoubleSpinBox *fb = nullptr;
@@ -120,6 +121,8 @@ private:
     void updateEnclosureFieldStates(DriverPage& page);
     void updateTubeLengthForPage(DriverPage& page);
     void updateTubeDiameterForPage(DriverPage& page);
+    void updateSdForPage(DriverPage& page);
+    void updateDiameterFromSdForPage(DriverPage& page);
     void calculateHogeForPage(DriverPage& page);
     void updateFitZmaButton(int index);
     void fitVoiceCoilToZma(int index);

@@ -458,7 +458,7 @@ Important fields include:
 - `Qes`
 - `Qms`
 - `Vas`
-- `Diameter`
+- `Diam / Sd` (effective membrane diameter, or its area Sd in cm²; editing one recalculates the other, only the diameter is stored)
 - `Vb`
 - `Fb`
 - `Enclosure type`

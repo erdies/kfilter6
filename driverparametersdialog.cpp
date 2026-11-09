@@ -237,6 +237,8 @@ double calculateBassReflexTubeDiameterCm(double lengthCm, double fbHz, double vb
     return diameterCm > 0.0 && std::isfinite(diameterCm) ? diameterCm : 0.0;
 }
 
+constexpr double Pi = 3.14159265358979323846;
+
 QString tubeDiameterSettingsKey(int driverIndex)
 {
     return QStringLiteral("DriverParameters/tubeDiameter%1").arg(driverIndex + 1);
@@ -349,6 +351,8 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     page.qms = createSpinBox(0.001, 1000.0, 5, 0.01);
     page.vas = createSpinBox(0.0, 100000.0, 3, 1.0, tr(" l"));
     page.dm = createSpinBox(0.0, 1000.0, 3, 0.1, tr(" cm"));
+    // Effective membrane area Sd; covers the full diameter range (pi * 500^2).
+    page.sd = createSpinBox(0.0, 800000.0, 2, 1.0, tr(" cm\u00b2"));
     page.vb = createSpinBox(0.0, 100000.0, 3, 1.0, tr(" l"));
     page.ql = createSpinBox(0.001, 1000.0, 5, 0.1);
     page.fb = createSpinBox(0.0, 100000.0, 3, 1.0, tr(" Hz"));
@@ -371,6 +375,8 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     page.gainDb->setObjectName(QStringLiteral("driverGainSpin") + controlSuffix);
     page.r2->setObjectName(QStringLiteral("driverR2Spin") + controlSuffix);
     page.l2MilliHenry->setObjectName(QStringLiteral("driverL2Spin") + controlSuffix);
+    page.dm->setObjectName(QStringLiteral("driverDiameterSpin") + controlSuffix);
+    page.sd->setObjectName(QStringLiteral("driverSdSpin") + controlSuffix);
 
     const int enclosureEditorWidth = page.gainDb->sizeHint().width();
     page.vb->setFixedWidth(enclosureEditorWidth);
@@ -379,6 +385,8 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     page.tubeDiameter->setFixedWidth(enclosureEditorWidth);
     page.tubeLength->setFixedWidth(enclosureEditorWidth);
     page.v2->setFixedWidth(enclosureEditorWidth);
+    page.dm->setFixedWidth(enclosureEditorWidth);
+    page.sd->setFixedWidth(enclosureEditorWidth);
 
     page.alignmentProposal = new QComboBox(page.page);
     page.alignmentProposal->addItem(tr("Open baffle driver"), 0);
@@ -403,6 +411,11 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     page.invertPhase->setToolTip(tr("Invert this driver's polarity by 180 degrees for the SPL calculation."));
     page.fullCircuit->setToolTip(tr("Use the full crossover network for this driver instead of the simplified calculation."));
     page.ql->setToolTip(tr("Enclosure loss damping factor. It affects sealed, vented, and bandpass calculations. Must be greater than zero."));
+    page.dm->setToolTip(tr("Effective membrane diameter: cone plus about one third to one half of the surround, "
+                           "not the basket diameter. Editing it recalculates Sd."));
+    page.sd->setToolTip(tr("Effective membrane area Sd as given in data sheets. Editing it recalculates the "
+                           "diameter; only the diameter is stored. For two identical drivers in parallel, "
+                           "enter twice the area."));
     page.tubeDiameter->setToolTip(tr("Inner diameter of one round bass reflex tube. Editing it recalculates the tube length from Vb and Fb."));
     page.r2->setToolTip(tr("LR2 voice-coil model: R2 in parallel with L2, in series with Rdc and Lsp. "
                            "Models eddy-current losses that flatten the impedance rise at high frequencies. "
@@ -443,7 +456,13 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
     addRow(leftForm, tr("Qes"), page.qes);
     addRow(leftForm, tr("Qms"), page.qms);
     addRow(leftForm, tr("Vas"), page.vas);
-    addRow(leftForm, tr("Diameter"), page.dm);
+    auto *diameterLayoutWidget = new QWidget(page.page);
+    auto *diameterLayout = new QHBoxLayout(diameterLayoutWidget);
+    diameterLayout->setContentsMargins(0, 0, 0, 0);
+    diameterLayout->addWidget(page.dm);
+    diameterLayout->addWidget(page.sd);
+    diameterLayout->addStretch(1);
+    addRow(leftForm, tr("Diam / Sd"), diameterLayoutWidget);
 
     page.qtsButton = new QPushButton(tr("Calculate Qts from Qes and Qms"), page.page);
     page.qtsButton->setObjectName(QStringLiteral("driverQtsButton") + controlSuffix);
@@ -543,6 +562,13 @@ QWidget *DriverParametersDialog::createDriverPage(int index)
             this, [this, index](double) { updateTubeLengthForPage(m_pages.at(index)); });
     connect(page.tubeDiameter, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
             this, [this, index](double) { updateTubeLengthForPage(m_pages.at(index)); });
+    connect(page.dm, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
+            this, [this, index](double) { updateSdForPage(m_pages.at(index)); });
+    connect(page.sd, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
+            this, [this, index](double) {
+                updateDiameterFromSdForPage(m_pages.at(index));
+                schedulePreview();
+            });
     connect(page.tubeLength, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
             this, [this, index](double) {
                 updateTubeDiameterForPage(m_pages.at(index));
@@ -1092,6 +1118,21 @@ void DriverParametersDialog::updateEnclosureFieldStates(DriverPage& page)
     page.tubeLength->setEnabled(hasTunedPort);
     page.v2->setEnabled(hasSecondVolume);
     page.gainDb->setEnabled(true);
+}
+
+void DriverParametersDialog::updateSdForPage(DriverPage& page)
+{
+    const double radiusCm = 0.5 * page.dm->value();
+    const QSignalBlocker blocker(page.sd);
+    page.sd->setValue(Pi * radiusCm * radiusCm);
+}
+
+void DriverParametersDialog::updateDiameterFromSdForPage(DriverPage& page)
+{
+    // Only the diameter is updated; the typed Sd stays as entered even though
+    // the rounded diameter maps back to a marginally different area.
+    const QSignalBlocker blocker(page.dm);
+    page.dm->setValue(2.0 * std::sqrt(page.sd->value() / Pi));
 }
 
 void DriverParametersDialog::updateTubeLengthForPage(DriverPage& page)
