@@ -89,6 +89,57 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    if (!require(!result.fitParameters.valid, "ZMA without fit lines reported fit parameters")) {
+        return 1;
+    }
+
+    // Driver parameters of the model fit, as written by tsp_impedance_measure.py.
+    const QString fitFile = temporaryDir.filePath(QStringLiteral("fit.zma"));
+    if (!require(writeFile(fitFile,
+                           QStringLiteral("* Impedance measurement, tsp_impedance_measure.py\n"
+                                          "* Output amplitude: 0.5\n"
+                                          "* Fit Re: 5.5079 ohm\n"
+                                          "* Fit Fs: 46.246 Hz\n"
+                                          "* Fit Qms: 2.6933\n"
+                                          "* Fit Qes: 0.5627\n"
+                                          "* Fit Qts: 0.4655\n"
+                                          "* Fit Le: 0.1758 mH\n"
+                                          "* Fit R2: 8.0134 ohm\n"
+                                          "* Fit L2: 0.4401 mH\n"
+                                          "* Fit range: <= 462.006 Hz\n"
+                                          "* Fit rms error: 1.51 %\n"
+                                          "* Freq[Hz]  |Z|[Ohm]  Phase[deg]\n"
+                                          "20 8.2 30\n"
+                                          "46 30.8 0\n")),
+                 "fit ZMA fixture could not be written")) {
+        return 1;
+    }
+    const KFilterZmaFitParameters fit = parseKFilterZmaFile(fitFile).fitParameters;
+    if (!require(fit.valid && fit.hasVoiceCoil, "fit lines were not recognised") ||
+        !require(nearlyEqual(fit.rdcOhm, 5.5079) && nearlyEqual(fit.fsHz, 46.246) &&
+                     nearlyEqual(fit.qms, 2.6933) && nearlyEqual(fit.qes, 0.5627) &&
+                     nearlyEqual(fit.qts, 0.4655),
+                 "fit Thiele-Small values mismatch") ||
+        !require(nearlyEqual(fit.lspH, 0.1758e-3, 1e-12) && nearlyEqual(fit.r2Ohm, 8.0134) &&
+                     nearlyEqual(fit.l2H, 0.4401e-3, 1e-12),
+                 "fit voice-coil values not converted from mH")) {
+        return 1;
+    }
+
+    // A missing Q value makes the set unusable; the curve still loads.
+    const QString partialFitFile = temporaryDir.filePath(QStringLiteral("partial_fit.zma"));
+    if (!require(writeFile(partialFitFile,
+                           QStringLiteral("* Fit Re: 5.5 ohm\n* Fit Fs: 46 Hz\n* Fit Qms: 2.7\n"
+                                          "* Fit Qts: 0.47\n100 6 0\n200 6 0\n")),
+                 "partial fit ZMA fixture could not be written")) {
+        return 1;
+    }
+    const KFilterImpedanceParseResult partial = parseKFilterZmaFile(partialFitFile);
+    if (!require(partial.isValid() && !partial.fitParameters.valid,
+                 "incomplete fit lines were accepted or broke the import")) {
+        return 1;
+    }
+
     const QString descendingFile = temporaryDir.filePath(QStringLiteral("descending.zma"));
     if (!require(writeFile(descendingFile, QStringLiteral("100 6 0\n90 6 0\n110 6 0\n")),
                  "descending ZMA fixture could not be written") ||

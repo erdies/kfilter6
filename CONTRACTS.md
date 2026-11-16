@@ -68,6 +68,15 @@ dort vorhandenes Objekt wird ignoriert.
 Die ZMA ist reine Plot-Referenz und geht nie in Simulation oder
 Gesamtimpedanz ein. Import, Clear und Hide markieren das Projekt als geändert.
 
+Kommentarzeilen der Form `Fit <Name>: <Wert> [Einheit]` mit den Namen Re, Fs,
+Qms, Qes, Qts, Le, R2, L2 (Le und L2 in mH) werden beim Import gelesen; sie
+stammen aus der Modellanpassung von `tsp_impedance_measure.py`. Sind Re, Fs,
+Qms, Qes und Qts vollständig und positiv, bietet der Import an, sie (und, falls
+vollständig, Le/R2/L2 als Lsp/R2/L2) für den Treiber zu übernehmen; Vorgabe
+ist Nein, übernommen wird nur nach Bestätigung und bestandener
+`validateDriverParameters()`. Die Werte werden nicht mit der Kurve
+gespeichert und ändern das Persistenzformat nicht.
+
 Keine Formatänderung ohne explizite Versionserhöhung und ohne I/O-Regression im
 Test.
 

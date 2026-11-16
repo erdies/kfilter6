@@ -13,6 +13,7 @@
 #include <QUrl>
 
 #include "driver.h"
+#include "impedancereferencecurve.h"
 
 #include <array>
 
@@ -123,6 +124,7 @@ private:
     QString circuitPreviewDriverMenuText(int driverIndex) const;
     void importMeasurementForDriver(int driverIndex);
     void importImpedanceReferenceForDriver(int driverIndex);
+    void offerZmaFitParameters(int driverIndex, const KFilterZmaFitParameters& fit);
     void exportMeasurementForDriver(int driverIndex);
     void startMeasurementDrawingForDriver(int driverIndex);
     void updateMeasurementActions();

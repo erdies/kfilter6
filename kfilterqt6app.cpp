@@ -12,6 +12,7 @@
 #include "correctioncurveexport.h"
 #include "driver.h"
 #include "driverparametersdialog.h"
+#include "driverparametervalidation.h"
 #include "networkparametersdialog.h"
 #include "networksectioneditdialog.h"
 #include "plotcolorsdialog.h"
@@ -1113,6 +1114,101 @@ void KFilterQt6App::importImpedanceReferenceForDriver(int driverIndex)
         message += QLatin1Char(' ') + tr("Enable the impedance curve of this driver to see it.");
     }
     statusBar()->showMessage(message, 6000);
+
+    if (parseResult.fitParameters.valid) {
+        offerZmaFitParameters(driverIndex, parseResult.fitParameters);
+    }
+}
+
+void KFilterQt6App::offerZmaFitParameters(int driverIndex, const KFilterZmaFitParameters& fit)
+{
+    driver& drv = m_doc->m_driverDriver[driverIndex];
+
+    struct Row {
+        QString name;
+        double current;
+        double measured;
+        double scale;
+        QString unit;
+        int decimals;
+    };
+    QVector<Row> rows{
+        {tr("Rdc"), drv.getRdc(), fit.rdcOhm, 1.0, tr("Ohm"), 3},
+        {tr("Fs"), drv.getF0(), fit.fsHz, 1.0, tr("Hz"), 2},
+        {tr("Qms"), drv.getQms(), fit.qms, 1.0, QString(), 3},
+        {tr("Qes"), drv.getQes(), fit.qes, 1.0, QString(), 3},
+        {tr("Qts"), drv.getQts(), fit.qts, 1.0, QString(), 3},
+    };
+    if (fit.hasVoiceCoil) {
+        rows.append({tr("Lsp"), drv.getLsp(), fit.lspH, 1000.0, tr("mH"), 4});
+        rows.append({tr("R2"), drv.getR2(), fit.r2Ohm, 1.0, tr("Ohm"), 3});
+        rows.append({tr("L2"), drv.getL2(), fit.l2H, 1000.0, tr("mH"), 4});
+    }
+
+    QString table = QStringLiteral("<table cellspacing='0' cellpadding='3'>"
+                                   "<tr><th></th><th align='right'>%1</th><th align='right'>%2</th></tr>")
+                        .arg(tr("current"), tr("measured"));
+    for (const Row& row : rows) {
+        table += QStringLiteral("<tr><td>%1</td><td align='right'>%2 %4</td><td align='right'><b>%3</b> %4</td></tr>")
+                     .arg(row.name)
+                     .arg(row.current * row.scale, 0, 'f', row.decimals)
+                     .arg(row.measured * row.scale, 0, 'f', row.decimals)
+                     .arg(row.unit);
+    }
+    table += QStringLiteral("</table>");
+
+    const QString driverText = measurementDriverMenuText(driverIndex);
+    QMessageBox box(QMessageBox::Question,
+                    tr("Driver Parameters from ZMA"),
+                    tr("The ZMA file contains driver parameters from a model fit.<br>"
+                       "Take them over for %1?<br><br>%2<br>"
+                       "Vas, the enclosure and all other values stay unchanged.")
+                        .arg(driverText.toHtmlEscaped(), table),
+                    QMessageBox::Yes | QMessageBox::No,
+                    this);
+    box.setTextFormat(Qt::RichText);
+    box.setDefaultButton(QMessageBox::No);
+    if (box.exec() != QMessageBox::Yes) {
+        return;
+    }
+
+    KFilterDriverValidation::Parameters parameters;
+    parameters.rdcOhm = fit.rdcOhm;
+    parameters.lspH = fit.hasVoiceCoil ? fit.lspH : drv.getLsp();
+    parameters.r2Ohm = fit.hasVoiceCoil ? fit.r2Ohm : drv.getR2();
+    parameters.l2H = fit.hasVoiceCoil ? fit.l2H : drv.getL2();
+    parameters.fsHz = fit.fsHz;
+    parameters.qts = fit.qts;
+    parameters.qes = fit.qes;
+    parameters.qms = fit.qms;
+    parameters.vasLitres = drv.getVas();
+    parameters.diameterCm = drv.getDm();
+    parameters.vbLitres = drv.getVb();
+    parameters.fbHz = drv.getFb();
+    parameters.v2Litres = drv.getV2();
+    parameters.enclosureTypeProposal = static_cast<int>(drv.getEnclosureTypeProposal());
+
+    QString reason;
+    if (!KFilterDriverValidation::validateDriverParameters(parameters, &reason)) {
+        QMessageBox::warning(this,
+                             tr("Driver Parameters from ZMA"),
+                             tr("The parameters were not applied: %1").arg(reason));
+        return;
+    }
+
+    drv.setRdc(parameters.rdcOhm);
+    drv.setLsp(parameters.lspH);
+    drv.setR2(parameters.r2Ohm);
+    drv.setL2(parameters.l2H);
+    drv.setF0(parameters.fsHz);
+    drv.setQts(parameters.qts);
+    drv.setQes(parameters.qes);
+    drv.setQms(parameters.qms);
+
+    m_doc->setModified(true);
+    m_doc->viewrefresh();
+    refreshOverview();
+    statusBar()->showMessage(tr("Driver parameters of %1 taken over from the ZMA file.").arg(driverText), 5000);
 }
 
 void KFilterQt6App::clearImpedanceReferenceForDriver(int driverIndex)
